@@ -12,7 +12,7 @@ import { api } from "@/lib/api/client";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export function TopBar() {
-  const { data: status, isLoading } = useServerStatus();
+  const { data: status, isPending } = useServerStatus();
   const qc = useQueryClient();
 
   const restart = useMutation({
@@ -31,16 +31,27 @@ export function TopBar() {
   return (
     <header className="flex h-14 items-center gap-3 border-b bg-background px-4">
       <SidebarTrigger className="-ml-1" />
-      <Separator orientation="vertical" className="mr-2 h-5" />
-      {isLoading || !status ? (
+      <Separator
+        orientation="vertical"
+        className="mr-2 self-stretch"
+      />
+      {isPending || !status ? (
         <Skeleton className="h-6 w-24" />
       ) : (
         <>
           <StatusPill state={status.state} />
-          <div className="hidden items-center gap-3 text-sm text-muted-foreground sm:flex">
-            <span className="inline-flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5" />
-              {status.map}
+          <div className="hidden min-w-0 items-center gap-3 text-sm text-muted-foreground sm:flex">
+            <span className="inline-flex min-w-0 max-w-[min(40vw,20rem)] items-center gap-2">
+              <span className="truncate font-medium text-foreground" title={status.hostname}>
+                {status.hostname}
+              </span>
+              <span className="shrink-0 text-muted-foreground/70" aria-hidden>
+                ·
+              </span>
+              <span className="inline-flex min-w-0 shrink items-center gap-1.5">
+                <MapPin className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                <span className="truncate font-mono text-xs">{status.map}</span>
+              </span>
             </span>
             <span className="inline-flex items-center gap-1.5">
               <UsersThree className="h-3.5 w-3.5" />

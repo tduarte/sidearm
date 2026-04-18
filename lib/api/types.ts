@@ -27,6 +27,8 @@ export type ConsoleLevel = "info" | "warn" | "error" | "chat";
 
 export interface ServerStatus {
   state: ServerState;
+  /** Server browser name (from config identity; echoed on status for header UI). */
+  hostname: string;
   map: string;
   gameMode: GameMode;
   players: number;

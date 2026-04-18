@@ -39,12 +39,12 @@ function formatUptime(s: number) {
 
 export default function DashboardPage() {
   const isNarrow = useMediaQuery("(max-width: 639px)");
-  const { data: status, isLoading } = useServerStatus();
+  const { data: status, isPending } = useServerStatus();
   const { data: match } = useMatchState();
   const { data: livePlayers, isLoading: playersLoading } = useLivePlayers();
   const { cpu, mem, fps } = useStatHistory();
 
-  if (isLoading || !status) {
+  if (isPending || !status) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-32" />
@@ -70,9 +70,14 @@ export default function DashboardPage() {
               <Badge variant="outline">tick {status.tickrate}</Badge>
             </div>
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <h1 className="min-w-0 shrink text-2xl font-semibold">
-                {status.map}
-              </h1>
+              <div className="min-w-0 shrink">
+                <p className="truncate text-sm text-muted-foreground" title={status.hostname}>
+                  {status.hostname}
+                </p>
+                <h1 className="min-w-0 truncate font-mono text-2xl font-semibold tracking-tight">
+                  {status.map}
+                </h1>
+              </div>
               <div className="flex w-full min-w-0 justify-stretch sm:w-auto sm:shrink-0 sm:justify-end">
                 <InputGroup className="h-9 w-full min-w-0 max-w-full sm:w-max">
                   <InputGroupInput

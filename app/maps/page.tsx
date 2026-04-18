@@ -1,12 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowRight, MapPin, Plus } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api/client";
+import { getOfficialMapArtPath } from "@/lib/maps/official-art";
 
 function parseWorkshopInput(s: string): string | null {
   const trimmed = s.trim();
@@ -173,8 +183,10 @@ export default function MapsPage() {
                 key={m.name}
                 name={m.name}
                 displayName={m.displayName}
+                imageSrc={getOfficialMapArtPath(m.name)}
                 badge={m.workshopId}
                 isCurrent={m.name === current}
+                isBusy={changeMap.isPending}
                 onPlay={() => changeMap.mutate(m.name)}
               />
             ))}
@@ -192,7 +204,9 @@ export default function MapsPage() {
               key={m.name}
               name={m.name}
               displayName={m.displayName}
+              imageSrc={getOfficialMapArtPath(m.name)}
               isCurrent={m.name === current}
+              isBusy={changeMap.isPending}
               onPlay={() => changeMap.mutate(m.name)}
             />
           ))}
@@ -205,49 +219,78 @@ export default function MapsPage() {
 function MapTile({
   name,
   displayName,
+  imageSrc,
   badge,
   isCurrent,
+  isBusy,
   onPlay,
 }: {
   name: string;
   displayName: string;
+  imageSrc?: string;
   badge?: string;
   isCurrent: boolean;
+  isBusy?: boolean;
   onPlay: () => void;
 }) {
   return (
     <Card
       className={cn(
-        "group relative overflow-hidden transition",
+        "relative w-full overflow-hidden pt-0 transition",
         isCurrent && "ring-2 ring-primary",
       )}
     >
-      <div className="aspect-video bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950">
-        <div className="flex h-full items-center justify-center">
-          <MapPin className="h-10 w-10 text-zinc-700" weight="duotone" />
-        </div>
-      </div>
-      <CardContent className="p-3">
-        <div className="flex items-center justify-between gap-2">
-          <div className="min-w-0">
-            <p className="truncate font-medium">{displayName}</p>
-            <p className="truncate text-xs text-muted-foreground font-mono">
-              {name}
-            </p>
+      <div className="relative aspect-video w-full overflow-hidden bg-muted">
+        {imageSrc ? (
+          <Image
+            src={imageSrc}
+            alt={`${displayName} preview`}
+            fill
+            sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 25vw"
+            className="object-cover object-center"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950">
+            <MapPin className="h-10 w-10 text-zinc-600" weight="duotone" />
           </div>
-          {isCurrent ? (
-            <Badge variant="outline" className="shrink-0">live</Badge>
-          ) : (
-            <Button size="sm" variant="ghost" onClick={onPlay}>
-              Play
-              <ArrowRight className="h-3.5 w-3.5" />
-            </Button>
-          )}
-        </div>
-        {badge && (
-          <p className="mt-1 text-xs text-muted-foreground">id {badge}</p>
         )}
-      </CardContent>
+      </div>
+      <CardHeader className="gap-2">
+        {(isCurrent || badge) && (
+          <CardAction>
+            {isCurrent ? (
+              <Badge>Live</Badge>
+            ) : (
+              <Badge variant="secondary">Workshop</Badge>
+            )}
+          </CardAction>
+        )}
+        <CardTitle className="text-base">{displayName}</CardTitle>
+        <CardDescription className="space-y-1">
+          <span className="block font-mono text-xs">{name}</span>
+          {badge ? (
+            <span className="block text-muted-foreground">
+              Workshop id {badge}
+            </span>
+          ) : null}
+        </CardDescription>
+      </CardHeader>
+      <CardFooter>
+        {isCurrent ? (
+          <Button className="w-full" variant="secondary" disabled>
+            Current map
+          </Button>
+        ) : (
+          <Button
+            className="w-full"
+            onClick={onPlay}
+            disabled={isBusy}
+          >
+            Play
+            <ArrowRight className="h-4 w-4" />
+          </Button>
+        )}
+      </CardFooter>
     </Card>
   );
 }
