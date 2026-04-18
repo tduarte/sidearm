@@ -124,6 +124,7 @@ function ConfigForm({ initial }: { initial: FormValues }) {
     onSuccess: () => {
       toast.success("Config saved");
       qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["status"] });
     },
   });
 

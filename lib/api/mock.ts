@@ -52,6 +52,7 @@ function makePlayer(i: number): Player {
 export const state = {
   status: {
     state: "running",
+    hostname: "sidearm | 5v5 comp",
     map: "de_mirage",
     gameMode: "competitive",
     players: 10,

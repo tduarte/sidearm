@@ -1,18 +1,18 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/app-shell";
 
-const jetbrainsMono = JetBrains_Mono({
+const geistSans = Geist({
   subsets: ["latin"],
-  variable: "--font-mono",
+  variable: "--font-geist-sans",
 });
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const geistMonoHeading = Geist_Mono({
   subsets: ["latin"],
+  variable: "--font-geist-heading",
 });
 
 const geistMono = Geist_Mono({
@@ -38,7 +38,7 @@ export default function RootLayout({
         "h-full dark antialiased",
         geistSans.variable,
         geistMono.variable,
-        jetbrainsMono.variable,
+        geistMonoHeading.variable,
       )}
     >
       <body className="min-h-full flex flex-col font-sans">

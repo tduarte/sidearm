@@ -32,7 +32,7 @@ export default function SettingsPage() {
               <Input id="admin-pw" type="password" placeholder="••••••••" />
             </div>
           </div>
-          <div className="flex items-center justify-between rounded-md border p-3">
+          <div className="flex items-center justify-between rounded-none border p-3">
             <div>
               <Label>Require login</Label>
               <p className="text-xs text-muted-foreground">
@@ -49,7 +49,7 @@ export default function SettingsPage() {
           <CardTitle className="text-base">Preferences</CardTitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <div className="flex items-center justify-between rounded-md border p-3">
+          <div className="flex items-center justify-between rounded-none border p-3">
             <div>
               <Label>Desktop notifications</Label>
               <p className="text-xs text-muted-foreground">
@@ -58,7 +58,7 @@ export default function SettingsPage() {
             </div>
             <Switch />
           </div>
-          <div className="flex items-center justify-between rounded-md border p-3">
+          <div className="flex items-center justify-between rounded-none border p-3">
             <div>
               <Label>Autoscroll console</Label>
               <p className="text-xs text-muted-foreground">

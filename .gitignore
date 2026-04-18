@@ -42,3 +42,6 @@ next-env.d.ts
 
 # claude code local
 .claude/settings.local.json
+
+# Cursor IDE (hooks, state, local config)
+.cursor/

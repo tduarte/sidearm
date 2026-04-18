@@ -54,6 +54,7 @@ export const api = {
   async putConfig(cfg: ServerConfig): Promise<ServerConfig> {
     await delay();
     state.config = cfg;
+    state.status.hostname = cfg.identity.hostname;
     addConsole("info", "admin", "Config updated");
     return JSON.parse(JSON.stringify(state.config));
   },
@@ -186,7 +187,7 @@ export const api = {
 function mockRconResponse(cmd: string): string {
   const c = cmd.trim().toLowerCase();
   if (c === "status") {
-    return `hostname: ${state.config.identity.hostname}\nmap: ${state.status.map}\nplayers: ${state.status.players}/${state.status.maxPlayers}`;
+    return `hostname: ${state.status.hostname}\nmap: ${state.status.map}\nplayers: ${state.status.players}/${state.status.maxPlayers}`;
   }
   if (c.startsWith("mp_")) return `${c} updated`;
   if (c === "say_team") return "";
