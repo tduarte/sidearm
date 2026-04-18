@@ -1,6 +1,5 @@
 "use client";
 
-import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -101,21 +100,24 @@ function fromForm(v: FormValues): ServerConfig {
 }
 
 export default function ConfigPage() {
-  const qc = useQueryClient();
   const { data, isLoading } = useQuery({
     queryKey: ["config"],
     queryFn: () => api.getConfig(),
   });
 
+  if (isLoading || !data) {
+    return <Skeleton className="h-96" />;
+  }
+
+  return <ConfigForm initial={toForm(data)} />;
+}
+
+function ConfigForm({ initial }: { initial: FormValues }) {
+  const qc = useQueryClient();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema) as unknown as Resolver<FormValues>,
-    defaultValues: data ? toForm(data) : undefined,
+    defaultValues: initial,
   });
-
-  useEffect(() => {
-    if (data) form.reset(toForm(data));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [data]);
 
   const save = useMutation({
     mutationFn: (v: FormValues) => api.putConfig(fromForm(v)),
@@ -124,10 +126,6 @@ export default function ConfigPage() {
       qc.invalidateQueries({ queryKey: ["config"] });
     },
   });
-
-  if (isLoading || !data) {
-    return <Skeleton className="h-96" />;
-  }
 
   return (
     <Form {...form}>
