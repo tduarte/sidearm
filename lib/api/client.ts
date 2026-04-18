@@ -8,189 +8,117 @@ import type {
   ServerConfig,
   ServerStatus,
 } from "./types";
-import { addConsole, state } from "./mock";
 
-const delay = (ms = 80) => new Promise((r) => setTimeout(r, ms));
+/**
+ * Browser-side API client. Every method maps to an `app/api/*` route handler;
+ * the server dispatches to the mock or real adapter based on `API_MODE`.
+ *
+ * Kept hand-rolled rather than generated — the surface is small and the types
+ * are already the source of truth.
+ */
+
+async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(path, {
+    ...init,
+    cache: "no-store",
+    headers: {
+      "content-type": "application/json",
+      ...(init?.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const j = await res.json();
+      detail = j.error ?? "";
+    } catch {
+      // ignore — use status text
+    }
+    throw new Error(
+      detail || `${res.status} ${res.statusText} for ${path}`,
+    );
+  }
+  // 204 handling
+  if (res.status === 204) return undefined as unknown as T;
+  return (await res.json()) as T;
+}
+
+const json = <T>(body: unknown): RequestInit => ({
+  method: "POST",
+  body: JSON.stringify(body),
+});
 
 export const api = {
-  async getStatus(): Promise<ServerStatus> {
-    await delay();
-    return { ...state.status };
+  getStatus: () => request<ServerStatus>("/api/status"),
+
+  setServerState: (next: "running" | "stopped") =>
+    request<ServerStatus>("/api/status/state", json({ next })),
+
+  restart: async () => {
+    await request<{ ok: true }>("/api/status/restart", { method: "POST" });
   },
 
-  async setServerState(
-    next: "running" | "stopped",
-  ): Promise<ServerStatus> {
-    await delay(200);
-    if (next === "running") {
-      state.status.state = "starting";
-      setTimeout(() => {
-        state.status.state = "running";
-        state.status.uptimeSec = 0;
-        addConsole("info", "server", "Server started");
-      }, 800);
-    } else {
-      state.status.state = "stopping";
-      setTimeout(() => {
-        state.status.state = "stopped";
-        state.status.players = 0;
-        state.players = [];
-        addConsole("warn", "server", "Server stopped by admin");
-      }, 800);
-    }
-    return { ...state.status };
-  },
+  getConfig: () => request<ServerConfig>("/api/config"),
 
-  async restart(): Promise<void> {
-    await this.setServerState("stopped");
-    setTimeout(() => this.setServerState("running"), 1200);
-  },
+  putConfig: (cfg: ServerConfig) =>
+    request<ServerConfig>("/api/config", {
+      method: "PUT",
+      body: JSON.stringify(cfg),
+    }),
 
-  async getConfig(): Promise<ServerConfig> {
-    await delay();
-    return JSON.parse(JSON.stringify(state.config));
-  },
+  getPlayers: () => request<Player[]>("/api/players"),
 
-  async putConfig(cfg: ServerConfig): Promise<ServerConfig> {
-    await delay();
-    state.config = cfg;
-    state.status.hostname = cfg.identity.hostname;
-    addConsole("info", "admin", "Config updated");
-    return JSON.parse(JSON.stringify(state.config));
-  },
-
-  async getPlayers(): Promise<Player[]> {
-    await delay();
-    return [...state.players];
-  },
-
-  async kick(steamId: string, reason?: string): Promise<void> {
-    await delay();
-    const p = state.players.find((x) => x.steamId === steamId);
-    state.players = state.players.filter((x) => x.steamId !== steamId);
-    state.status.players = state.players.length;
-    addConsole(
-      "warn",
-      "admin",
-      `Kicked ${p?.name ?? steamId}${reason ? `: ${reason}` : ""}`,
+  kick: async (steamId: string, reason?: string) => {
+    await request<{ ok: true }>(
+      "/api/players/kick",
+      json({ steamId, reason }),
     );
   },
 
-  async getMaps(): Promise<{
-    current: string;
-    rotation: string[];
-    all: MapEntry[];
-  }> {
-    await delay();
-    return {
-      current: state.status.map,
-      rotation: [...state.rotation],
-      all: [...state.maps],
-    };
+  getMaps: () =>
+    request<{ current: string; rotation: string[]; all: MapEntry[] }>(
+      "/api/maps",
+    ),
+
+  changeMap: async (name: string) => {
+    await request<{ ok: true }>("/api/maps/current", json({ name }));
   },
 
-  async changeMap(name: string): Promise<void> {
-    await delay(200);
-    state.status.map = name;
-    state.match.phase = "warmup";
-    state.match.score = { ct: 0, t: 0 };
-    state.match.round = 0;
-    addConsole("info", "admin", `changelevel ${name}`);
+  subscribeWorkshop: (workshopId: string, displayName?: string) =>
+    request<MapEntry>(
+      "/api/maps/workshop",
+      json({ workshopId, displayName }),
+    ),
+
+  setRotation: async (rotation: string[]) => {
+    await request<{ ok: true }>("/api/maps/rotation", {
+      method: "PUT",
+      body: JSON.stringify({ rotation }),
+    });
   },
 
-  async subscribeWorkshop(
-    workshopId: string,
-    displayName?: string,
-  ): Promise<MapEntry> {
-    await delay(300);
-    const entry: MapEntry = {
-      name: `workshop/${workshopId}/${displayName ?? "map"}`,
-      displayName: displayName ?? `Workshop ${workshopId}`,
-      type: "workshop",
-      workshopId,
-    };
-    state.maps.push(entry);
-    addConsole("info", "workshop", `Subscribed to ${workshopId}`);
-    return entry;
-  },
+  getMatch: () => request<MatchState>("/api/match"),
 
-  async setRotation(rotation: string[]): Promise<void> {
-    await delay();
-    state.rotation = rotation;
-    addConsole("info", "admin", "Map rotation updated");
-  },
+  setMatchPhase: (phase: MatchState["phase"]) =>
+    request<MatchState>("/api/match/phase", json({ phase })),
 
-  async getMatch(): Promise<MatchState> {
-    await delay();
-    return { ...state.match };
-  },
+  togglePause: () =>
+    request<MatchState>("/api/match/pause", { method: "POST" }),
 
-  async setMatchPhase(phase: MatchState["phase"]): Promise<MatchState> {
-    await delay();
-    state.match.phase = phase;
-    if (phase === "warmup") {
-      state.match.score = { ct: 0, t: 0 };
-      state.match.round = 0;
-    }
-    addConsole("info", "match", `Phase → ${phase}`);
-    return { ...state.match };
-  },
+  toggleDemo: () =>
+    request<MatchState>("/api/match/demo", { method: "POST" }),
 
-  async togglePause(): Promise<MatchState> {
-    await delay();
-    state.match.paused = !state.match.paused;
-    addConsole(
-      "info",
-      "match",
-      state.match.paused ? "Match paused" : "Match resumed",
+  getConsole: () => request<ConsoleEvent[]>("/api/console"),
+
+  rcon: async (command: string) => {
+    const { output } = await request<{ output: string }>(
+      "/api/rcon",
+      json({ command }),
     );
-    return { ...state.match };
+    return output;
   },
 
-  async toggleDemo(): Promise<MatchState> {
-    await delay();
-    state.match.demoRecording = !state.match.demoRecording;
-    addConsole(
-      "info",
-      "match",
-      state.match.demoRecording
-        ? "Demo recording started"
-        : "Demo recording stopped",
-    );
-    return { ...state.match };
-  },
+  getChat: () => request<ChatMessage[]>("/api/chat"),
 
-  async getConsole(): Promise<ConsoleEvent[]> {
-    await delay();
-    return state.console.slice(-500);
-  },
-
-  async rcon(command: string): Promise<string> {
-    await delay(120);
-    addConsole("info", "rcon", `> ${command}`);
-    const out = mockRconResponse(command);
-    addConsole("info", "rcon", out);
-    return out;
-  },
-
-  async getChat(): Promise<ChatMessage[]> {
-    await delay();
-    return [...state.chat];
-  },
-
-  async getHistory(): Promise<MatchHistoryDetail[]> {
-    await delay();
-    return [...state.history];
-  },
+  getHistory: () => request<MatchHistoryDetail[]>("/api/history"),
 };
-
-function mockRconResponse(cmd: string): string {
-  const c = cmd.trim().toLowerCase();
-  if (c === "status") {
-    return `hostname: ${state.status.hostname}\nmap: ${state.status.map}\nplayers: ${state.status.players}/${state.status.maxPlayers}`;
-  }
-  if (c.startsWith("mp_")) return `${c} updated`;
-  if (c === "say_team") return "";
-  if (c === "") return "";
-  return `(ok) ${cmd}`;
-}

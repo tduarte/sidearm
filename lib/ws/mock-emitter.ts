@@ -1,5 +1,3 @@
-"use client";
-
 import { addChat, addConsole, nextId, state } from "@/lib/api/mock";
 import type { ConsoleEvent, Player, Team } from "@/lib/api/types";
 import { bus } from "./bus";
@@ -37,6 +35,10 @@ function jitter(current: number, delta: number, min: number, max: number) {
   return Math.max(min, Math.min(max, Math.round(next)));
 }
 
+/**
+ * Drives the mock world loop. Intended to run once per server process (not
+ * per request/connection) — guarded by a module-level `started` flag.
+ */
 export function startMockEmitter() {
   if (started) return;
   started = true;
