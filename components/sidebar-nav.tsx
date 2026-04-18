@@ -42,32 +42,45 @@ export function SidebarNav() {
 
   return (
     <Sidebar collapsible="icon">
-      <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-3">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Crosshair weight="bold" className="h-5 w-5" />
+      <SidebarHeader className="px-1 py-1 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:py-3">
+        <div className="flex items-center gap-2.5 px-2 py-3.5 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:gap-0 group-data-[collapsible=icon]:p-0">
+          <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground group-data-[collapsible=icon]:size-8">
+            <Crosshair
+              weight="bold"
+              className="size-5 group-data-[collapsible=icon]:size-[1.125rem]"
+            />
           </div>
-          <div className="flex flex-col group-data-[collapsible=icon]:hidden">
+          <div className="flex min-w-0 flex-col group-data-[collapsible=icon]:hidden">
             <span className="font-semibold leading-none">sidearm</span>
             <span className="text-xs text-muted-foreground">CS2 panel</span>
           </div>
         </div>
       </SidebarHeader>
-      <SidebarContent>
-        <SidebarGroup>
-          <SidebarGroupLabel>Server</SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
+      <SidebarContent className="gap-2 px-1 group-data-[collapsible=icon]:px-2">
+        <SidebarGroup className="py-1 group-data-[collapsible=icon]:px-2 group-data-[collapsible=icon]:py-2">
+          <SidebarGroupLabel className="mb-1.5 h-9 px-2 text-[0.8125rem] font-medium tracking-wide group-data-[collapsible=icon]:hidden">
+            Server
+          </SidebarGroupLabel>
+          <SidebarGroupContent className="text-sm">
+            <SidebarMenu className="gap-1 group-data-[collapsible=icon]:gap-2">
               {NAV.map((item) => {
                 const active =
                   pathname === item.href || pathname.startsWith(item.href + "/");
                 const Icon = item.icon;
                 return (
                   <SidebarMenuItem key={item.href}>
-                    <SidebarMenuButton asChild isActive={active} tooltip={item.label}>
-                      <Link href={item.href}>
-                        <Icon className="h-4 w-4" />
-                        <span>{item.label}</span>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      size="lg"
+                      tooltip={item.label}
+                      className="gap-3 text-sm leading-snug [&_svg]:size-5"
+                    >
+                      <Link href={item.href} aria-label={item.label}>
+                        <Icon className="size-5 shrink-0" />
+                        <span className="group-data-[collapsible=icon]:hidden">
+                          {item.label}
+                        </span>
                       </Link>
                     </SidebarMenuButton>
                   </SidebarMenuItem>
@@ -77,8 +90,8 @@ export function SidebarNav() {
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
-      <SidebarFooter>
-        <div className="px-2 py-2 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
+      <SidebarFooter className="px-1 py-1">
+        <div className="px-2 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
           v0.1.0 · mock mode
         </div>
       </SidebarFooter>
