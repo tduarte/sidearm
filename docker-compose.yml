@@ -1,0 +1,90 @@
+# sidearm — self-hosted CS2 server + admin panel.
+#
+# First-run:
+#   cp .env.example .env  # then fill in GSLT and passwords
+#   docker compose up -d
+# The CS2 game files (~40 GB) download into the `cs2-data` volume on first
+# boot; be patient. Panel UI lives at http://<host>:3000.
+#
+# The panel talks to Docker through `docker-proxy` (tecnativa/docker-socket-proxy)
+# so we never give it the raw socket.
+
+services:
+  cs2:
+    image: joedwards32/cs2:latest
+    container_name: cs2
+    restart: unless-stopped
+    environment:
+      SRCDS_TOKEN: ${GSLT}
+      CS2_SERVERNAME: ${SERVER_NAME:-sidearm}
+      CS2_PW: ${SERVER_PASSWORD:-}
+      CS2_RCONPW: ${RCON_PASSWORD}
+      CS2_MAXPLAYERS: ${CS2_MAXPLAYERS:-10}
+      CS2_GAMETYPE: ${CS2_GAMETYPE:-0}
+      CS2_GAMEMODE: ${CS2_GAMEMODE:-1}
+      CS2_MAPGROUP: ${CS2_MAPGROUP:-mg_active}
+      CS2_STARTMAP: ${CS2_STARTMAP:-de_mirage}
+      CS2_PORT: "27015"
+    volumes:
+      - cs2-data:/home/steam/cs2-dedicated
+    ports:
+      # Game traffic. RCON (TCP/27015) stays on the internal network only.
+      - "27015:27015/udp"
+      # SourceTV relay.
+      - "27020:27020/udp"
+    networks: [panel-net]
+    healthcheck:
+      test: ["CMD", "nc", "-z", "-u", "127.0.0.1", "27015"]
+      interval: 30s
+      timeout: 5s
+      retries: 6
+
+  panel:
+    build: .
+    image: sidearm-panel:latest
+    container_name: sidearm-panel
+    restart: unless-stopped
+    depends_on:
+      - cs2
+      - docker-proxy
+    environment:
+      API_MODE: real
+      HOSTNAME: 0.0.0.0
+      PORT: "3000"
+      RCON_HOST: cs2
+      RCON_PORT: "27015"
+      RCON_PASSWORD: ${RCON_PASSWORD}
+      CS2_CONTAINER: cs2
+      DOCKER_HOST: tcp://docker-proxy:2375
+      LOG_INGEST_SECRET: ${LOG_INGEST_SECRET}
+      PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
+      SQLITE_PATH: /data/sidearm.db
+    volumes:
+      - panel-data:/data
+      # Read-only view of CS2 game files — we write config via rcon `exec`,
+      # not by poking files directly, but Phase F needs to drop sidearm.cfg
+      # into cfg/. Flip to rw in Phase F or mount the cfg subdir writeable.
+      - cs2-data:/cs2:ro
+    ports:
+      - "3000:3000"
+    networks: [panel-net]
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: sidearm-docker-proxy
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      POST: "1"
+      # Leave everything else at default (0) to minimise attack surface.
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [panel-net]
+
+volumes:
+  cs2-data:
+  panel-data:
+
+networks:
+  panel-net:
+    driver: bridge
