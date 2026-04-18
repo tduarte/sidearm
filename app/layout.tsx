@@ -1,19 +1,13 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import { Geist_Mono, Geist } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/app-shell";
 
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-mono",
-});
+const geistMonoHeading = Geist_Mono({subsets:['latin'],variable:'--font-heading'});
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
+const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
@@ -32,16 +26,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={cn(
-        "h-full dark antialiased",
-        geistSans.variable,
-        geistMono.variable,
-        jetbrainsMono.variable,
-      )}
-    >
-      <body className="min-h-full flex flex-col font-sans">
+    <html lang="en" className={cn("h-full dark antialiased", geistMono.variable, "font-sans", geist.variable, geistMonoHeading.variable)}>
+      <body className="min-h-full flex flex-col font-sans text-[13px]">
         <Providers>
           <AppShell>{children}</AppShell>
         </Providers>
