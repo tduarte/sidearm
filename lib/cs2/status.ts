@@ -20,7 +20,7 @@ export async function fetchStatus(): Promise<{
   const docker =
     dockerStats.status === "fulfilled"
       ? dockerStats.value
-      : { cpuPct: 0, memMb: 0 };
+      : { cpuPct: 0, memMb: 0, memLimitMb: 0 };
 
   const containerState =
     inspect.status === "fulfilled" ? inspect.value.State : null;
@@ -70,7 +70,7 @@ export async function fetchStatus(): Promise<{
     uptimeSec: 0,
     cpuPct: docker.cpuPct,
     memMb: docker.memMb,
-    memMaxMb: 8192,
+    memMaxMb: docker.memLimitMb || 8192,
     fps,
     tickrate: 64,
     connectUrl: `connect ${SERVER_IP}:${PORT}`,

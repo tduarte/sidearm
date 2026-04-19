@@ -39,6 +39,7 @@ export async function inspectContainer(name: string) {
 export interface ContainerStats {
   cpuPct: number;
   memMb: number;
+  memLimitMb: number;
 }
 
 export async function containerStats(name: string): Promise<ContainerStats> {
@@ -58,8 +59,9 @@ export async function containerStats(name: string): Promise<ContainerStats> {
   const rss = raw.memory_stats.usage ?? 0;
   const cache = raw.memory_stats.stats?.cache ?? 0;
   const memMb = (rss - cache) / 1024 / 1024;
+  const memLimitMb = (raw.memory_stats.limit ?? 0) / 1024 / 1024;
 
-  return { cpuPct: Math.round(cpuPct * 10) / 10, memMb: Math.round(memMb) };
+  return { cpuPct: Math.round(cpuPct * 10) / 10, memMb: Math.round(memMb), memLimitMb: Math.round(memLimitMb) };
 }
 
 export async function containerLogs(
