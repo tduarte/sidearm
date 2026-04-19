@@ -62,6 +62,22 @@ export function appendChat(msg: ChatMessage) {
   if (cache().chat.length > 1000) cache().chat.shift();
 }
 
+export function updatePlayerKill(attackerSteamId: string, victimSteamId: string) {
+  const players = cache().players;
+  let changed = false;
+  for (const p of players) {
+    if (p.steamId === attackerSteamId) { p.k += 1; changed = true; }
+    if (p.steamId === victimSteamId) { p.d += 1; changed = true; }
+  }
+  if (changed) {
+    for (const p of players) {
+      if (p.steamId === attackerSteamId || p.steamId === victimSteamId) {
+        bus.emit({ type: "player.update", player: { ...p } });
+      }
+    }
+  }
+}
+
 function makeConsoleEvent(
   level: ConsoleEvent["level"],
   source: string,
@@ -117,7 +133,7 @@ export const realAdapter = {
         gsltToken: process.env.GSLT ?? "",
       },
       gameplay: {
-        mode: "competitive",
+        mode: cache().status?.gameMode ?? "competitive",
         tickrate: 64,
         maxPlayers: cache().status?.maxPlayers ?? 10,
         botsEnabled: false,
@@ -133,12 +149,23 @@ export const realAdapter = {
   },
 
   async putConfig(cfg: ServerConfig): Promise<ServerConfig> {
+    const gameModeMap: Record<string, [number, number]> = {
+      casual:      [0, 0],
+      competitive: [0, 1],
+      wingman:     [0, 2],
+      deathmatch:  [1, 2],
+      practice:    [0, 0],
+      custom:      [3, 0],
+    };
+    const [gt, gm] = gameModeMap[cfg.gameplay.mode] ?? [0, 1];
     const cvars = [
       `hostname "${cfg.identity.hostname}"`,
       cfg.access.serverPassword
         ? `sv_password "${cfg.access.serverPassword}"`
         : `sv_password ""`,
       `mp_maxrounds ${cfg.gameplay.maxPlayers}`,
+      `game_type ${gt}`,
+      `game_mode ${gm}`,
     ];
     for (const cvar of cvars) await rconExec(cvar);
     const ev = makeConsoleEvent("info", "admin", "Config applied via RCON");

@@ -17,7 +17,7 @@ const DISCONNECT_RE = /^"(.+?)<\d+><([^>]*)><[^>]*>" disconnected/;
 const ENTERED_RE = /^"(.+?)<\d+><([^>]*)><[^>]*>" entered the game/;
 
 // "Name<uid><STEAMID><TEAM>" killed "Name<uid><STEAMID><TEAM>" with "weapon"
-const KILL_RE = /^"(.+?)<\d+><([^>]*)><([^>]*)>" killed "(.+?)<\d+><[^>]*><[^>]*>" with "([^"]+)"/;
+const KILL_RE = /^"(.+?)<\d+><([^>]*)><([^>]*)>" killed "(.+?)<\d+><([^>]*)><[^>]*>" with "([^"]+)"/;
 
 // World triggered "Round_Start" / "Round_End" / "Match_Start" / "Game_Commencing"
 const WORLD_TRIGGER_RE = /^World triggered "([^"]+)"/;
@@ -100,10 +100,11 @@ export function parseLine(raw: string): ParseResult {
   // Kill
   const kill = KILL_RE.exec(line);
   if (kill) {
-    const [, attackerName, , attackerTeamRaw, victimName, weapon] = kill;
+    const [, attackerName, attackerSteamId, , victimName, victimSteamId, weapon] = kill;
     const ev = makeConsoleEvent("info", "game", `${attackerName} killed ${victimName} with ${weapon}`);
     consoleEvents.push(ev);
     events.push({ type: "console.line", event: ev });
+    events.push({ type: "player.kill", attackerSteamId: attackerSteamId || attackerName, victimSteamId: victimSteamId || victimName });
     return { events, consoleEvents, chatMessages };
   }
 

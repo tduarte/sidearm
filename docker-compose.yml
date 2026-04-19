@@ -28,9 +28,8 @@ services:
     volumes:
       - cs2-data:/home/steam/cs2-dedicated
     ports:
-      # Game traffic. RCON (TCP/27015) stays on the internal network only.
       - "27015:27015/udp"
-      # SourceTV relay.
+      - "27015:27015/tcp"
       - "27020:27020/udp"
     networks: [panel-net]
     healthcheck:

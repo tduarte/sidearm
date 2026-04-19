@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { parseLogBody } from "@/lib/cs2/log-parser";
-import { appendConsole, appendChat } from "@/lib/api/server/real";
+import { appendConsole, appendChat, updatePlayerKill } from "@/lib/api/server/real";
 import { bus } from "@/lib/ws/bus";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,13 @@ export async function POST(
 
   for (const ev of consoleEvents) appendConsole(ev);
   for (const msg of chatMessages) appendChat(msg);
-  for (const event of events) bus.emit(event);
+  for (const event of events) {
+    if (event.type === "player.kill") {
+      updatePlayerKill(event.attackerSteamId, event.victimSteamId);
+    } else {
+      bus.emit(event);
+    }
+  }
 
   return NextResponse.json({ ok: true, lines: consoleEvents.length });
 }

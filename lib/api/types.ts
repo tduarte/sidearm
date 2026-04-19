@@ -144,6 +144,7 @@ export type WsEvent =
   | { type: "player.join"; player: Player }
   | { type: "player.leave"; steamId: string }
   | { type: "player.update"; player: Player }
+  | { type: "player.kill"; attackerSteamId: string; victimSteamId: string }
   | { type: "console.line"; event: ConsoleEvent }
   | { type: "chat.message"; message: ChatMessage }
   | { type: "match.phase"; phase: MatchPhase }

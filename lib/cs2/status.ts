@@ -1,18 +1,45 @@
-import type { Player, ServerStatus, Team } from "@/lib/api/types";
+import type { GameMode, Player, ServerStatus, Team } from "@/lib/api/types";
 import { rconExec } from "./rcon";
 import { containerStats, inspectContainer } from "./docker";
 
 const PORT = parseInt(process.env.RCON_PORT ?? "27015", 10);
-const SERVER_IP = process.env.SERVER_IP ?? "";
+
+let cachedPublicIp: string | null = null;
+
+async function getPublicIp(): Promise<string> {
+  if (cachedPublicIp) return cachedPublicIp;
+  const envIp = process.env.SERVER_IP;
+  if (envIp) { cachedPublicIp = envIp; return envIp; }
+  try {
+    const res = await fetch("https://api.ipify.org?format=text", { signal: AbortSignal.timeout(3000) });
+    if (res.ok) {
+      cachedPublicIp = (await res.text()).trim();
+      return cachedPublicIp;
+    }
+  } catch { /* fall through */ }
+  return "";
+}
+
+function gameModeFromCvars(gameType: number, gameMode: number): GameMode {
+  if (gameType === 1 && gameMode === 2) return "deathmatch";
+  if (gameType === 0 && gameMode === 0) return "casual";
+  if (gameType === 0 && gameMode === 1) return "competitive";
+  if (gameType === 0 && gameMode === 2) return "wingman";
+  if (gameType === 1 && gameMode === 0) return "deathmatch"; // arms race variant
+  if (gameType === 3 && gameMode === 0) return "custom";
+  return "competitive";
+}
 
 export async function fetchStatus(): Promise<{
   status: ServerStatus;
   players: Player[];
 }> {
-  const [statusOut, dockerStats, inspect] = await Promise.allSettled([
+  const [statusOut, dockerStats, inspect, serverIp, gameModeOut] = await Promise.allSettled([
     rconExec("status"),
     containerStats("cs2"),
     inspectContainer("cs2"),
+    getPublicIp(),
+    rconExec("game_type; game_mode"),
   ]);
 
   const statusText =
@@ -21,9 +48,20 @@ export async function fetchStatus(): Promise<{
     dockerStats.status === "fulfilled"
       ? dockerStats.value
       : { cpuPct: 0, memMb: 0, memLimitMb: 0 };
-
   const containerState =
     inspect.status === "fulfilled" ? inspect.value.State : null;
+  const ip = serverIp.status === "fulfilled" ? serverIp.value : "";
+
+  // Parse game_type and game_mode from cvar output: "game_type" = "0"
+  let gameType = 0;
+  let gameModeNum = 1;
+  if (gameModeOut.status === "fulfilled") {
+    const gtMatch = /game_type[^=]*=\s*"?(\d+)/i.exec(gameModeOut.value);
+    const gmMatch = /game_mode[^=]*=\s*"?(\d+)/i.exec(gameModeOut.value);
+    if (gtMatch) gameType = parseInt(gtMatch[1], 10);
+    if (gmMatch) gameModeNum = parseInt(gmMatch[1], 10);
+  }
+  const gameMode: GameMode = gameModeFromCvars(gameType, gameModeNum);
 
   const state =
     containerState?.Running
@@ -64,7 +102,7 @@ export async function fetchStatus(): Promise<{
     state: state as ServerStatus["state"],
     hostname,
     map,
-    gameMode: "competitive",
+    gameMode,
     players: humans,
     maxPlayers,
     uptimeSec: 0,
@@ -73,8 +111,8 @@ export async function fetchStatus(): Promise<{
     memMaxMb: docker.memLimitMb || 8192,
     fps,
     tickrate: 64,
-    connectUrl: `connect ${SERVER_IP}:${PORT}`,
-    ip: SERVER_IP,
+    connectUrl: `connect ${ip}:${PORT}`,
+    ip,
     port: PORT,
   };
 
