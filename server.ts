@@ -9,7 +9,7 @@ const hostname = process.env.HOSTNAME ?? "0.0.0.0";
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
-app.prepare().then(() => {
+app.prepare().then(async () => {
   const httpServer = createServer((req, res) => handle(req, res));
   attachWsServer(httpServer, { path: "/ws" });
 
@@ -20,4 +20,23 @@ app.prepare().then(() => {
       `> sidearm panel ready on http://${hostname}:${port} (${dev ? "dev" : process.env.NODE_ENV}, API_MODE=${mode})`,
     );
   });
+
+  if (process.env.API_MODE === "real") {
+    const { rconConnect } = await import("./lib/cs2/rcon");
+    const { fetchStatus } = await import("./lib/cs2/status");
+    const { updateCache } = await import("./lib/api/server/real");
+    const { bus } = await import("./lib/ws/bus");
+
+    rconConnect();
+
+    setInterval(async () => {
+      try {
+        const { status, players } = await fetchStatus();
+        updateCache(status, players);
+        bus.emit({ type: "status.update", status });
+      } catch {
+        // transient — rcon reconnect handles it
+      }
+    }, 2000);
+  }
 });

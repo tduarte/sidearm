@@ -40,8 +40,7 @@ services:
       retries: 6
 
   panel:
-    build: .
-    image: sidearm-panel:latest
+    image: ghcr.io/tduarte/sidearm:latest
     container_name: sidearm-panel
     restart: unless-stopped
     depends_on:
