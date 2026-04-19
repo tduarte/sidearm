@@ -92,7 +92,7 @@ export function SidebarNav() {
       </SidebarContent>
       <SidebarFooter className="px-1 py-1">
         <div className="px-2 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-          v0.1.0 · mock mode
+          v0.1.0 · {process.env.NEXT_PUBLIC_API_MODE === "real" ? "real mode" : "mock mode"}
         </div>
       </SidebarFooter>
     </Sidebar>
