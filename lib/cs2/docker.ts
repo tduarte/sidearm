@@ -20,9 +20,15 @@ export async function containerAction(
 ): Promise<void> {
   assertAllowed(name);
   const c = docker.getContainer(name);
-  if (action === "start") await c.start();
-  else if (action === "stop") await c.stop();
-  else await c.restart();
+  try {
+    if (action === "start") await c.start();
+    else if (action === "stop") await c.stop();
+    else await c.restart();
+  } catch (err: any) {
+    // 304 = already in desired state, 304/not modified is not an error for us
+    if (err?.statusCode === 304) return;
+    throw err;
+  }
 }
 
 export async function inspectContainer(name: string) {

@@ -12,6 +12,7 @@ import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
 import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
+import { OFFICIAL_MAPS } from "@/lib/api/mock";
 
 // Use Node.js global so the poll loop in server.ts and the Next.js API route
 // handlers share the same state regardless of how modules are bundled.
@@ -158,7 +159,7 @@ export const realAdapter = {
   },
 
   async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {
-    return { current: cache().status?.map ?? "unknown", rotation: [], all: [] };
+    return { current: cache().status?.map ?? "unknown", rotation: [], all: [...OFFICIAL_MAPS] };
   },
 
   async changeMap(name: string): Promise<void> {
