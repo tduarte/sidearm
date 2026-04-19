@@ -22,12 +22,24 @@ app.prepare().then(async () => {
   });
 
   if (process.env.API_MODE === "real") {
-    const { rconConnect } = await import("./lib/cs2/rcon");
+    const { rconConnect, rconExec } = await import("./lib/cs2/rcon");
     const { fetchStatus } = await import("./lib/cs2/status");
     const { updateCache } = await import("./lib/api/server/real");
     const { bus } = await import("./lib/ws/bus");
 
-    rconConnect();
+    const secret = process.env.LOG_INGEST_SECRET ?? "";
+    const panelUrl = process.env.PANEL_URL ?? `http://panel:${port}`;
+
+    rconConnect(async () => {
+      try {
+        await rconExec(`logaddress_add_http "${panelUrl}/api/ingest/logs/${secret}"`);
+        await rconExec("logaddress_enable_http 1");
+        await rconExec("log on");
+        console.log("[rcon] log ingest configured");
+      } catch (err) {
+        console.error("[rcon] failed to configure log ingest:", err);
+      }
+    });
 
     setInterval(async () => {
       try {

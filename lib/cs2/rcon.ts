@@ -10,6 +10,8 @@ let client: Rcon | null = null;
 let authenticated = false;
 let connecting = false;
 let backoff = 1000;
+let onFirstConnect: (() => void) | null = null;
+let didFirstConnect = false;
 let commandQueue: Array<{
   cmd: string;
   resolve: (v: string) => void;
@@ -26,6 +28,10 @@ async function connect(): Promise<void> {
     backoff = 1000;
     console.log("[rcon] connected");
     flushQueue();
+    if (!didFirstConnect && onFirstConnect) {
+      didFirstConnect = true;
+      onFirstConnect();
+    }
   } catch (err) {
     authenticated = false;
     client = null;
@@ -69,6 +75,7 @@ export async function rconExec(cmd: string): Promise<string> {
   });
 }
 
-export function rconConnect(): void {
+export function rconConnect(onConnect?: () => void): void {
+  if (onConnect) onFirstConnect = onConnect;
   connect();
 }
