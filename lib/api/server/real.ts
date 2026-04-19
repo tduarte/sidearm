@@ -13,37 +13,52 @@ import { containerAction } from "@/lib/cs2/docker";
 import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
 
-// In-memory state — replaced each poll cycle
-let cachedStatus: ServerStatus | null = null;
-let cachedPlayers: Player[] = [];
-let cachedMatch: MatchState = {
-  phase: "idle",
-  score: { ct: 0, t: 0 },
-  round: 0,
-  maxRounds: 24,
-  paused: false,
-  demoRecording: false,
+// Use Node.js global so the poll loop in server.ts and the Next.js API route
+// handlers share the same state regardless of how modules are bundled.
+declare global {
+  // eslint-disable-next-line no-var
+  var __cs2Cache: {
+    status: ServerStatus | null;
+    players: Player[];
+    match: MatchState;
+    console: ConsoleEvent[];
+    chat: ChatMessage[];
+  };
+}
+global.__cs2Cache ??= {
+  status: null,
+  players: [],
+  match: {
+    phase: "idle",
+    score: { ct: 0, t: 0 },
+    round: 0,
+    maxRounds: 24,
+    paused: false,
+    demoRecording: false,
+  },
+  console: [],
+  chat: [],
 };
-let consoleRing: ConsoleEvent[] = [];
-let chatHistory: ChatMessage[] = [];
+
+const cache = () => global.__cs2Cache;
 
 export function updateCache(status: ServerStatus, players: Player[]) {
-  cachedStatus = status;
-  cachedPlayers = players;
+  cache().status = status;
+  cache().players = players;
 }
 
 export function updateMatchState(match: Partial<MatchState>) {
-  cachedMatch = { ...cachedMatch, ...match };
+  cache().match = { ...cache().match, ...match };
 }
 
 export function appendConsole(event: ConsoleEvent) {
-  consoleRing.push(event);
-  if (consoleRing.length > 500) consoleRing.shift();
+  cache().console.push(event);
+  if (cache().console.length > 500) cache().console.shift();
 }
 
 export function appendChat(msg: ChatMessage) {
-  chatHistory.push(msg);
-  if (chatHistory.length > 1000) chatHistory.shift();
+  cache().chat.push(msg);
+  if (cache().chat.length > 1000) cache().chat.shift();
 }
 
 function makeConsoleEvent(
@@ -62,9 +77,9 @@ function makeConsoleEvent(
 
 export const realAdapter = {
   async getStatus(): Promise<ServerStatus> {
-    if (cachedStatus) return { ...cachedStatus };
+    if (cache().status) return { ...cache().status! };
     const { status } = await fetchStatus();
-    cachedStatus = status;
+    cache().status = status;
     return { ...status };
   },
 
@@ -72,24 +87,26 @@ export const realAdapter = {
     const action = next === "running" ? "start" : "stop";
     await containerAction("cs2", action);
     const { status } = await fetchStatus();
-    cachedStatus = { ...status, state: next === "running" ? "starting" : "stopping" };
-    bus.emit({ type: "status.update", status: { ...cachedStatus } });
-    return { ...cachedStatus };
+    const updated: ServerStatus = { ...status, state: next === "running" ? "starting" : "stopping" };
+    cache().status = updated;
+    bus.emit({ type: "status.update", status: updated });
+    return updated;
   },
 
   async restart(): Promise<void> {
     await containerAction("cs2", "restart");
-    if (cachedStatus) {
-      cachedStatus = { ...cachedStatus, state: "starting" };
-      bus.emit({ type: "status.update", status: { ...cachedStatus } });
+    const s = cache().status;
+    if (s) {
+      const updated = { ...s, state: "starting" as const };
+      cache().status = updated;
+      bus.emit({ type: "status.update", status: updated });
     }
   },
 
   async getConfig(): Promise<ServerConfig> {
-    // Config is write-only in Phase C; return defaults shaped from env
     return {
       identity: {
-        hostname: cachedStatus?.hostname ?? "CS2 Server",
+        hostname: cache().status?.hostname ?? "CS2 Server",
         tags: [],
         region: "local",
       },
@@ -101,13 +118,13 @@ export const realAdapter = {
       gameplay: {
         mode: "competitive",
         tickrate: 64,
-        maxPlayers: cachedStatus?.maxPlayers ?? 10,
+        maxPlayers: cache().status?.maxPlayers ?? 10,
         botsEnabled: false,
         botDifficulty: 1,
         botQuota: 0,
       },
       networking: {
-        port: cachedStatus?.port ?? 27015,
+        port: cache().status?.port ?? 27015,
         tvPort: 27020,
         workshopCollectionId: "",
       },
@@ -130,40 +147,32 @@ export const realAdapter = {
   },
 
   async getPlayers(): Promise<Player[]> {
-    return [...cachedPlayers];
+    return [...cache().players];
   },
 
   async kick(steamId: string, reason?: string): Promise<void> {
-    const cmd = reason
-      ? `kickid ${steamId} "${reason}"`
-      : `kickid ${steamId}`;
+    const cmd = reason ? `kickid ${steamId} "${reason}"` : `kickid ${steamId}`;
     await rconExec(cmd);
-    cachedPlayers = cachedPlayers.filter((p) => p.steamId !== steamId);
+    cache().players = cache().players.filter((p) => p.steamId !== steamId);
     bus.emit({ type: "player.leave", steamId });
   },
 
-  async getMaps(): Promise<{
-    current: string;
-    rotation: string[];
-    all: MapEntry[];
-  }> {
-    const current = cachedStatus?.map ?? "unknown";
-    return { current, rotation: [], all: [] };
+  async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {
+    return { current: cache().status?.map ?? "unknown", rotation: [], all: [] };
   },
 
   async changeMap(name: string): Promise<void> {
     await rconExec(`changelevel ${name}`);
-    if (cachedStatus) {
-      cachedStatus = { ...cachedStatus, map: name };
-      bus.emit({ type: "status.update", status: { ...cachedStatus } });
+    const s = cache().status;
+    if (s) {
+      const updated = { ...s, map: name };
+      cache().status = updated;
+      bus.emit({ type: "status.update", status: updated });
     }
     bus.emit({ type: "match.phase", phase: "warmup" });
   },
 
-  async subscribeWorkshop(
-    workshopId: string,
-    displayName?: string,
-  ): Promise<MapEntry> {
+  async subscribeWorkshop(workshopId: string, displayName?: string): Promise<MapEntry> {
     await rconExec(`host_workshop_collection ${workshopId}`);
     return {
       name: `workshop/${workshopId}/${displayName ?? "map"}`,
@@ -178,7 +187,7 @@ export const realAdapter = {
   },
 
   async getMatch(): Promise<MatchState> {
-    return { ...cachedMatch };
+    return { ...cache().match };
   },
 
   async setMatchPhase(phase: MatchState["phase"]): Promise<MatchState> {
@@ -191,30 +200,29 @@ export const realAdapter = {
       knife: [],
     };
     for (const cmd of cmds[phase] ?? []) await rconExec(cmd);
-    cachedMatch = { ...cachedMatch, phase };
+    cache().match = { ...cache().match, phase };
     bus.emit({ type: "match.phase", phase });
-    return { ...cachedMatch };
+    return { ...cache().match };
   },
 
   async togglePause(): Promise<MatchState> {
-    await rconExec(cachedMatch.paused ? "mp_unpause_match" : "mp_pause_match");
-    cachedMatch = { ...cachedMatch, paused: !cachedMatch.paused };
-    return { ...cachedMatch };
+    await rconExec(cache().match.paused ? "mp_unpause_match" : "mp_pause_match");
+    cache().match = { ...cache().match, paused: !cache().match.paused };
+    return { ...cache().match };
   },
 
   async toggleDemo(): Promise<MatchState> {
-    if (cachedMatch.demoRecording) {
+    if (cache().match.demoRecording) {
       await rconExec("stop");
     } else {
-      const name = `demo_${Date.now()}`;
-      await rconExec(`record ${name}`);
+      await rconExec(`record demo_${Date.now()}`);
     }
-    cachedMatch = { ...cachedMatch, demoRecording: !cachedMatch.demoRecording };
-    return { ...cachedMatch };
+    cache().match = { ...cache().match, demoRecording: !cache().match.demoRecording };
+    return { ...cache().match };
   },
 
   async getConsole(): Promise<ConsoleEvent[]> {
-    return consoleRing.slice(-500);
+    return cache().console.slice(-500);
   },
 
   async rcon(command: string): Promise<string> {
@@ -226,7 +234,7 @@ export const realAdapter = {
   },
 
   async getChat(): Promise<ChatMessage[]> {
-    return [...chatHistory];
+    return [...cache().chat];
   },
 
   async getHistory(): Promise<MatchHistoryDetail[]> {
