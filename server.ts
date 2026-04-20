@@ -26,6 +26,30 @@ app.prepare().then(async () => {
     const { fetchStatus } = await import("./lib/cs2/status");
     const { updateCache } = await import("./lib/api/server/real");
     const { bus } = await import("./lib/ws/bus");
+    const { getDb } = await import("./lib/db/index");
+    const { beginMatch, endMatch } = await import("./lib/db/matches");
+
+    // Ensure DB is open and migrated before anything else touches it
+    getDb();
+
+    // Match lifecycle tracking
+    let activeMatchId: string | null = null;
+    bus.subscribe((ev) => {
+      if (ev.type === "match.phase") {
+        if (ev.phase === "live" && !activeMatchId) {
+          const cache = (global as any).__cs2Cache;
+          activeMatchId = beginMatch(cache?.status?.map ?? "unknown", cache?.status?.gameMode ?? "competitive");
+        } else if ((ev.phase === "ended" || ev.phase === "idle") && activeMatchId) {
+          const cache = (global as any).__cs2Cache;
+          endMatch(activeMatchId, cache?.match?.score ?? { ct: 0, t: 0 }, cache?.players ?? []);
+          activeMatchId = null;
+        }
+      }
+      if (ev.type === "match.score" && activeMatchId) {
+        const cache = (global as any).__cs2Cache;
+        if (cache?.match) cache.match.score = ev.score;
+      }
+    });
 
     const secret = process.env.LOG_INGEST_SECRET ?? "";
     const panelUrl = process.env.PANEL_URL ?? `http://panel:${port}`;

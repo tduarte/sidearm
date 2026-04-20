@@ -13,6 +13,8 @@ import { containerAction } from "@/lib/cs2/docker";
 import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
 import { OFFICIAL_MAPS } from "@/lib/api/mock";
+import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
+import { getMatches, getMatchDetail } from "@/lib/db/matches";
 
 // Use Node.js global so the poll loop in server.ts and the Next.js API route
 // handlers share the same state regardless of how modules are bundled.
@@ -60,6 +62,7 @@ export function appendConsole(event: ConsoleEvent) {
 export function appendChat(msg: ChatMessage) {
   cache().chat.push(msg);
   if (cache().chat.length > 1000) cache().chat.shift();
+  try { insertChatMessage(msg); } catch { /* non-critical */ }
 }
 
 export function updatePlayerKill(attackerSteamId: string, victimSteamId: string) {
@@ -262,10 +265,13 @@ export const realAdapter = {
   },
 
   async getChat(): Promise<ChatMessage[]> {
+    try { return getChatMessages(); } catch { /* fall back to in-memory */ }
     return [...cache().chat];
   },
 
   async getHistory(): Promise<MatchHistoryDetail[]> {
-    return [];
+    try {
+      return getMatches().map((m) => ({ ...m, players: [] }));
+    } catch { return []; }
   },
 };
