@@ -52,5 +52,12 @@ function migrate(db: Database.Database): void {
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS workshop_maps (
+      workshop_id  TEXT PRIMARY KEY,
+      name         TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      added_at     TEXT NOT NULL DEFAULT (datetime('now'))
+    );
   `);
 }
