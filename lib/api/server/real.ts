@@ -15,6 +15,7 @@ import { bus } from "@/lib/ws/bus";
 import { OFFICIAL_MAPS } from "@/lib/api/mock";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
 import { getMatches, getMatchDetail } from "@/lib/db/matches";
+import { getWorkshopMaps, upsertWorkshopMap } from "@/lib/db/maps";
 
 // Use Node.js global so the poll loop in server.ts and the Next.js API route
 // handlers share the same state regardless of how modules are bundled.
@@ -26,6 +27,7 @@ declare global {
     match: MatchState;
     console: ConsoleEvent[];
     chat: ChatMessage[];
+    workshopMaps: MapEntry[] | null;
   };
 }
 global.__cs2Cache ??= {
@@ -41,6 +43,7 @@ global.__cs2Cache ??= {
   },
   console: [],
   chat: [],
+  workshopMaps: null,
 };
 
 const cache = () => global.__cs2Cache;
@@ -189,7 +192,14 @@ export const realAdapter = {
   },
 
   async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {
-    return { current: cache().status?.map ?? "unknown", rotation: [], all: [...OFFICIAL_MAPS] };
+    if (cache().workshopMaps === null) {
+      try { cache().workshopMaps = getWorkshopMaps(); } catch { cache().workshopMaps = []; }
+    }
+    return {
+      current: cache().status?.map ?? "unknown",
+      rotation: [],
+      all: [...(cache().workshopMaps ?? []), ...OFFICIAL_MAPS],
+    };
   },
 
   async changeMap(name: string): Promise<void> {
@@ -204,13 +214,24 @@ export const realAdapter = {
   },
 
   async subscribeWorkshop(workshopId: string, displayName?: string): Promise<MapEntry> {
-    await rconExec(`host_workshop_collection ${workshopId}`);
-    return {
+    const entry: MapEntry = {
       name: `workshop/${workshopId}/${displayName ?? "map"}`,
       displayName: displayName ?? `Workshop ${workshopId}`,
       type: "workshop",
       workshopId,
     };
+    try { upsertWorkshopMap({ ...entry, workshopId }); } catch { /* non-critical */ }
+    if (cache().workshopMaps === null) {
+      try { cache().workshopMaps = getWorkshopMaps(); } catch { cache().workshopMaps = []; }
+    }
+    const list = cache().workshopMaps ?? [];
+    const idx = list.findIndex((m) => m.workshopId === workshopId);
+    if (idx >= 0) list[idx] = entry; else list.push(entry);
+    cache().workshopMaps = list;
+    const ev = makeConsoleEvent("info", "workshop", `Subscribed to ${workshopId}`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return entry;
   },
 
   async setRotation(_rotation: string[]): Promise<void> {
