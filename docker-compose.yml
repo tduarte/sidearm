@@ -56,20 +56,22 @@ services:
       RCON_HOST: cs2
       RCON_PORT: "27015"
       RCON_PASSWORD: ${RCON_PASSWORD}
-      CS2_CONTAINER: cs2
+      # Must match the `docker-proxy` service name.
       DOCKER_HOST_ADDR: docker-proxy
       DOCKER_PORT: "2375"
+      # Embedded in the logaddress_add_http URL the panel sets on CS2.
       LOG_INGEST_SECRET: ${LOG_INGEST_SECRET}
-      SERVER_PASSWORD: ${SERVER_PASSWORD:-}
-      GSLT: ${GSLT:-}
+      # Empty = panel is open on the LAN. Set it to require a bearer token
+      # on /api/* and /ws.
       PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
+      # Set to 1 only when serving the panel over HTTPS.
+      PANEL_HTTPS: ${PANEL_HTTPS:-}
+      # Public address for the connect URL. Set it to skip an outbound
+      # api.ipify.org lookup.
+      SERVER_IP: ${SERVER_IP:-}
       SQLITE_PATH: /data/sidearm.db
     volumes:
       - panel-data:/data
-      # Read-only view of CS2 game files — we write config via rcon `exec`,
-      # not by poking files directly, but Phase F needs to drop sidearm.cfg
-      # into cfg/. Flip to rw in Phase F or mount the cfg subdir writeable.
-      - cs2-data:/cs2:ro
     ports:
       - "3000:3000"
     networks: [panel-net]
