@@ -7,6 +7,7 @@ import type {
   Player,
   ServerConfig,
   ServerStatus,
+  UpdateStatus,
 } from "../types";
 import { addConsole, state } from "../mock";
 import { bus } from "@/lib/ws/bus";
@@ -191,6 +192,62 @@ export const mockAdapter = {
   async getHistory(): Promise<MatchHistoryDetail[]> {
     return [...state.history];
   },
+
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return { ...mockUpdate };
+  },
+
+  async checkForUpdate(): Promise<UpdateStatus> {
+    mockUpdate = { ...mockUpdate, checkedAt: new Date().toISOString() };
+    bus.emit({ type: "server.update", update: { ...mockUpdate } });
+    return { ...mockUpdate };
+  },
+
+  /**
+   * Plays through a shortened version of the real thing — steamcmd progress
+   * followed by srcds boot — so the updating UI can be demoed without a server.
+   */
+  async applyUpdate(): Promise<void> {
+    let pct = 0;
+    state.status.state = "updating";
+    const tick = setInterval(() => {
+      pct = Math.min(100, pct + 7);
+      state.status.updateProgress = {
+        phase: "downloading",
+        pct,
+        bytesDone: Math.round((pct / 100) * 71_089_555_502),
+        bytesTotal: 71_089_555_502,
+      };
+      bus.emit({ type: "status.update", status: { ...state.status } });
+      if (pct < 100) return;
+
+      clearInterval(tick);
+      state.status.updateProgress = null;
+      state.status.state = "starting";
+      bus.emit({ type: "status.update", status: { ...state.status } });
+      setTimeout(() => {
+        state.status.state = "running";
+        mockUpdate = {
+          ...mockUpdate,
+          installedVersion: mockUpdate.requiredVersion,
+          upToDate: true,
+          checkedAt: new Date().toISOString(),
+          message: "Server is up to date",
+        };
+        bus.emit({ type: "status.update", status: { ...state.status } });
+        bus.emit({ type: "server.update", update: { ...mockUpdate } });
+      }, 1500);
+    }, 400);
+  },
+};
+
+let mockUpdate: UpdateStatus = {
+  installedVersion: 14_150,
+  requiredVersion: 14_177,
+  upToDate: false,
+  checkedAt: new Date().toISOString(),
+  autoRestart: false,
+  message: "Server version required: 1.41.7.7",
 };
 
 function mockRconResponse(cmd: string): string {

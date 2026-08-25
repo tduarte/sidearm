@@ -1,10 +1,29 @@
-import type { GameMode, Player, ServerStatus, Team } from "@/lib/api/types";
+import type {
+  GameMode,
+  Player,
+  ServerStatus,
+  Team,
+  UpdateProgress,
+} from "@/lib/api/types";
 import { rconExec } from "./rcon";
-import { containerStats, inspectContainer } from "./docker";
+import { containerLogs, containerStats, inspectContainer } from "./docker";
+import { parseUpdateProgress } from "./updates";
 
 const PORT = parseInt(process.env.RCON_PORT ?? "27015", 10);
 
 let cachedPublicIp: string | null = null;
+
+/**
+ * steamcmd progress, throttled independently of the 2s status poll.
+ *
+ * A first boot downloads ~70 GB over hours; fetching container logs on every
+ * tick for all of that is a lot of Docker API traffic for a number that moves by
+ * hundredths of a percent. Five seconds is well under the eye's threshold for a
+ * progress bar.
+ */
+const PROGRESS_REFRESH_MS = 5000;
+let lastProgressFetch = 0;
+let lastProgress: UpdateProgress | null = null;
 
 async function getPublicIp(): Promise<string> {
   if (cachedPublicIp !== null) return cachedPublicIp;
@@ -202,7 +221,41 @@ export async function fetchStatus(): Promise<{
   const parsed = parseStatusText(statusText);
   // A `status` reply proves the game server is alive even if the Docker socket
   // is unreachable, so it disambiguates "proxy down" from "container stopped".
-  const state = containerStateToServerState(containerState, statusText !== "");
+  let state = containerStateToServerState(containerState, statusText !== "");
+
+  // A running container whose RCON is silent is usually mid-boot, and on this
+  // image "mid-boot" most often means steamcmd is pulling ~70 GB of game files.
+  // Only scrape the logs in that window: once srcds answers we never look.
+  let updateProgress: UpdateProgress | null = null;
+  // "crashed" is included deliberately: a container downloading 70 GB fails its
+  // healthcheck, so an unhealthy-but-downloading container must resolve to
+  // "updating", not to a red crash pill.
+  if (
+    (state === "starting" || state === "crashed") &&
+    containerState?.Running
+  ) {
+    const now = Date.now();
+    if (now - lastProgressFetch < PROGRESS_REFRESH_MS) {
+      updateProgress = lastProgress;
+    } else {
+      lastProgressFetch = now;
+      try {
+        const startedAt = containerState.StartedAt;
+        const since = startedAt
+          ? Math.floor(new Date(startedAt).getTime() / 1000)
+          : undefined;
+        lastProgress = parseUpdateProgress(
+          await containerLogs("cs2", 50, since),
+        );
+        updateProgress = lastProgress;
+      } catch {
+        // Logs unavailable (proxy denies it, container gone) — stay on "starting".
+      }
+    }
+    if (updateProgress) state = "updating";
+  }
+
+  if (state === "running") lastProgress = null;
 
   const status: ServerStatus = {
     state,
@@ -225,6 +278,7 @@ export async function fetchStatus(): Promise<{
     connectUrl: `connect ${ip}:${PORT}`,
     ip,
     port: PORT,
+    updateProgress,
   };
 
   return { status, players: statusText === "" ? null : parsed.players };
@@ -232,6 +286,8 @@ export async function fetchStatus(): Promise<{
 
 interface DockerState {
   Running?: boolean;
+  StartedAt?: string;
+  Health?: { Status?: string };
   Paused?: boolean;
   Restarting?: boolean;
   Dead?: boolean;
@@ -245,6 +301,19 @@ interface DockerState {
  * as the container being stopped, and reporting "stopped" there flips the top
  * bar to a Start button on a perfectly healthy server. When RCON is still
  * answering we know the server is up regardless of what Docker says.
+ *
+ * `Running` alone is not enough to report "running" either: this image spends
+ * its first boot running steamcmd, so the container is up long before srcds
+ * listens. Without the RCON check the panel showed "Running" next to an
+ * "unknown" map for the entire ~70 GB download — while Docker's own healthcheck
+ * was already reporting the container unhealthy.
+ *
+ * That healthcheck is the tiebreaker for a container that is up but silent.
+ * `unhealthy` is not a snapshot: compose gives it `retries: 6` at a 30s
+ * interval, so Docker only says it after three minutes of a closed game port.
+ * Treating that as a crash needs no timer of our own — but the caller must rule
+ * out an in-progress steamcmd download first, because that fails the healthcheck
+ * for entirely normal reasons.
  */
 export function containerStateToServerState(
   s: DockerState | null,
@@ -253,7 +322,10 @@ export function containerStateToServerState(
   if (!s) return rconAlive ? "running" : "crashed";
   if (s.Restarting) return "starting";
   if (s.Paused) return "stopping";
-  if (s.Running) return "running";
+  if (s.Running) {
+    if (rconAlive) return "running";
+    return s.Health?.Status === "unhealthy" ? "crashed" : "starting";
+  }
   if (s.Dead || (s.ExitCode ?? 0) !== 0) return "crashed";
   return "stopped";
 }

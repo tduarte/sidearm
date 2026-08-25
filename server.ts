@@ -14,6 +14,17 @@ const dev = process.env.NODE_ENV !== "production";
  */
 const hostname = process.env.BIND_HOST ?? "0.0.0.0";
 const POLL_INTERVAL_MS = Number.parseInt(process.env.STATUS_POLL_MS ?? "2000", 10);
+/**
+ * How often to ask Steam whether the running CS2 build is current. Set to 0 to
+ * disable the check entirely. Fifteen minutes is far more often than Valve ships
+ * builds, and the endpoint is a single unauthenticated GET.
+ */
+const UPDATE_CHECK_MS = Number.parseInt(
+  process.env.CS2_UPDATE_CHECK_MS ?? "900000",
+  10,
+);
+/** Wait for the container to finish booting before the first check. */
+const UPDATE_FIRST_CHECK_MS = 60_000;
 
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
@@ -33,7 +44,7 @@ app.prepare().then(async () => {
 
   const { rconConnect, rconExec, rconDisconnect } = await import("./lib/cs2/rcon");
   const { fetchStatus } = await import("./lib/cs2/status");
-  const { updateCache } = await import("./lib/api/server/real");
+  const { updateCache, realAdapter } = await import("./lib/api/server/real");
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
   const { beginMatch, endMatch } = await import("./lib/db/matches");
@@ -98,11 +109,34 @@ app.prepare().then(async () => {
   };
   void poll();
 
+  // CS2 updates: the image runs `steamcmd app_update 730` from its entrypoint,
+  // so restarting the container *is* the update. All this loop does is notice
+  // that one is pending and — when CS2_AUTO_UPDATE=1 and nobody is connected —
+  // restart. See lib/cs2/updates.ts.
+  let updateTimer: NodeJS.Timeout | null = null;
+  if (UPDATE_CHECK_MS > 0) {
+    const checkForUpdate = async () => {
+      try {
+        await realAdapter.checkForUpdate();
+      } catch (err) {
+        console.error("[update] check failed:", err);
+      } finally {
+        if (!stopped) {
+          updateTimer = setTimeout(checkForUpdate, UPDATE_CHECK_MS);
+          updateTimer.unref();
+        }
+      }
+    };
+    updateTimer = setTimeout(checkForUpdate, UPDATE_FIRST_CHECK_MS);
+    updateTimer.unref();
+  }
+
   const shutdown = (signal: string) => {
     if (stopped) return;
     stopped = true;
     console.log(`[sidearm] ${signal} received, shutting down`);
     if (pollTimer) clearTimeout(pollTimer);
+    if (updateTimer) clearTimeout(updateTimer);
     rconDisconnect();
     httpServer.close(() => process.exit(0));
     // Don't let a lingering connection block exit indefinitely.

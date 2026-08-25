@@ -76,6 +76,10 @@ function respond(command) {
   const verb = command.trim().split(/\s+/)[0];
   if (verb === "status") return statusOutput();
   if (verb === "game_type") return `"game_type" = "0"\n"game_mode" = "1"`;
+  // Lets the dev stack exercise the update check. STUB_VERSION can be set below
+  // the current CS2 build to make the panel report an update as pending.
+  if (verb === "version")
+    return `Server Version: ${process.env.STUB_VERSION ?? "14177"}`;
   return `${verb}: stub ok`;
 }
 

@@ -131,11 +131,50 @@ describe("containerStateToServerState", () => {
   });
 
   it("maps the ordinary states", () => {
-    assert.equal(containerStateToServerState({ Running: true }), "running");
+    assert.equal(containerStateToServerState({ Running: true }, true), "running");
     assert.equal(containerStateToServerState({ Restarting: true }), "starting");
     assert.equal(containerStateToServerState({ Paused: true }), "stopping");
     assert.equal(containerStateToServerState({ Running: false }), "stopped");
     assert.equal(containerStateToServerState({ Dead: true }), "crashed");
+  });
+
+  it("reports 'crashed' when the healthcheck has given up and RCON is silent", () => {
+    // compose gives the healthcheck retries: 6 at 30s, so "unhealthy" already
+    // means three minutes of a closed game port — no extra debounce needed.
+    assert.equal(
+      containerStateToServerState(
+        { Running: true, Health: { Status: "unhealthy" } },
+        false,
+      ),
+      "crashed",
+    );
+  });
+
+  it("stays 'running' on an unhealthy container that still answers RCON", () => {
+    assert.equal(
+      containerStateToServerState(
+        { Running: true, Health: { Status: "unhealthy" } },
+        true,
+      ),
+      "running",
+    );
+  });
+
+  it("reports 'starting' while the healthcheck is still in its grace period", () => {
+    assert.equal(
+      containerStateToServerState(
+        { Running: true, Health: { Status: "starting" } },
+        false,
+      ),
+      "starting",
+    );
+  });
+
+  it("reports 'starting' for a running container whose RCON is silent", () => {
+    // This image runs steamcmd from its entrypoint, so the container is up for
+    // the whole of a ~70 GB download while srcds is not listening. Reporting
+    // "running" there showed a live server pill next to an "unknown" map.
+    assert.equal(containerStateToServerState({ Running: true }, false), "starting");
   });
 });
 

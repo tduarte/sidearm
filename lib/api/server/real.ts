@@ -7,10 +7,12 @@ import type {
   Player,
   ServerConfig,
   ServerStatus,
+  UpdateStatus,
   WsEvent,
 } from "../types";
 import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
+import { runUpdateCheck } from "@/lib/cs2/updates";
 import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
 import { OFFICIAL_MAPS } from "@/lib/api/mock";
@@ -37,6 +39,7 @@ declare global {
     console: ConsoleEvent[];
     chat: ChatMessage[];
     workshopMaps: MapEntry[] | null;
+    update: UpdateStatus | null;
   };
 }
 global.__cs2Cache ??= {
@@ -53,6 +56,7 @@ global.__cs2Cache ??= {
   console: [],
   chat: [],
   workshopMaps: null,
+  update: null,
 };
 
 const cache = () => global.__cs2Cache;
@@ -439,6 +443,45 @@ export const realAdapter = {
     return [...cache().chat];
   },
 
+  /** Runs a full check now, storing and broadcasting the result. */
+  async checkForUpdate(): Promise<UpdateStatus> {
+    const result = await runUpdateCheck({
+      rconExec,
+      restartContainer: () => containerAction("cs2", "restart"),
+      // `status.players` is the humans count. A null status means we have not
+      // polled yet, and `runUpdateCheck` treats that as "do not restart".
+      playerCount: () => cache().status?.players ?? null,
+      matchPhase: () => cache().match.phase,
+      autoRestart: autoRestartEnabled(),
+    });
+
+    setUpdateStatus(result.update);
+    if (result.restarted) {
+      console.log("[update] CS2 update pending and server empty — restarting");
+      setServerStatusState("starting");
+    } else if (result.deferredReason) {
+      console.log(`[update] update pending, deferred: ${result.deferredReason}`);
+    }
+    return result.update;
+  },
+
+  async getUpdateStatus(): Promise<UpdateStatus> {
+    return cache().update ?? {
+      installedVersion: null,
+      requiredVersion: null,
+      upToDate: null,
+      checkedAt: null,
+      autoRestart: autoRestartEnabled(),
+      message: "No update check has run yet",
+    };
+  },
+
+  /** Restarts the container, which re-runs `steamcmd app_update 730` on boot. */
+  async applyUpdate(): Promise<void> {
+    await containerAction("cs2", "restart");
+    setServerStatusState("starting");
+  },
+
   async getHistory(): Promise<MatchHistoryDetail[]> {
     try {
       // Hydrate each entry with its per-player scoreboard; returning an empty
@@ -449,3 +492,22 @@ export const realAdapter = {
     } catch { return []; }
   },
 };
+
+/** `CS2_AUTO_UPDATE=1` lets the panel restart the container by itself. */
+export function autoRestartEnabled(): boolean {
+  return process.env.CS2_AUTO_UPDATE === "1";
+}
+
+/** Stores the latest check and pushes it to connected clients. */
+export function setUpdateStatus(update: UpdateStatus): void {
+  cache().update = update;
+  bus.emit({ type: "server.update", update });
+}
+
+function setServerStatusState(state: ServerStatus["state"]): void {
+  const s = cache().status;
+  if (!s) return;
+  const updated: ServerStatus = { ...s, state };
+  cache().status = updated;
+  bus.emit({ type: "status.update", status: updated });
+}

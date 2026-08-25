@@ -52,6 +52,71 @@ Copy `.env.example` to `.env` and fill in:
 | `PANEL_HTTPS` | No | Set to `1` when serving over HTTPS so the session cookie is marked `Secure`. |
 | `SERVER_IP` | No | Public address for the connect URL. Set it to avoid an outbound lookup to api.ipify.org each poll. |
 | `BIND_HOST` | No | Interface to bind (default `0.0.0.0`). Deliberately not `HOSTNAME`, which shells and Docker both set. |
+| `CS2_AUTO_UPDATE` | No | `1` lets the panel restart the CS2 container by itself when a game update is pending **and** nobody is connected. Unset = surface the badge only. |
+| `CS2_UPDATE_CHECK_MS` | No | How often to check for a CS2 update (default `900000`, 15 min). `0` disables the check. |
+
+---
+
+## CS2 updates
+
+CS2 cannot be patched in place. The `joedwards32/cs2` image runs
+`steamcmd app_update 730` from its entrypoint, so **restarting the container is
+the update** — there is nothing to run against a live server, and a build change
+needs a new `srcds` process anyway.
+
+The panel therefore does not try to update anything. It answers a narrower
+question: *is an update pending, and is now a good time?*
+
+Every `CS2_UPDATE_CHECK_MS` it asks the server its build over RCON (`version`)
+and passes that to Steam's public
+[`ISteamApps/UpToDateCheck`](https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/?appid=730&version=1)
+endpoint — no API key, no GSLT. When a newer build exists:
+
+- An **Update available** button appears in the top bar. Clicking it restarts the
+  container immediately, players connected or not — you asked for it.
+- With `CS2_AUTO_UPDATE=1`, the panel also restarts on its own, but **only** when
+  the server is empty. Every other outcome (players connected, roster unknown,
+  RCON silent, Steam unreachable, an unparseable build) defers the restart and is
+  logged with the reason. The check fails safe: unknown never means "go ahead".
+
+### While it is updating
+
+A first boot pulls roughly 70 GB, and the container is `Running` for all of it
+even though `srcds` is not listening — which is why the panel used to show a
+green **Running** pill next to an `unknown` map for hours. Server state is now
+derived from three signals rather than one:
+
+| Container | RCON | Healthcheck | Panel shows |
+|---|---|---|---|
+| Running | answers | — | **Running** |
+| Running | silent | starting / none | **Starting** |
+| Running | silent | — (steamcmd progress in logs) | **Updating 68%** with the byte count |
+| Running | silent | `unhealthy` | **Crashed** |
+
+The percentage is scraped from the container's own boot logs
+(`Update state (0x61) downloading, progress: …`), read only while RCON is silent
+and scoped to the current boot — so a finished download cannot linger at a stale
+percentage. Docker's healthcheck already debounces itself (`retries: 6` at 30s),
+so `unhealthy` means three minutes of a closed game port; steamcmd progress is
+checked first, because a long download fails that healthcheck for entirely
+normal reasons.
+
+### Container image updates are a separate thing
+
+Watchtower refreshes the *images* in `docker-compose.yml`. It does **not** patch
+Counter-Strike — the game arrives through steamcmd at boot, on a schedule
+unrelated to image releases. It is opt-in:
+
+```bash
+docker compose --profile autoupdate up -d
+```
+
+Only services labelled `com.centurylinklabs.watchtower.enable=true` are touched,
+which is `panel` alone — a wrapper-image bump must not recreate `cs2` mid-match.
+Note that Watchtower needs the raw Docker socket read-write plus image-pull
+rights, which is a considerably wider grant than the panel's socket proxy: the
+panel only gets `CONTAINERS` and `POST`. `containrrr/watchtower` was archived in
+December 2025, so the compose file uses the maintained community fork.
 
 ---
 
@@ -195,6 +260,7 @@ docker compose -f docker-compose.dev.yml down -v
 - **Config write-back** (Phase F) is not yet implemented — cvars are applied via RCON exec but not persisted to disk. Tickrate and max players are launch arguments and cannot be hot-applied.
 - **`uptimeSec`, `fps` and `tickrate`** in the dashboard are still placeholders.
 - **Log line format** is parsed permissively (with or without the Source `L ` prefix, with or without milliseconds), but has not yet been confirmed against a live CS2 server.
+- **`version` output format** is likewise parsed permissively (four known layouts) and not yet confirmed against a live CS2 server. If no build number can be read, the update check reports *unknown* and auto-restart never fires — it does not guess.
 
 ---
 
