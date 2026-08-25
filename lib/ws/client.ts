@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { WsEvent } from "@/lib/api/types";
 import { bus } from "./bus";
 
@@ -49,14 +49,26 @@ export function useServerEvents(
   filter: WsEvent["type"] | WsEvent["type"][] | "*",
   handler: (e: WsEvent) => void,
 ) {
+  // The subscription is intentionally created once, but it must not capture the
+  // first render's `handler`/`filter`. Routing through refs keeps a single
+  // subscription while always dispatching to the current callback — otherwise a
+  // handler closing over changing props silently goes stale.
+  const handlerRef = useRef(handler);
+  const filterRef = useRef(filter);
+
+  // Updated in an effect rather than during render — refs must not be written
+  // while rendering.
+  useEffect(() => {
+    handlerRef.current = handler;
+    filterRef.current = filter;
+  });
+
   useEffect(() => {
     connect();
-    const types =
-      filter === "*" ? null : Array.isArray(filter) ? filter : [filter];
-    const unsub = bus.subscribe((e) => {
-      if (types === null || types.includes(e.type)) handler(e);
+    return bus.subscribe((e) => {
+      const f = filterRef.current;
+      const types = f === "*" ? null : Array.isArray(f) ? f : [f];
+      if (types === null || types.includes(e.type)) handlerRef.current(e);
     });
-    return unsub;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 }

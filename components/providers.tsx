@@ -5,6 +5,7 @@ import { useState } from "react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { StatusLiveSync } from "@/components/status-live-sync";
+import { AuthGate } from "@/components/auth-gate";
 
 export function Providers({ children }: { children: React.ReactNode }) {
   const [client] = useState(
@@ -17,9 +18,11 @@ export function Providers({ children }: { children: React.ReactNode }) {
   );
   return (
     <QueryClientProvider client={client}>
-      <StatusLiveSync />
       <TooltipProvider delayDuration={200}>
-        {children}
+        <AuthGate>
+          <StatusLiveSync />
+          {children}
+        </AuthGate>
         <Toaster richColors position="top-right" />
       </TooltipProvider>
     </QueryClientProvider>

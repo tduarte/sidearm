@@ -48,7 +48,10 @@ Copy `.env.example` to `.env` and fill in:
 | `SERVER_NAME` | No | Server browser name (default: `sidearm`) |
 | `CS2_MAXPLAYERS` | No | Slot count (default: `10`) |
 | `CS2_STARTMAP` | No | Starting map (default: `de_mirage`) |
-| `PANEL_ADMIN_TOKEN` | No | Bearer token for `/api/*` auth (Phase G — leave blank during early setup) |
+| `PANEL_ADMIN_TOKEN` | No | Bearer token for `/api/*` and `/ws`. Blank = open panel. When set, the UI prompts once and keeps an HttpOnly session cookie. |
+| `PANEL_HTTPS` | No | Set to `1` when serving over HTTPS so the session cookie is marked `Secure`. |
+| `SERVER_IP` | No | Public address for the connect URL. Set it to avoid an outbound lookup to api.ipify.org each poll. |
+| `BIND_HOST` | No | Interface to bind (default `0.0.0.0`). Deliberately not `HOSTNAME`, which shells and Docker both set. |
 
 ---
 
@@ -139,8 +142,49 @@ CS2 is still downloading game files. Check `docker compose logs -f cs2`. Once yo
 **RCON keeps failing to connect**
 Some CS2 builds drop auth silently. The panel retries with exponential backoff (cap 30s) — give it a moment. Double-check `RCON_PASSWORD` in `.env` matches what CS2 got at startup. Changing it requires a container recreate: `docker compose up -d --force-recreate cs2`.
 
+**Dashboard shows 0% CPU and 0 MB memory, Start/Stop do nothing**
+The panel could not reach the Docker socket proxy. On SELinux hosts (Fedora,
+RHEL, CentOS) the proxy is denied write access to `/var/run/docker.sock` and
+every request 503s — check with
+`docker logs sidearm-docker-proxy 2>&1 | tail`. Both compose files set
+`security_opt: [label:disable]` on the proxy to fix this; if you wrote your own,
+add it there.
+
 **Friends can't connect over the internet**
 Paste a valid GSLT into `.env`, then force-recreate the CS2 container: `docker compose up -d --force-recreate cs2` (it's a launch arg, not a hot cvar). Make sure UDP 27015 and 27020 are open on your firewall/router.
+
+---
+
+## Tests
+
+```bash
+npm test              # unit: log parser, status parser, RCON queue, sanitisers
+npm run test:integration   # boots the panel against a stub RCON server
+npm run test:all
+```
+
+The integration suite needs no CS2 and no Docker: it starts a stub Source RCON
+server, boots the panel with `API_MODE=real` against it, and drives real log
+POSTs through to WebSocket frames and SQLite. Set `PANEL_DEBUG=1` to see the
+child process output.
+
+### Full stack, without the 40 GB download
+
+`docker-compose.dev.yml` builds the panel **from local source** (never from
+ghcr.io) and swaps CS2 for a stub that speaks RCON and emits synthetic gameplay
+logs:
+
+```bash
+docker compose -f docker-compose.dev.yml up --build -d
+```
+
+Then open <http://localhost:3001>. This exercises the real production image
+(including the `better-sqlite3` native build on Alpine), the Docker socket proxy,
+container start/stop/restart, and the full RCON + log-ingest + WebSocket path.
+
+```bash
+docker compose -f docker-compose.dev.yml down -v
+```
 
 ---
 
@@ -148,8 +192,9 @@ Paste a valid GSLT into `.env`, then force-recreate the CS2 container: `docker c
 
 - **Knife rounds** are faked with cvars which is brittle for real competitive flow. Match plugins (Get5 / MatchZy) are out of scope for now — flagged in the match page.
 - **GSLT rotation** requires a full container recreate, not just restart.
-- **Config write-back** (Phase F) is not yet implemented — cvars are applied via RCON exec but not persisted to disk.
-- **API auth** on `/api/*` (Phase G) is not yet implemented — don't expose port 3000 to the public internet until that ships.
+- **Config write-back** (Phase F) is not yet implemented — cvars are applied via RCON exec but not persisted to disk. Tickrate and max players are launch arguments and cannot be hot-applied.
+- **`uptimeSec`, `fps` and `tickrate`** in the dashboard are still placeholders.
+- **Log line format** is parsed permissively (with or without the Source `L ` prefix, with or without milliseconds), but has not yet been confirmed against a live CS2 server.
 
 ---
 

@@ -8,7 +8,9 @@
 # ---- deps ---------------------------------------------------------------
 FROM node:24-alpine AS deps
 WORKDIR /app
-RUN apk add --no-cache libc6-compat
+# better-sqlite3 publishes no musl prebuild, so it is compiled from source here
+# — that needs a toolchain. Without these, `npm ci` fails on alpine.
+RUN apk add --no-cache libc6-compat python3 make g++
 COPY package.json package-lock.json ./
 RUN npm ci --no-audit --no-fund
 
@@ -26,7 +28,7 @@ WORKDIR /app
 ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
-    HOSTNAME=0.0.0.0
+    BIND_HOST=0.0.0.0
 
 # Drop root for the running process.
 RUN addgroup --system --gid 1001 nodejs \

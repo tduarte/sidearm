@@ -1,0 +1,89 @@
+# sidearm — local development stack.
+#
+# Same shape as docker-compose.yml, with two differences:
+#   * `panel` is BUILT FROM LOCAL SOURCE, never pulled from ghcr.io, so this
+#     actually tests the code in your working tree.
+#   * `cs2` is a stub that speaks RCON and emits synthetic gameplay logs, so
+#     there is no ~40 GB game-file download.
+#
+# What this does exercise for real: the production panel image (including the
+# better-sqlite3 native build on Alpine), the Docker socket proxy path, real
+# container networking, and the full RCON + log-ingest + WebSocket round trip.
+#
+#   docker compose -f docker-compose.dev.yml up --build -d
+#   open http://localhost:3001
+#   docker compose -f docker-compose.dev.yml down -v
+#
+# Runs under its own project name so it cannot collide with the real stack.
+name: sidearm-dev
+
+services:
+  cs2:
+    build:
+      context: ./test/docker/stub-cs2
+    # The panel's container allowlist is hardcoded to ["cs2"], so the name has
+    # to match for start/stop/stats to be permitted.
+    container_name: cs2
+    restart: unless-stopped
+    environment:
+      CS2_RCONPW: ${RCON_PASSWORD:-dev-rcon-password}
+      CS2_SERVERNAME: sidearm (stub cs2)
+      CS2_STARTMAP: de_mirage
+    networks: [panel-net]
+
+  panel:
+    build:
+      context: .
+    container_name: sidearm-panel-dev
+    restart: unless-stopped
+    depends_on:
+      - cs2
+      - docker-proxy
+    environment:
+      API_MODE: real
+      BIND_HOST: 0.0.0.0
+      PORT: "3000"
+      RCON_HOST: cs2
+      RCON_PORT: "27015"
+      RCON_PASSWORD: ${RCON_PASSWORD:-dev-rcon-password}
+      CS2_CONTAINER: cs2
+      DOCKER_HOST_ADDR: docker-proxy
+      DOCKER_PORT: "2375"
+      LOG_INGEST_SECRET: ${LOG_INGEST_SECRET:-dev-ingest-secret}
+      PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
+      PANEL_URL: http://panel:3000
+      # Skip the outbound api.ipify.org lookup on every status poll.
+      SERVER_IP: 127.0.0.1
+      SQLITE_PATH: /data/sidearm.db
+    volumes:
+      - panel-dev-data:/data
+    # 3001 so it cannot clash with `npm run dev` on 3000.
+    ports:
+      - "3001:3000"
+    networks: [panel-net]
+
+  docker-proxy:
+    image: tecnativa/docker-socket-proxy:latest
+    container_name: sidearm-docker-proxy-dev
+    restart: unless-stopped
+    environment:
+      CONTAINERS: "1"
+      POST: "1"
+    # SELinux (Fedora/RHEL/CentOS, enforcing by default) denies a confined
+    # container write access to the Docker socket, so haproxy cannot reach its
+    # backend and every request 503s — the panel then shows no CPU/memory and
+    # cannot start/stop the container. Disabling the label for THIS container
+    # only is the standard fix; the proxy still enforces its own endpoint
+    # allowlist below. No-op on non-SELinux hosts.
+    security_opt:
+      - label:disable
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [panel-net]
+
+volumes:
+  panel-dev-data:
+
+networks:
+  panel-net:
+    driver: bridge

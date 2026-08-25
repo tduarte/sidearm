@@ -7,6 +7,7 @@ import type {
   Player,
   ServerConfig,
   ServerStatus,
+  WsEvent,
 } from "../types";
 import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
@@ -16,11 +17,19 @@ import { OFFICIAL_MAPS } from "@/lib/api/mock";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
 import { getMatches, getMatchDetail } from "@/lib/db/matches";
 import { getWorkshopMaps, upsertWorkshopMap } from "@/lib/db/maps";
+import {
+  assertCommandAllowed,
+  assertValidMapName,
+  assertWorkshopId,
+  quoteArg,
+  REDACTED,
+  safeInt,
+  safeToken,
+} from "@/lib/cs2/sanitize";
 
 // Use Node.js global so the poll loop in server.ts and the Next.js API route
 // handlers share the same state regardless of how modules are bundled.
 declare global {
-  // eslint-disable-next-line no-var
   var __cs2Cache: {
     status: ServerStatus | null;
     players: Player[];
@@ -48,9 +57,62 @@ global.__cs2Cache ??= {
 
 const cache = () => global.__cs2Cache;
 
-export function updateCache(status: ServerStatus, players: Player[]) {
+/** Does this string look like a real Steam identity rather than a name fallback? */
+function looksLikeSteamId(s: string): boolean {
+  return /^\[U:\d/i.test(s) || /^STEAM_/i.test(s) || /^765611\d{11}$/.test(s);
+}
+
+/**
+ * Merges a freshly polled roster onto the cached one.
+ *
+ * `status` is authoritative for *who is connected* plus ping, but it carries no
+ * team column and no kill counters — those are accumulated from the log stream.
+ * Replacing the array wholesale (the previous behaviour) reset every player's
+ * k/d/a to 0, their team to SPEC, and their `connectedAt` to "now" on every 2s
+ * tick, so stats could never survive long enough to be seen.
+ *
+ * Players are matched on SteamID, falling back to name for `status` layouts that
+ * don't expose a uniqueid column.
+ */
+export function mergeRoster(prev: Player[], incoming: Player[]): Player[] {
+  const byId = new Map<string, Player>();
+  for (const p of prev) {
+    byId.set(p.steamId, p);
+    byId.set(`name:${p.name}`, p);
+  }
+
+  return incoming.map((next) => {
+    const existing = byId.get(next.steamId) ?? byId.get(`name:${next.name}`);
+    if (!existing) return next;
+
+    // Keep whichever side actually has a real SteamID.
+    const steamId = looksLikeSteamId(next.steamId)
+      ? next.steamId
+      : looksLikeSteamId(existing.steamId)
+        ? existing.steamId
+        : next.steamId;
+
+    return {
+      ...existing,
+      steamId,
+      userId: next.userId ?? existing.userId,
+      name: next.name || existing.name,
+      ping: next.ping,
+      // Accumulated from the log stream — must survive the poll.
+      k: existing.k,
+      d: existing.d,
+      a: existing.a,
+      team: existing.team,
+      connectedAt: existing.connectedAt,
+    };
+  });
+}
+
+export function updateCache(status: ServerStatus, players: Player[] | null) {
   cache().status = status;
-  cache().players = players;
+  // A null roster means RCON did not answer this tick — keep the last known
+  // roster rather than blanking the players page and losing accumulated stats.
+  if (players !== null) cache().players = mergeRoster(cache().players, players);
 }
 
 export function updateMatchState(match: Partial<MatchState>) {
@@ -68,19 +130,84 @@ export function appendChat(msg: ChatMessage) {
   try { insertChatMessage(msg); } catch { /* non-critical */ }
 }
 
-export function updatePlayerKill(attackerSteamId: string, victimSteamId: string) {
+/** Locates a cached player by SteamID, falling back to name. */
+function findPlayer(id: string): Player | undefined {
   const players = cache().players;
-  let changed = false;
-  for (const p of players) {
-    if (p.steamId === attackerSteamId) { p.k += 1; changed = true; }
-    if (p.steamId === victimSteamId) { p.d += 1; changed = true; }
-  }
-  if (changed) {
-    for (const p of players) {
-      if (p.steamId === attackerSteamId || p.steamId === victimSteamId) {
-        bus.emit({ type: "player.update", player: { ...p } });
+  return (
+    players.find((p) => p.steamId === id) ?? players.find((p) => p.name === id)
+  );
+}
+
+function emitPlayerUpdate(p: Player) {
+  bus.emit({ type: "player.update", player: { ...p } });
+}
+
+/**
+ * Applies one parsed log event to the cache and forwards it to the bus.
+ *
+ * Stat events (`player.kill` / `.assist` / `.team`) mutate the cached roster and
+ * re-emit as `player.update`, because the client keeps a whole `Player` row per
+ * SteamID and has no way to apply a bare delta.
+ */
+export function ingestEvent(event: WsEvent): void {
+  switch (event.type) {
+    case "player.kill": {
+      const attacker = findPlayer(event.attackerSteamId);
+      const victim = findPlayer(event.victimSteamId);
+      if (attacker && attacker !== victim) {
+        attacker.k += 1;
+        emitPlayerUpdate(attacker);
       }
+      if (victim) {
+        victim.d += 1;
+        emitPlayerUpdate(victim);
+      }
+      return;
     }
+    case "player.assist": {
+      const p = findPlayer(event.steamId);
+      if (p) {
+        p.a += 1;
+        emitPlayerUpdate(p);
+      }
+      return;
+    }
+    case "player.team": {
+      const p = findPlayer(event.steamId);
+      if (p && p.team !== event.team) {
+        p.team = event.team;
+        emitPlayerUpdate(p);
+      }
+      return;
+    }
+    case "player.join": {
+      if (!findPlayer(event.player.steamId)) cache().players.push(event.player);
+      bus.emit(event);
+      return;
+    }
+    case "player.leave": {
+      cache().players = cache().players.filter(
+        (p) => p.steamId !== event.steamId && p.name !== event.steamId,
+      );
+      bus.emit(event);
+      return;
+    }
+    case "match.phase": {
+      cache().match = { ...cache().match, phase: event.phase };
+      bus.emit(event);
+      return;
+    }
+    case "match.score": {
+      cache().match = {
+        ...cache().match,
+        score: event.score,
+        round: event.round,
+      };
+      bus.emit(event);
+      return;
+    }
+    default:
+      bus.emit(event);
   }
 }
 
@@ -133,10 +260,12 @@ export const realAdapter = {
         tags: [],
         region: "local",
       },
+      // Secrets are write-only. `GET /api/config` previously returned the live
+      // RCON password and GSLT in plain JSON to any browser that asked.
       access: {
-        serverPassword: process.env.SERVER_PASSWORD ?? "",
-        rconPassword: process.env.RCON_PASSWORD ?? "",
-        gsltToken: process.env.GSLT ?? "",
+        serverPassword: REDACTED,
+        rconPassword: REDACTED,
+        gsltToken: REDACTED,
       },
       gameplay: {
         mode: cache().status?.gameMode ?? "competitive",
@@ -164,20 +293,32 @@ export const realAdapter = {
       custom:      [3, 0],
     };
     const [gt, gm] = gameModeMap[cfg.gameplay.mode] ?? [0, 1];
+
     const cvars = [
-      `hostname "${cfg.identity.hostname}"`,
-      cfg.access.serverPassword
-        ? `sv_password "${cfg.access.serverPassword}"`
-        : `sv_password ""`,
-      `mp_maxrounds ${cfg.gameplay.maxPlayers}`,
+      `hostname "${quoteArg(cfg.identity.hostname)}"`,
+      `sv_password "${quoteArg(cfg.access.serverPassword ?? "")}"`,
       `game_type ${gt}`,
       `game_mode ${gm}`,
+      // Was `mp_maxrounds ${maxPlayers}` — max *players* written to max
+      // *rounds*, so changing the slot count silently rewrote match length.
+      `sv_visiblemaxplayers ${safeInt(cfg.gameplay.maxPlayers, 1, 64, 10)}`,
+      `bot_quota ${cfg.gameplay.botsEnabled ? safeInt(cfg.gameplay.botQuota, 0, 64, 0) : 0}`,
+      `bot_difficulty ${safeInt(cfg.gameplay.botDifficulty, 0, 3, 1)}`,
     ];
+
     for (const cvar of cvars) await rconExec(cvar);
+
     const ev = makeConsoleEvent("info", "admin", "Config applied via RCON");
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
-    return cfg;
+
+    // Fields that cannot be hot-applied are reported back rather than silently
+    // dropped: tickrate and maxplayers are launch arguments, and rotating the
+    // GSLT or RCON password needs the container recreated.
+    return {
+      ...cfg,
+      access: { serverPassword: REDACTED, rconPassword: REDACTED, gsltToken: REDACTED },
+    };
   },
 
   async getPlayers(): Promise<Player[]> {
@@ -185,7 +326,12 @@ export const realAdapter = {
   },
 
   async kick(steamId: string, reason?: string): Promise<void> {
-    const cmd = reason ? `kickid ${steamId} "${reason}"` : `kickid ${steamId}`;
+    // `kickid` takes the RCON userid, not a SteamID. The UI keys players by
+    // SteamID, so resolve through the roster to get the slot id.
+    const target = safeToken(findPlayer(steamId)?.userId ?? steamId, 32);
+    const cmd = reason
+      ? `kickid ${target} "${quoteArg(reason, 120)}"`
+      : `kickid ${target}`;
     await rconExec(cmd);
     cache().players = cache().players.filter((p) => p.steamId !== steamId);
     bus.emit({ type: "player.leave", steamId });
@@ -203,10 +349,11 @@ export const realAdapter = {
   },
 
   async changeMap(name: string): Promise<void> {
-    await rconExec(`changelevel ${name}`);
+    const map = assertValidMapName(name);
+    await rconExec(`changelevel ${map}`);
     const s = cache().status;
     if (s) {
-      const updated = { ...s, map: name };
+      const updated = { ...s, map };
       cache().status = updated;
       bus.emit({ type: "status.update", status: updated });
     }
@@ -214,8 +361,9 @@ export const realAdapter = {
   },
 
   async subscribeWorkshop(workshopId: string, displayName?: string): Promise<MapEntry> {
+    workshopId = assertWorkshopId(workshopId);
     const entry: MapEntry = {
-      name: `workshop/${workshopId}/${displayName ?? "map"}`,
+      name: `workshop/${workshopId}/${safeToken(displayName ?? "map", 64) || "map"}`,
       displayName: displayName ?? `Workshop ${workshopId}`,
       type: "workshop",
       workshopId,
@@ -267,7 +415,7 @@ export const realAdapter = {
     if (cache().match.demoRecording) {
       await rconExec("stop");
     } else {
-      await rconExec(`record demo_${Date.now()}`);
+      await rconExec(`record ${safeToken(`demo_${Date.now()}`)}`);
     }
     cache().match = { ...cache().match, demoRecording: !cache().match.demoRecording };
     return { ...cache().match };
@@ -278,8 +426,9 @@ export const realAdapter = {
   },
 
   async rcon(command: string): Promise<string> {
-    const out = await rconExec(command);
-    const ev = makeConsoleEvent("info", "rcon", `> ${command}\n${out}`);
+    const safe = assertCommandAllowed(command);
+    const out = await rconExec(safe);
+    const ev = makeConsoleEvent("info", "rcon", `> ${safe}\n${out}`);
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
     return out;
@@ -292,7 +441,11 @@ export const realAdapter = {
 
   async getHistory(): Promise<MatchHistoryDetail[]> {
     try {
-      return getMatches().map((m) => ({ ...m, players: [] }));
+      // Hydrate each entry with its per-player scoreboard; returning an empty
+      // `players` array left the match detail view permanently blank.
+      return getMatches().map(
+        (m) => getMatchDetail(m.id) ?? { ...m, players: [] },
+      );
     } catch { return []; }
   },
 };
