@@ -49,7 +49,7 @@ function makePlayer(i: number): Player {
   };
 }
 
-export const state = {
+const initialMockState = {
   status: {
     state: "running",
     hostname: "sidearm | 5v5 comp",
@@ -144,6 +144,22 @@ export const state = {
     },
   ] as MatchHistoryDetail[],
 };
+
+/**
+ * Pinned to `globalThis` for the same reason as `lib/ws/bus.ts` and
+ * `__cs2Cache`: `server.ts` runs under tsx while `app/api/**` is bundled by
+ * Turbopack, so a plain module-level singleton exists once per registry.
+ *
+ * Without this, a mutation made by a route handler is invisible to the WS
+ * emitter that broadcasts state to the browser — the REST response and the live
+ * stream disagree, which is exactly what the update simulation exposed.
+ */
+declare global {
+  var __sidearmMockState: typeof initialMockState | undefined;
+}
+
+export const state: typeof initialMockState = (globalThis.__sidearmMockState ??=
+  initialMockState);
 
 export function addConsole(
   level: ConsoleEvent["level"],

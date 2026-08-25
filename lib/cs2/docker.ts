@@ -136,9 +136,25 @@ export function demuxDockerStream(buf: Buffer): string {
   return parts.length > 0 ? parts.join("") : buf.toString("utf8");
 }
 
-export async function containerLogs(name: string, tail = 100): Promise<string> {
+/**
+ * Tail of a container's logs, demultiplexed to plain text.
+ *
+ * `sinceUnix` scopes the read to the current boot. Without it, lines from a
+ * previous run stay in the tail and a caller scraping steamcmd progress would
+ * report a finished download as if it were still running.
+ */
+export async function containerLogs(
+  name: string,
+  tail = 100,
+  sinceUnix?: number,
+): Promise<string> {
   assertAllowed(name);
   const c = docker.getContainer(name);
-  const buf = await c.logs({ stdout: true, stderr: true, tail });
+  const buf = await c.logs({
+    stdout: true,
+    stderr: true,
+    tail,
+    ...(sinceUnix !== undefined ? { since: sinceUnix } : {}),
+  });
   return demuxDockerStream(buf as unknown as Buffer);
 }

@@ -69,12 +69,20 @@ services:
       # Public address for the connect URL. Set it to skip an outbound
       # api.ipify.org lookup.
       SERVER_IP: ${SERVER_IP:-}
+      # Set to 1 to let the panel restart `cs2` by itself when a game update is
+      # pending AND nobody is connected. Unset = surface the badge only.
+      CS2_AUTO_UPDATE: ${CS2_AUTO_UPDATE:-}
+      # How often to ask Steam whether the running build is current. 0 disables.
+      CS2_UPDATE_CHECK_MS: ${CS2_UPDATE_CHECK_MS:-900000}
       SQLITE_PATH: /data/sidearm.db
     volumes:
       - panel-data:/data
     ports:
       - "3000:3000"
     networks: [panel-net]
+    labels:
+      # Picked up only when the `autoupdate` profile is running.
+      com.centurylinklabs.watchtower.enable: "true"
 
   docker-proxy:
     image: tecnativa/docker-socket-proxy:latest
@@ -94,6 +102,33 @@ services:
       - label:disable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks: [panel-net]
+
+  # Container *image* updates — a different thing from CS2 game updates, which
+  # the panel handles itself (see CS2_AUTO_UPDATE above). Watchtower only
+  # refreshes the images in this file; it does not patch Counter-Strike.
+  #
+  # Opt in explicitly, because unlike `panel` this needs the raw socket
+  # read-write plus image-pull rights, which is root-equivalent on the host:
+  #
+  #   docker compose --profile autoupdate up -d
+  #
+  # containrrr/watchtower was archived in December 2025; this is the maintained
+  # community fork. Only services carrying the label below are touched — `cs2`
+  # is left out on purpose so a wrapper-image bump cannot recreate the container
+  # mid-match.
+  watchtower:
+    image: nickfedor/watchtower:latest
+    container_name: sidearm-watchtower
+    restart: unless-stopped
+    profiles: ["autoupdate"]
+    environment:
+      WATCHTOWER_CLEANUP: "true"
+      WATCHTOWER_LABEL_ENABLE: "true"
+      # 6-field cron (seconds first): 04:00 daily.
+      WATCHTOWER_SCHEDULE: "0 0 4 * * *"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
     networks: [panel-net]
 
 volumes:

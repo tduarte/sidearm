@@ -2,6 +2,8 @@ export type ServerState =
   | "running"
   | "stopped"
   | "starting"
+  /** Container is up but steamcmd is still pulling game files; srcds is not listening. */
+  | "updating"
   | "stopping"
   | "crashed";
 
@@ -42,6 +44,8 @@ export interface ServerStatus {
   connectUrl: string;
   ip: string;
   port: number;
+  /** Present only while `state` is `updating`. */
+  updateProgress?: UpdateProgress | null;
 }
 
 export interface ServerConfig {
@@ -148,6 +152,36 @@ export interface MatchHistoryDetail extends MatchHistoryEntry {
   }>;
 }
 
+/** steamcmd download progress while the container is fetching game files. */
+export interface UpdateProgress {
+  phase: string;
+  pct: number;
+  bytesDone: number;
+  bytesTotal: number;
+}
+
+/**
+ * CS2 update state, derived from the build the running server reports versus the
+ * build Steam currently requires.
+ */
+export interface UpdateStatus {
+  /** Build the running server reports; null when it could not be determined. */
+  installedVersion: number | null;
+  /** Build Steam currently requires; null when the check has not succeeded. */
+  requiredVersion: number | null;
+  /**
+   * `null` means *unknown*, not "up to date" — either the check has never run,
+   * or the server's build could not be parsed. Auto-restart never fires on null.
+   */
+  upToDate: boolean | null;
+  /** ISO timestamp of the last completed check, or null if it never ran. */
+  checkedAt: string | null;
+  /** Whether the panel is configured to restart the container on its own. */
+  autoRestart: boolean;
+  /** Note from Steam, or the reason the check could not produce an answer. */
+  message: string;
+}
+
 export type WsEvent =
   | { type: "status.update"; status: ServerStatus }
   | { type: "player.join"; player: Player }
@@ -159,4 +193,5 @@ export type WsEvent =
   | { type: "console.line"; event: ConsoleEvent }
   | { type: "chat.message"; message: ChatMessage }
   | { type: "match.phase"; phase: MatchPhase }
-  | { type: "match.score"; score: { ct: number; t: number }; round: number };
+  | { type: "match.score"; score: { ct: number; t: number }; round: number }
+  | { type: "server.update"; update: UpdateStatus };

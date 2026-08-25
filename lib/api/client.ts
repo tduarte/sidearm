@@ -7,6 +7,7 @@ import type {
   Player,
   ServerConfig,
   ServerStatus,
+  UpdateStatus,
 } from "./types";
 
 /**
@@ -137,4 +138,13 @@ export const api = {
   getChat: () => request<ChatMessage[]>("/api/chat"),
 
   getHistory: () => request<MatchHistoryDetail[]>("/api/history"),
+
+  getUpdateStatus: () => request<UpdateStatus>("/api/updates"),
+
+  checkForUpdate: () =>
+    request<UpdateStatus>("/api/updates/check", { method: "POST" }),
+
+  applyUpdate: async () => {
+    await request<{ ok: true }>("/api/updates/apply", { method: "POST" });
+  },
 };

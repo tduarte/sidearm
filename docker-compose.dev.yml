@@ -29,6 +29,8 @@ services:
       CS2_RCONPW: ${RCON_PASSWORD:-dev-rcon-password}
       CS2_SERVERNAME: sidearm (stub cs2)
       CS2_STARTMAP: de_mirage
+      # Deliberately an old build, so the update check reports one as pending.
+      STUB_VERSION: ${STUB_VERSION:-14000}
     networks: [panel-net]
 
   panel:
@@ -55,6 +57,9 @@ services:
       # Skip the outbound api.ipify.org lookup on every status poll.
       SERVER_IP: 127.0.0.1
       SQLITE_PATH: /data/sidearm.db
+      # Surface the update badge but never restart the stub out from under us.
+      CS2_AUTO_UPDATE: ""
+      CS2_UPDATE_CHECK_MS: "900000"
     volumes:
       - panel-dev-data:/data
     # 3001 so it cannot clash with `npm run dev` on 3000.
