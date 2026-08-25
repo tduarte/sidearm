@@ -71,7 +71,14 @@ export interface ServerConfig {
 }
 
 export interface Player {
+  /** Stable identity. Real SteamID (e.g. `[U:1:12345]`) whenever one is known. */
   steamId: string;
+  /**
+   * Per-connection RCON slot id from `status`. Required by `kickid` and friends,
+   * which do NOT accept a SteamID. Not stable across reconnects — never use it
+   * as an identity key.
+   */
+  userId?: string;
   name: string;
   team: Team;
   k: number;
@@ -115,6 +122,8 @@ export interface ChatMessage {
   name: string;
   team: Team;
   message: string;
+  /** `say_team` (team-only) rather than `say` (all-chat). */
+  teamOnly?: boolean;
 }
 
 export interface MatchHistoryEntry {
@@ -145,6 +154,8 @@ export type WsEvent =
   | { type: "player.leave"; steamId: string }
   | { type: "player.update"; player: Player }
   | { type: "player.kill"; attackerSteamId: string; victimSteamId: string }
+  | { type: "player.assist"; steamId: string }
+  | { type: "player.team"; steamId: string; team: Team }
   | { type: "console.line"; event: ConsoleEvent }
   | { type: "chat.message"; message: ChatMessage }
   | { type: "match.phase"; phase: MatchPhase }

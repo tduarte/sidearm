@@ -17,15 +17,25 @@ import type {
  * are already the source of truth.
  */
 
+/** Thrown when the panel requires an admin token and we do not have one. */
+export class UnauthorizedError extends Error {
+  constructor() {
+    super("unauthorized");
+    this.name = "UnauthorizedError";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, {
     ...init,
     cache: "no-store",
+    credentials: "same-origin",
     headers: {
       "content-type": "application/json",
       ...(init?.headers ?? {}),
     },
   });
+  if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
     let detail = "";
     try {
@@ -43,12 +53,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-const json = <T>(body: unknown): RequestInit => ({
+const json = (body: unknown): RequestInit => ({
   method: "POST",
   body: JSON.stringify(body),
 });
 
 export const api = {
+  /** Whether the panel is configured to require an admin token. */
+  authStatus: () => request<{ authRequired: boolean }>("/api/auth"),
+
+  /** Exchanges the admin token for a session cookie. */
+  login: (token: string) => request<{ ok: true }>("/api/auth", json({ token })),
+
   getStatus: () => request<ServerStatus>("/api/status"),
 
   setServerState: (next: "running" | "stopped") =>

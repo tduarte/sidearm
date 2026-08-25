@@ -29,7 +29,8 @@ services:
       - cs2-data:/home/steam/cs2-dedicated
     ports:
       - "27015:27015/udp"
-      - "27015:27015/tcp"
+      # RCON (27015/tcp) is deliberately NOT published: it lives only on the
+      # internal compose network between the panel and CS2.
       - "27020:27020/udp"
     networks: [panel-net]
     healthcheck:
@@ -39,7 +40,10 @@ services:
       retries: 6
 
   panel:
+    # Pre-built image by default; `docker compose up --build` uses local source.
     image: ghcr.io/tduarte/sidearm:latest
+    build:
+      context: .
     container_name: sidearm-panel
     restart: unless-stopped
     depends_on:
@@ -47,14 +51,17 @@ services:
       - docker-proxy
     environment:
       API_MODE: real
-      HOSTNAME: 0.0.0.0
+      BIND_HOST: 0.0.0.0
       PORT: "3000"
       RCON_HOST: cs2
       RCON_PORT: "27015"
       RCON_PASSWORD: ${RCON_PASSWORD}
       CS2_CONTAINER: cs2
-      DOCKER_HOST: tcp://docker-proxy:2375
+      DOCKER_HOST_ADDR: docker-proxy
+      DOCKER_PORT: "2375"
       LOG_INGEST_SECRET: ${LOG_INGEST_SECRET}
+      SERVER_PASSWORD: ${SERVER_PASSWORD:-}
+      GSLT: ${GSLT:-}
       PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
       SQLITE_PATH: /data/sidearm.db
     volumes:
@@ -75,6 +82,14 @@ services:
       CONTAINERS: "1"
       POST: "1"
       # Leave everything else at default (0) to minimise attack surface.
+    # SELinux (Fedora/RHEL/CentOS, enforcing by default) denies a confined
+    # container write access to the Docker socket, so haproxy cannot reach its
+    # backend and every request 503s — the panel then shows no CPU/memory and
+    # cannot start/stop the container. Disabling the label for THIS container
+    # only is the standard fix; the proxy still enforces its own endpoint
+    # allowlist below. No-op on non-SELinux hosts.
+    security_opt:
+      - label:disable
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     networks: [panel-net]

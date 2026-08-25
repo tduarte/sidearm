@@ -39,7 +39,9 @@ const schema = z.object({
   }),
   access: z.object({
     serverPassword: z.string(),
-    rconPassword: z.string().min(6, "RCON password must be at least 6 chars"),
+    // Loaded blank: the server never sends secrets back. Rotating these needs a
+    // container recreate, so the form does not attempt to apply them.
+    rconPassword: z.string(),
     gsltToken: z.string(),
   }),
   gameplay: z.object({
@@ -236,8 +238,13 @@ function ConfigForm({ initial }: { initial: FormValues }) {
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>RCON password</FormLabel>
-                      <FormControl><Input type="password" {...field} /></FormControl>
-                      <FormDescription>Required for remote admin commands.</FormDescription>
+                      <FormControl>
+                        <Input type="password" placeholder="•••••••• (set in .env)" disabled {...field} />
+                      </FormControl>
+                      <FormDescription>
+                        Set via <code>RCON_PASSWORD</code> in <code>.env</code>. Changing it needs{" "}
+                        <code>docker compose up -d --force-recreate cs2</code>.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
@@ -248,8 +255,13 @@ function ConfigForm({ initial }: { initial: FormValues }) {
                   render={({ field }) => (
                     <FormItem className="md:col-span-2">
                       <FormLabel>GSLT token</FormLabel>
-                      <FormControl><Input placeholder="optional" {...field} /></FormControl>
-                      <FormDescription>Game Server Login Token from Steam.</FormDescription>
+                      <FormControl>
+                        <Input placeholder="(set in .env)" disabled {...field} />
+                      </FormControl>
+                      <FormDescription>
+                        Set via <code>GSLT</code> in <code>.env</code>. It is a launch argument, so
+                        changing it needs <code>docker compose up -d --force-recreate cs2</code>.
+                      </FormDescription>
                       <FormMessage />
                     </FormItem>
                   )}
