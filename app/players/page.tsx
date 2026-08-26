@@ -221,8 +221,20 @@ export default function PlayersPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Kick {kickTarget?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              They will be removed from the current match immediately.
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  They are removed from the match immediately and can rejoin
+                  straight away — a kick is not a ban.
+                </p>
+                {kickTarget && (
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {kickTarget.team} · {kickTarget.k}/{kickTarget.d}/
+                    {kickTarget.a} · {kickTarget.ping}ms ·{" "}
+                    {kickTarget.steamId}
+                  </p>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

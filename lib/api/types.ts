@@ -87,6 +87,11 @@ export interface ServerStatus {
    * this the UI shows a healthy server and buttons that quietly do nothing.
    */
   control: { docker: boolean; rcon: boolean };
+  /**
+   * What the panel is still waiting to see take effect, if anything. Cleared
+   * by the status poll observing the result, never by the request returning.
+   */
+  pendingOp?: PendingOp | null;
   /** Present only while `state` is `updating`. */
   updateProgress?: UpdateProgress | null;
 }
@@ -193,6 +198,26 @@ export interface MatchHistoryDetail extends MatchHistoryEntry {
     d: number;
     a: number;
   }>;
+}
+
+/**
+ * An operation the panel asked for whose effect has not been observed yet.
+ *
+ * These all outlive their HTTP request by a wide margin: a workshop map
+ * downloads before it loads (about a minute on a first fetch), a container
+ * restart takes 30-90s, applying a CS2 update pulls tens of GB. Reporting
+ * success when the request returned 200 told the admin the work was finished
+ * while it had barely started, so the panel now holds the request open until
+ * live status confirms it.
+ */
+export type PendingOpKind = "map" | "restart" | "start" | "stop" | "update";
+
+export interface PendingOp {
+  kind: PendingOpKind;
+  /** The map that was asked for, when `kind` is `map`. */
+  target?: string;
+  /** ISO timestamp of when the panel issued the command. */
+  since: string;
 }
 
 /** steamcmd download progress while the container is fetching game files. */

@@ -30,7 +30,12 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { LoadError } from "@/components/load-error";
+import { DangerConfirm } from "@/components/danger-confirm";
 import { api } from "@/lib/api/client";
+import {
+  formatElapsed,
+  usePendingOp,
+} from "@/lib/hooks/use-pending-op";
 import { getOfficialMapArtPath } from "@/lib/maps/official-art";
 import { isSameMap } from "@/lib/cs2/workshop";
 
@@ -49,11 +54,19 @@ export default function MapsPage() {
     queryFn: () => api.getMaps(),
   });
 
+  const { op: pendingOp, elapsedSec } = usePendingOp();
+  const mapPending = pendingOp?.kind === "map" ? pendingOp : null;
+
   const changeMap = useMutation({
     mutationFn: (name: string) => api.changeMap(name),
     meta: { action: "Map change" },
+    // Not "Changing map to X" as a success: at this point the server has only
+    // accepted the command. The tile carries the pending state until the poll
+    // reports the level has actually loaded.
     onSuccess: (_, name) => {
-      toast.success(`Changing map to ${name}`);
+      toast(`Asked the server to load ${name}`, {
+        description: "Workshop maps download first; this can take a minute.",
+      });
       qc.invalidateQueries({ queryKey: ["maps"] });
       qc.invalidateQueries({ queryKey: ["status"] });
       qc.invalidateQueries({ queryKey: ["match"] });
@@ -194,7 +207,9 @@ export default function MapsPage() {
                 imageSrc={getOfficialMapArtPath(m.name)}
                 badge={m.workshopId}
                 isCurrent={isSameMap(m.name, current)}
-                isBusy={changeMap.isPending}
+                isBusy={changeMap.isPending || !!mapPending}
+                isLoadingNow={!!mapPending && isSameMap(m.name, mapPending.target ?? "")}
+                elapsedSec={elapsedSec}
                 onPlay={() => changeMap.mutate(m.name)}
               />
             ))}
@@ -214,7 +229,9 @@ export default function MapsPage() {
               displayName={m.displayName}
               imageSrc={getOfficialMapArtPath(m.name)}
               isCurrent={isSameMap(m.name, current)}
-              isBusy={changeMap.isPending}
+              isBusy={changeMap.isPending || !!mapPending}
+              isLoadingNow={!!mapPending && isSameMap(m.name, mapPending.target ?? "")}
+              elapsedSec={elapsedSec}
               onPlay={() => changeMap.mutate(m.name)}
             />
           ))}
@@ -231,6 +248,8 @@ function MapTile({
   badge,
   isCurrent,
   isBusy,
+  isLoadingNow,
+  elapsedSec,
   onPlay,
 }: {
   name: string;
@@ -239,6 +258,9 @@ function MapTile({
   badge?: string;
   isCurrent: boolean;
   isBusy?: boolean;
+  /** This is the map the server was asked for and has not loaded yet. */
+  isLoadingNow?: boolean;
+  elapsedSec?: number;
   onPlay: () => void;
 }) {
   return (
@@ -246,6 +268,7 @@ function MapTile({
       className={cn(
         "relative w-full overflow-hidden pt-0 transition",
         isCurrent && "ring-2 ring-primary",
+        isLoadingNow && "ring-2 ring-amber-500/70",
       )}
     >
       <div className="relative aspect-video w-full overflow-hidden bg-muted">
@@ -264,9 +287,14 @@ function MapTile({
         )}
       </div>
       <CardHeader className="gap-2">
-        {(isCurrent || badge) && (
+        {(isCurrent || badge || isLoadingNow) && (
           <CardAction>
-            {isCurrent ? (
+            {isLoadingNow ? (
+              <Badge className="gap-1.5 border-amber-500/30 bg-amber-500/15 text-amber-400">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+                Loading
+              </Badge>
+            ) : isCurrent ? (
               <Badge>Live</Badge>
             ) : (
               <Badge variant="secondary">Workshop</Badge>
@@ -283,20 +311,38 @@ function MapTile({
           ) : null}
         </CardDescription>
       </CardHeader>
-      <CardFooter>
-        {isCurrent ? (
+      <CardFooter className="flex-col items-stretch gap-2">
+        {isLoadingNow ? (
+          <>
+            <Button className="w-full" variant="secondary" disabled>
+              Loading · {formatElapsed(elapsedSec ?? 0)}
+            </Button>
+            <p className="text-center text-[0.65rem] leading-snug text-muted-foreground">
+              Workshop maps download before they load. The tile clears when the
+              server reports the new map.
+            </p>
+          </>
+        ) : isCurrent ? (
           <Button className="w-full" variant="secondary" disabled>
             Current map
           </Button>
         ) : (
-          <Button
-            className="w-full"
-            onClick={onPlay}
-            disabled={isBusy}
+          <DangerConfirm
+            title={`Change the map to ${displayName}?`}
+            consequence="Everyone connected is pulled into the new map, ending the current round. A workshop map downloads first, which can take about a minute."
+            operation={
+              badge ? `host_workshop_map ${badge}` : `changelevel ${name}`
+            }
+            confirmLabel="Change map"
+            onConfirm={onPlay}
           >
-            Play
-            <ArrowRight className="h-4 w-4" />
-          </Button>
+            {(arm) => (
+              <Button className="w-full" onClick={arm} disabled={isBusy}>
+                Play
+                <ArrowRight className="h-4 w-4" />
+              </Button>
+            )}
+          </DangerConfirm>
         )}
       </CardFooter>
     </Card>
