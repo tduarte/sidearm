@@ -11,6 +11,7 @@ import type {
 } from "../types";
 import { addConsole, state } from "../mock";
 import { bus } from "@/lib/ws/bus";
+import { workshopIdFromMapName, workshopMapPath } from "@/lib/cs2/workshop";
 
 /**
  * Mock backend adapter. Mirrors the shape of `lib/api/client.ts` but runs
@@ -104,7 +105,12 @@ export const mockAdapter = {
     state.match.phase = "warmup";
     state.match.score = { ct: 0, t: 0 };
     state.match.round = 0;
-    const ev = addConsole("info", "admin", `changelevel ${name}`);
+    const workshopId = workshopIdFromMapName(name);
+    const ev = addConsole(
+      "info",
+      "admin",
+      workshopId ? `host_workshop_map ${workshopId}` : `changelevel ${name}`,
+    );
     bus.emit({ type: "console.line", event: ev });
     bus.emit({ type: "status.update", status: { ...state.status } });
     bus.emit({ type: "match.phase", phase: state.match.phase });
@@ -115,13 +121,19 @@ export const mockAdapter = {
     displayName?: string,
   ): Promise<MapEntry> {
     const entry: MapEntry = {
-      name: `workshop/${workshopId}/${displayName ?? "map"}`,
+      // The real filename is only knowable once the server has downloaded the
+      // map, so the id alone is the identifier. See lib/cs2/workshop.ts.
+      name: workshopMapPath(workshopId),
       displayName: displayName ?? `Workshop ${workshopId}`,
       type: "workshop",
       workshopId,
     };
     state.maps.push(entry);
-    const ev = addConsole("info", "workshop", `Subscribed to ${workshopId}`);
+    const ev = addConsole(
+      "info",
+      "workshop",
+      `Added workshop map ${workshopId}; it downloads on first play`,
+    );
     bus.emit({ type: "console.line", event: ev });
     return entry;
   },

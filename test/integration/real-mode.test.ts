@@ -317,6 +317,50 @@ describe("real mode over a stub CS2 server", () => {
     }
   });
 
+  it("hosts a workshop map by id instead of changelevel", async () => {
+    const id = "3070563536";
+    const added = await fetch(`${BASE}/api/maps/workshop`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ workshopId: id, displayName: "aim botz" }),
+    });
+    assert.equal(added.status, 200);
+    // Adding a map must not ask the server for anything — `host_workshop_map`
+    // hosts as well as downloads, and would boot everyone off the current map.
+    assert.ok(
+      !rcon.commands.some((c) => c.includes("workshop")),
+      `no RCON on subscribe; saw: ${rcon.commands.join(", ")}`,
+    );
+
+    const entry = (await added.json()) as { name: string };
+    // The filename is unknown until the server has fetched the map, so the id
+    // alone is the identifier — the old code guessed one from the display name.
+    assert.equal(entry.name, `workshop/${id}`);
+
+    const played = await fetch(`${BASE}/api/maps/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: entry.name }),
+    });
+    assert.equal(played.status, 200);
+    assert.ok(
+      rcon.commands.includes(`host_workshop_map ${id}`),
+      `expected host_workshop_map; saw: ${rcon.commands.join(", ")}`,
+    );
+    // `changelevel workshop/<id>` cannot download and would fail outright.
+    assert.ok(!rcon.commands.some((c) => c.startsWith("changelevel workshop/")));
+  });
+
+  it("changes to an official map with changelevel", async () => {
+    const res = await fetch(`${BASE}/api/maps/current`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "de_nuke" }),
+    });
+    assert.equal(res.status, 200);
+    assert.ok(rcon.commands.includes("changelevel de_nuke"));
+  });
+
   it("rejects log posts with a bad secret", async () => {
     const res = await fetch(`${BASE}/api/ingest/logs/wrong-secret`, {
       method: "POST",

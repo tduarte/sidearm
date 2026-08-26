@@ -28,6 +28,11 @@ import {
   safeInt,
   safeToken,
 } from "@/lib/cs2/sanitize";
+import {
+  shortMapName,
+  workshopIdFromMapName,
+  workshopMapPath,
+} from "@/lib/cs2/workshop";
 
 // Use Node.js global so the poll loop in server.ts and the Next.js API route
 // handlers share the same state regardless of how modules are bundled.
@@ -40,6 +45,8 @@ declare global {
     chat: ChatMessage[];
     workshopMaps: MapEntry[] | null;
     update: UpdateStatus | null;
+    /** Workshop map we asked the server to host, until its filename is known. */
+    pendingWorkshopMap: { id: string; fromMap: string; at: number } | null;
   };
 }
 global.__cs2Cache ??= {
@@ -57,6 +64,7 @@ global.__cs2Cache ??= {
   chat: [],
   workshopMaps: null,
   update: null,
+  pendingWorkshopMap: null,
 };
 
 const cache = () => global.__cs2Cache;
@@ -112,7 +120,78 @@ export function mergeRoster(prev: Player[], incoming: Player[]): Player[] {
   });
 }
 
+/** Lazily loads the persisted workshop library into the cache. */
+function workshopLibrary(): MapEntry[] {
+  if (cache().workshopMaps === null) {
+    try {
+      cache().workshopMaps = getWorkshopMaps();
+    } catch {
+      cache().workshopMaps = [];
+    }
+  }
+  return cache().workshopMaps!;
+}
+
+/**
+ * How long to keep waiting for a hosted workshop map to appear.
+ *
+ * `host_workshop_map` downloads before it loads, and a first fetch of a large
+ * map is not instant. Generous, but bounded: a stale id must not be left around
+ * to claim whatever map happens to load next.
+ */
+const WORKSHOP_RESOLVE_TIMEOUT_MS = 10 * 60_000;
+
+/**
+ * Learns a workshop map's real filename from the status poll.
+ *
+ * Steam gives out an id, not a filename, and the server only knows what is
+ * inside the .vpk once it has downloaded it — so the first poll that shows a
+ * different map after `host_workshop_map` is the moment the name becomes
+ * knowable. Until then the entry stays `workshop/<id>`, which is all
+ * `host_workshop_map` needs anyway.
+ *
+ * This also repairs entries written by older builds of the panel, which
+ * synthesised the filename from the user-typed display name.
+ */
+function resolveWorkshopMapName(loadedMap: string): void {
+  const pending = cache().pendingWorkshopMap;
+  if (!pending) return;
+
+  if (Date.now() - pending.at > WORKSHOP_RESOLVE_TIMEOUT_MS) {
+    cache().pendingWorkshopMap = null;
+    return;
+  }
+
+  // Still on the map we changed away from, or RCON has not answered yet: the
+  // download or the level load is not finished.
+  const short = shortMapName(loadedMap);
+  if (!short || short === "unknown" || short === shortMapName(pending.fromMap)) {
+    return;
+  }
+  cache().pendingWorkshopMap = null;
+
+  const entry = workshopLibrary().find((m) => m.workshopId === pending.id);
+  if (!entry) return;
+
+  const name = workshopMapPath(pending.id, short);
+  if (entry.name === name) return;
+  entry.name = name;
+  // A display name the user never typed is a placeholder, and the real
+  // filename reads better than `Workshop 3070563536`.
+  if (entry.displayName === `Workshop ${pending.id}`) entry.displayName = short;
+  try {
+    upsertWorkshopMap({ ...entry, workshopId: pending.id });
+  } catch {
+    /* non-critical */
+  }
+
+  const ev = makeConsoleEvent("info", "workshop", `Workshop ${pending.id} is ${short}`);
+  appendConsole(ev);
+  bus.emit({ type: "console.line", event: ev });
+}
+
 export function updateCache(status: ServerStatus, players: Player[] | null) {
+  resolveWorkshopMapName(status.map);
   cache().status = status;
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
@@ -342,19 +421,35 @@ export const realAdapter = {
   },
 
   async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {
-    if (cache().workshopMaps === null) {
-      try { cache().workshopMaps = getWorkshopMaps(); } catch { cache().workshopMaps = []; }
-    }
     return {
       current: cache().status?.map ?? "unknown",
       rotation: [],
-      all: [...(cache().workshopMaps ?? []), ...OFFICIAL_MAPS],
+      all: [...workshopLibrary(), ...OFFICIAL_MAPS],
     };
   },
 
   async changeMap(name: string): Promise<void> {
     const map = assertValidMapName(name);
-    await rconExec(`changelevel ${map}`);
+    const workshopId = workshopIdFromMapName(map);
+
+    if (workshopId) {
+      // `host_workshop_map` downloads the map when the server does not have it
+      // and then hosts it. `changelevel workshop/<id>/<name>` — what this used
+      // to send — can do neither: it needs the map installed already and needs
+      // its real filename, and a map added through the panel has neither.
+      cache().pendingWorkshopMap = {
+        id: workshopId,
+        fromMap: cache().status?.map ?? "",
+        at: Date.now(),
+      };
+      await rconExec(`host_workshop_map ${workshopId}`);
+    } else {
+      // Drop any unfinished workshop load: the map that lands now is this one,
+      // and must not be recorded as the workshop entry's filename.
+      cache().pendingWorkshopMap = null;
+      await rconExec(`changelevel ${map}`);
+    }
+
     const s = cache().status;
     if (s) {
       const updated = { ...s, map };
@@ -366,21 +461,37 @@ export const realAdapter = {
 
   async subscribeWorkshop(workshopId: string, displayName?: string): Promise<MapEntry> {
     workshopId = assertWorkshopId(workshopId);
+    const list = workshopLibrary();
+    const idx = list.findIndex((m) => m.workshopId === workshopId);
+    const existing = idx >= 0 ? list[idx] : undefined;
+
+    // Nothing is asked of the game server here: the map downloads on first
+    // play, when `changeMap` issues `host_workshop_map`. Doing it now would
+    // mean changing the level out from under whoever is playing, since that
+    // command hosts the map as well as fetching it.
     const entry: MapEntry = {
-      name: `workshop/${workshopId}/${safeToken(displayName ?? "map", 64) || "map"}`,
-      displayName: displayName ?? `Workshop ${workshopId}`,
+      // Keep a filename already learned from an earlier play (see
+      // `resolveWorkshopMapName`) rather than dropping back to the bare id.
+      name:
+        existing && workshopIdFromMapName(existing.name) === workshopId
+          ? existing.name
+          : workshopMapPath(workshopId),
+      displayName:
+        displayName?.trim().slice(0, 64) ||
+        existing?.displayName ||
+        `Workshop ${workshopId}`,
       type: "workshop",
       workshopId,
     };
+
     try { upsertWorkshopMap({ ...entry, workshopId }); } catch { /* non-critical */ }
-    if (cache().workshopMaps === null) {
-      try { cache().workshopMaps = getWorkshopMaps(); } catch { cache().workshopMaps = []; }
-    }
-    const list = cache().workshopMaps ?? [];
-    const idx = list.findIndex((m) => m.workshopId === workshopId);
     if (idx >= 0) list[idx] = entry; else list.push(entry);
-    cache().workshopMaps = list;
-    const ev = makeConsoleEvent("info", "workshop", `Subscribed to ${workshopId}`);
+
+    const ev = makeConsoleEvent(
+      "info",
+      "workshop",
+      `Added workshop map ${workshopId}; it downloads on first play`,
+    );
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
     return entry;

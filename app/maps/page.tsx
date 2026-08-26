@@ -31,6 +31,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api/client";
 import { getOfficialMapArtPath } from "@/lib/maps/official-art";
+import { isSameMap } from "@/lib/cs2/workshop";
 
 function parseWorkshopInput(s: string): string | null {
   const trimmed = s.trim();
@@ -185,7 +186,7 @@ export default function MapsPage() {
                 displayName={m.displayName}
                 imageSrc={getOfficialMapArtPath(m.name)}
                 badge={m.workshopId}
-                isCurrent={m.name === current}
+                isCurrent={isSameMap(m.name, current)}
                 isBusy={changeMap.isPending}
                 onPlay={() => changeMap.mutate(m.name)}
               />
@@ -205,7 +206,7 @@ export default function MapsPage() {
               name={m.name}
               displayName={m.displayName}
               imageSrc={getOfficialMapArtPath(m.name)}
-              isCurrent={m.name === current}
+              isCurrent={isSameMap(m.name, current)}
               isBusy={changeMap.isPending}
               onPlay={() => changeMap.mutate(m.name)}
             />
