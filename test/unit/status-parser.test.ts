@@ -389,6 +389,7 @@ describe("updateCache roster handling", () => {
     connectUrl: "connect 127.0.0.1:27015",
     ip: "127.0.0.1",
     port: 27015,
+    control: { docker: true, rcon: true },
   };
 
   it("keeps the last known roster when the poll could not read one", () => {

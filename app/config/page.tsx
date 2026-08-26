@@ -28,6 +28,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import type { ServerConfig } from "@/lib/api/types";
 
@@ -102,10 +103,14 @@ function fromForm(v: FormValues): ServerConfig {
 }
 
 export default function ConfigPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["config"],
     queryFn: () => api.getConfig(),
   });
+
+  if (error && !data) {
+    return <LoadError what="the server config" error={error} onRetry={() => refetch()} />;
+  }
 
   if (isLoading || !data) {
     return <Skeleton className="h-96" />;
@@ -123,6 +128,7 @@ function ConfigForm({ initial }: { initial: FormValues }) {
 
   const save = useMutation({
     mutationFn: (v: FormValues) => api.putConfig(fromForm(v)),
+    meta: { action: "Saving the config" },
     onSuccess: () => {
       toast.success("Config saved");
       qc.invalidateQueries({ queryKey: ["config"] });

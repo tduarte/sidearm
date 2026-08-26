@@ -312,6 +312,10 @@ export async function fetchStatus(): Promise<{
     connectUrl: `connect ${ip}:${PORT}`,
     ip,
     port: PORT,
+    control: {
+      docker: inspect.status === "fulfilled",
+      rcon: statusText !== "",
+    },
     updateProgress,
   };
 

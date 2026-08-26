@@ -30,8 +30,11 @@ export function TopBar() {
   const { data: update } = useUpdateStatus();
   const qc = useQueryClient();
 
+  // `meta.action` names the action in the global failure toast
+  // (components/providers.tsx). Every mutation carries one.
   const restart = useMutation({
     mutationFn: () => api.restart(),
+    meta: { action: "Restart" },
     onSuccess: () => {
       toast.success("Server restarting");
       qc.invalidateQueries({ queryKey: ["status"] });
@@ -40,22 +43,33 @@ export function TopBar() {
 
   const toggle = useMutation({
     mutationFn: (next: "running" | "stopped") => api.setServerState(next),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }),
+    meta: { action: "Start/stop" },
+    onSuccess: (_data, next) => {
+      toast.success(next === "running" ? "Server starting" : "Server stopping");
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
   });
 
   const applyUpdate = useMutation({
     mutationFn: () => api.applyUpdate(),
+    meta: { action: "Applying the update" },
     onSuccess: () => {
       toast.success("Restarting to apply the CS2 update", {
         description: "Game files download on boot; this takes a while.",
       });
       qc.invalidateQueries({ queryKey: ["status"] });
     },
-    onError: (err: Error) => toast.error(err.message),
   });
 
   const updating = status?.state === "updating";
   const progress = status?.updateProgress ?? null;
+  /**
+   * Every lifecycle control goes through the Docker API. With the socket proxy
+   * down they used to look enabled and do nothing at all — say so instead.
+   */
+  const dockerDown = status ? !status.control.docker : false;
+  const dockerReason =
+    "The Docker socket proxy is unreachable, so the panel cannot control the container. RCON, chat and the console still work.";
   // Only offer the button when we actually know an update is pending and the
   // server is idle enough to be worth interrupting.
   const updateAvailable =
@@ -131,7 +145,8 @@ export function TopBar() {
                   size="sm"
                   variant="outline"
                   onClick={() => restart.mutate()}
-                  disabled={restart.isPending}
+                  disabled={restart.isPending || dockerDown}
+                  title={dockerDown ? dockerReason : undefined}
                 >
                   <ArrowsClockwise className="h-4 w-4" />
                   Restart
@@ -140,7 +155,8 @@ export function TopBar() {
                   size="sm"
                   variant="destructive"
                   onClick={() => toggle.mutate("stopped")}
-                  disabled={toggle.isPending}
+                  disabled={toggle.isPending || dockerDown}
+                  title={dockerDown ? dockerReason : undefined}
                 >
                   <Stop className="h-4 w-4" weight="fill" />
                   Stop
@@ -152,11 +168,13 @@ export function TopBar() {
                 onClick={() => toggle.mutate("running")}
                 disabled={
                   toggle.isPending ||
+                  dockerDown ||
                   status.state === "starting" ||
                   // Interrupting steamcmd mid-download just restarts the
                   // download; there is nothing useful to do but wait.
                   updating
                 }
+                title={dockerDown ? dockerReason : undefined}
               >
                 <Play className="h-4 w-4" weight="fill" />
                 Start

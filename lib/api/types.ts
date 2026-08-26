@@ -78,6 +78,15 @@ export interface ServerStatus {
   connectUrl: string;
   ip: string;
   port: number;
+  /**
+   * Which control planes answered on the last poll.
+   *
+   * They fail independently and the panel is differently broken by each: with
+   * the Docker socket gone, Start/Stop/Restart and the resource tiles are dead
+   * while RCON and chat keep working; with RCON silent, the reverse. Without
+   * this the UI shows a healthy server and buttons that quietly do nothing.
+   */
+  control: { docker: boolean; rcon: boolean };
   /** Present only while `state` is `updating`. */
   updateProgress?: UpdateProgress | null;
 }

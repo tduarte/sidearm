@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { serverApi } from "@/lib/api/server";
+import { route } from "@/lib/api/route";
 
 export const dynamic = "force-dynamic";
 
@@ -8,7 +9,7 @@ export const dynamic = "force-dynamic";
  * Deliberately unconditional: the operator asked for it, so unlike the
  * automatic path this does not wait for the server to empty.
  */
-export async function POST() {
+export const POST = route(async () => {
   await serverApi.applyUpdate();
   return NextResponse.json({ ok: true });
-}
+});

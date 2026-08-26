@@ -71,6 +71,7 @@ const initialMockState = {
     connectUrl: "steam://connect/192.168.1.20:27015/trusted",
     ip: "192.168.1.20",
     port: 27015,
+    control: { docker: true, rcon: true },
   } as ServerStatus,
 
   config: {

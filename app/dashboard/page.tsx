@@ -20,6 +20,7 @@ import { MemoryStatCard } from "@/components/memory-stat-card";
 import { Sparkline } from "@/components/sparkline";
 import { StatCard } from "@/components/stat-card";
 import { StatusPill } from "@/components/status-pill";
+import { LoadError } from "@/components/load-error";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useStatHistory } from "@/lib/hooks/use-stat-history";
 import { useMatchState } from "@/lib/hooks/use-match-state";
@@ -57,10 +58,14 @@ function VacBadge({ secure }: { secure: boolean | null }) {
 
 export default function DashboardPage() {
   const isNarrow = useMediaQuery("(max-width: 639px)");
-  const { data: status, isPending } = useServerStatus();
+  const { data: status, isPending, error, refetch } = useServerStatus();
   const { data: match } = useMatchState();
   const { data: livePlayers, isLoading: playersLoading } = useLivePlayers();
   const { cpu, mem } = useStatHistory();
+
+  if (error && !status) {
+    return <LoadError what="server status" error={error} onRetry={() => refetch()} />;
+  }
 
   if (isPending || !status) {
     return (

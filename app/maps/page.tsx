@@ -29,6 +29,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
+import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import { getOfficialMapArtPath } from "@/lib/maps/official-art";
 import { isSameMap } from "@/lib/cs2/workshop";
@@ -43,13 +44,14 @@ function parseWorkshopInput(s: string): string | null {
 
 export default function MapsPage() {
   const qc = useQueryClient();
-  const { data, isLoading } = useQuery({
+  const { data, isLoading, error, refetch } = useQuery({
     queryKey: ["maps"],
     queryFn: () => api.getMaps(),
   });
 
   const changeMap = useMutation({
     mutationFn: (name: string) => api.changeMap(name),
+    meta: { action: "Map change" },
     onSuccess: (_, name) => {
       toast.success(`Changing map to ${name}`);
       qc.invalidateQueries({ queryKey: ["maps"] });
@@ -61,6 +63,7 @@ export default function MapsPage() {
   const subscribe = useMutation({
     mutationFn: ({ id, name }: { id: string; name?: string }) =>
       api.subscribeWorkshop(id, name),
+    meta: { action: "Adding the workshop map" },
     onSuccess: () => {
       toast.success("Workshop map added");
       qc.invalidateQueries({ queryKey: ["maps"] });
@@ -70,6 +73,10 @@ export default function MapsPage() {
   const [subOpen, setSubOpen] = useState(false);
   const [subInput, setSubInput] = useState("");
   const [subName, setSubName] = useState("");
+
+  if (error && !data) {
+    return <LoadError what="the map list" error={error} onRetry={() => refetch()} />;
+  }
 
   if (isLoading || !data) {
     return (
