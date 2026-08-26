@@ -102,7 +102,7 @@ export function TopBar() {
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <UsersThree className="h-3.5 w-3.5" />
-                {status.players}/{status.maxPlayers}
+                {status.players}/{status.maxPlayers ?? "?"}
               </span>
             </div>
           )}

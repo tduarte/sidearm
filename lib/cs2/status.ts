@@ -7,7 +7,7 @@ import type {
 } from "@/lib/api/types";
 import { rconExec } from "./rcon";
 import { containerLogs, containerStats, inspectContainer } from "./docker";
-import { parseUpdateProgress } from "./updates";
+import { parseServerVersion, parseUpdateProgress } from "./updates";
 
 const PORT = parseInt(process.env.RCON_PORT ?? "27015", 10);
 
@@ -88,9 +88,27 @@ export interface ParsedStatus {
   hostname: string;
   map: string;
   humans: number;
-  maxPlayers: number;
+  /**
+   * The `(N max)` figure, which is the *advertised* slot count
+   * (`sv_visiblemaxplayers`) and reads `0` at its -1 default. Never use it as
+   * the real ceiling; see `ServerStatus.maxPlayers`.
+   */
+  visibleMaxPlayers: number;
+  bots: number;
+  /** VAC state from the `version :` line; `null` when the line is absent. */
+  vacSecure: boolean | null;
   players: Player[];
 }
+
+/**
+ * The `version :` line, which carries both the Steam build and the VAC flag:
+ *
+ *   version  : 1.41.7.7/14177 10896 secure  public
+ *
+ * `secure` must be matched on a word boundary — it is a substring of
+ * `insecure`, and getting that backwards would report a dead GSLT as healthy.
+ */
+const VAC_RE = /^\s*version\s*:.*?\b(in)?secure\b/im;
 
 /**
  * Parses RCON `status` output.
@@ -115,11 +133,16 @@ export function parseStatusText(text: string): ParsedStatus {
     "unknown";
 
   const humans = parseInt(/(\d+)\s+humans/i.exec(text)?.[1] ?? "0", 10);
-  // Matches both "(10 max)" and "(10/0 max)".
-  const maxPlayers = parseInt(
+  const bots = parseInt(/(\d+)\s+bots/i.exec(text)?.[1] ?? "0", 10);
+  // Matches both "(10 max)" and "(10/0 max)". This is the advertised count, not
+  // the ceiling: a live CS2 server with -maxplayers 10 prints "(0 max)".
+  const visibleMaxPlayers = parseInt(
     /\((\d+)(?:\/\d+)?\s+max\)/i.exec(text)?.[1] ?? "0",
     10,
   );
+
+  const vacMatch = VAC_RE.exec(text);
+  const vacSecure = vacMatch ? vacMatch[1] === undefined : null;
 
   const players: Player[] = [];
   for (const rawLine of text.split("\n")) {
@@ -145,7 +168,7 @@ export function parseStatusText(text: string): ParsedStatus {
     }
   }
 
-  return { hostname, map, humans, maxPlayers, players };
+  return { hostname, map, humans, bots, visibleMaxPlayers, vacSecure, players };
 }
 
 function makePlayer(
@@ -211,6 +234,10 @@ export async function fetchStatus(): Promise<{
       : { cpuPct: 0, memMb: 0, memLimitMb: 0 };
   const containerState =
     inspect.status === "fulfilled" ? inspect.value.State : null;
+  // The launch line is right here in the inspect payload we already fetch every
+  // tick, so the real slot ceiling costs nothing extra to read.
+  const containerEnv =
+    inspect.status === "fulfilled" ? inspect.value.Config?.Env ?? null : null;
   const ip = serverIp.status === "fulfilled" ? serverIp.value : "";
 
   const gameMode: GameMode =
@@ -263,18 +290,25 @@ export async function fetchStatus(): Promise<{
     map: parsed.map,
     gameMode,
     players: parsed.humans,
-    maxPlayers: parsed.maxPlayers,
-    // TODO(phase-2.3): uptimeSec, fps and tickrate are still placeholders.
-    // The previous `host_framerate` probe was removed: it is a client cvar that
-    // reads 0 on a dedicated server, and it cost a serial RCON round-trip on
-    // every 2s tick. Real values need `stats` / container StartedAt / the
-    // tickrate launch arg.
-    uptimeSec: 0,
+    // The launch argument, not `status`'s advertised `(N max)` — see
+    // `envMaxPlayers`. Falls back to the advertised figure only when Docker is
+    // unreachable and it is actually meaningful (> 0).
+    maxPlayers:
+      envMaxPlayers(containerEnv) ??
+      (parsed.visibleMaxPlayers > 0 ? parsed.visibleMaxPlayers : null),
+    visibleMaxPlayers: parsed.visibleMaxPlayers > 0 ? parsed.visibleMaxPlayers : null,
+    uptimeSec: uptimeFrom(containerState),
     cpuPct: docker.cpuPct,
     memMb: docker.memMb,
     memMaxMb: docker.memLimitMb || 8192,
-    fps: 0,
-    tickrate: 64,
+    // Both null on purpose. CS2 dropped the `stats` table that reported server
+    // FPS (it answers with an empty string), and there is no tickrate to read:
+    // `-tickrate` was a CS:GO launch argument and CS2 is 64-tick with sub-tick.
+    // Showing 0 and 64 was fabrication; showing nothing is the truth.
+    fps: null,
+    tickrate: null,
+    vacSecure: parsed.vacSecure,
+    build: parseServerVersion(statusText),
     connectUrl: `connect ${ip}:${PORT}`,
     ip,
     port: PORT,
@@ -282,6 +316,33 @@ export async function fetchStatus(): Promise<{
   };
 
   return { status, players: statusText === "" ? null : parsed.players };
+}
+
+/**
+ * The real slot ceiling, read from the CS2 container's own environment.
+ *
+ * `CS2_MAXPLAYERS` becomes `-maxplayers` on the launch line, so it is the
+ * engine's slot allocation and no cvar can change it at runtime. This is the
+ * only trustworthy source: `status`'s `(N max)` reports the *advertised* count
+ * and reads 0 whenever `sv_visiblemaxplayers` is at its -1 default.
+ */
+export function envMaxPlayers(env: string[] | null): number | null {
+  if (!env) return null;
+  for (const entry of env) {
+    if (!entry.startsWith("CS2_MAXPLAYERS=")) continue;
+    const n = Number.parseInt(entry.slice("CS2_MAXPLAYERS=".length), 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }
+  return null;
+}
+
+/** Seconds since the container started; `null` when Docker is unreachable. */
+export function uptimeFrom(s: Pick<DockerState, "StartedAt"> | null): number | null {
+  if (!s?.StartedAt) return null;
+  const started = new Date(s.StartedAt).getTime();
+  if (!Number.isFinite(started)) return null;
+  const secs = Math.floor((Date.now() - started) / 1000);
+  return secs >= 0 ? secs : null;
 }
 
 interface DockerState {

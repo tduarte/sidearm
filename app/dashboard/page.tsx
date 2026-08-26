@@ -1,7 +1,6 @@
 "use client";
 
 import {
-  Pulse,
   Cpu,
   Clipboard,
   Memory,
@@ -30,11 +29,30 @@ import { RecentPlayersDataTable } from "@/components/recent-players/recent-playe
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 
-function formatUptime(s: number) {
+function formatUptime(s: number | null) {
+  if (s === null) return "unknown";
   const h = Math.floor(s / 3600);
   const m = Math.floor((s % 3600) / 60);
   const sec = s % 60;
   return `${h}h ${m}m ${sec}s`;
+}
+
+/** `null` = RCON has not answered; `false` is the dead-GSLT signature. */
+function VacBadge({ secure }: { secure: boolean | null }) {
+  if (secure === null) return null;
+  return secure ? (
+    <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/15 text-emerald-400">
+      VAC secure
+    </Badge>
+  ) : (
+    <Badge
+      variant="outline"
+      className="border-red-500/30 bg-red-500/15 text-red-400"
+      title="The server is running but unlisted and unprotected — usually a dead or missing GSLT. Reissue it at steamcommunity.com/dev/managegameservers."
+    >
+      VAC insecure
+    </Badge>
+  );
 }
 
 export default function DashboardPage() {
@@ -42,15 +60,15 @@ export default function DashboardPage() {
   const { data: status, isPending } = useServerStatus();
   const { data: match } = useMatchState();
   const { data: livePlayers, isLoading: playersLoading } = useLivePlayers();
-  const { cpu, mem, fps } = useStatHistory();
+  const { cpu, mem } = useStatHistory();
 
   if (isPending || !status) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-32" />
         <Skeleton className="min-h-64 w-full" />
-        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {Array.from({ length: 3 }).map((_, i) => (
             <Skeleton key={i} className="h-28" />
           ))}
         </div>
@@ -67,7 +85,7 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center gap-3">
               <StatusPill state={status.state} />
               <Badge variant="secondary">{status.gameMode}</Badge>
-              <Badge variant="outline">tick {status.tickrate}</Badge>
+              <VacBadge secure={status.vacSecure} />
             </div>
             <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
               <div className="min-w-0 shrink">
@@ -169,10 +187,10 @@ export default function DashboardPage() {
       </Card>
 
       {/* Stats */}
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4 [&>*]:min-h-0">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-h-0">
         <StatCard
           label="Players"
-          value={`${status.players}/${status.maxPlayers}`}
+          value={`${status.players}/${status.maxPlayers ?? "?"}`}
           sub={
             <div className="flex min-h-0 flex-col gap-2">
               {match ? (
@@ -200,12 +218,12 @@ export default function DashboardPage() {
           memMaxMb={status.memMaxMb}
           icon={<Memory className="h-5 w-5" />}
         />
-        <StatCard
-          label="FPS"
-          value={status.fps}
-          sub={<Sparkline data={fps} variant="fps" />}
-          icon={<Pulse className="h-5 w-5" />}
-        />
+        {/*
+          There was an FPS card here. CS2 removed the `stats` table that
+          reported server framerate, so the value was the constant 0 and the
+          sparkline was a flat line of zeros presented as telemetry. Nothing
+          honest can fill it, so it is gone rather than faked.
+        */}
       </div>
     </div>
   );

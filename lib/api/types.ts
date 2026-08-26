@@ -34,13 +34,47 @@ export interface ServerStatus {
   map: string;
   gameMode: GameMode;
   players: number;
-  maxPlayers: number;
-  uptimeSec: number;
+  /**
+   * The real slot ceiling — `-maxplayers` on the launch line, read from the
+   * container's own env.
+   *
+   * Deliberately NOT taken from `status`'s `(N max)`: with
+   * `sv_visiblemaxplayers` at its default of -1, CS2 prints `(0 max)`, which is
+   * how the panel came to display `0/0` players on a working server.
+   * `null` when the container cannot be inspected.
+   */
+  maxPlayers: number | null;
+  /**
+   * Slots advertised to the server browser (`sv_visiblemaxplayers`), when it
+   * differs from the ceiling. A display knob, never enforcement.
+   */
+  visibleMaxPlayers?: number | null;
+  /** From the container's `StartedAt`; `null` when Docker is unreachable. */
+  uptimeSec: number | null;
   cpuPct: number;
   memMb: number;
   memMaxMb: number;
-  fps: number;
-  tickrate: number;
+  /**
+   * `null` always, for now: CS2 removed the `stats` table that carried server
+   * FPS, and `host_framerate` is a client cvar that reads 0 on a dedicated
+   * server. Kept in the contract so a future source can fill it — never
+   * fabricated as 0.
+   */
+  fps: number | null;
+  /**
+   * `null` unless something authoritative reports it. CS2 has no tickrate cvar
+   * and the image passes no `-tickrate` (that was a CS:GO launch argument), so
+   * there is nothing honest to show.
+   */
+  tickrate: number | null;
+  /**
+   * VAC state from `status`'s `version :` line. `false` is the signature of a
+   * dead GSLT: the server runs and looks healthy but is insecure and unlisted.
+   * `null` when RCON did not answer.
+   */
+  vacSecure: boolean | null;
+  /** Steam build number from the same line; feeds the update check. */
+  build: number | null;
   connectUrl: string;
   ip: string;
   port: number;
