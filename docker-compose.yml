@@ -64,6 +64,8 @@ services:
       # Empty = panel is open on the LAN. Set it to require a bearer token
       # on /api/* and /ws.
       PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
+      # CIDRs allowed to skip the token. Empty = everyone authenticates.
+      PANEL_TRUSTED_CIDRS: ${PANEL_TRUSTED_CIDRS:-}
       # Set to 1 only when serving the panel over HTTPS.
       PANEL_HTTPS: ${PANEL_HTTPS:-}
       # Public address for the connect URL. Set it to skip an outbound

@@ -1,11 +1,17 @@
 import { NextResponse } from "next/server";
-import { AUTH_COOKIE, authRequired, safeEqual } from "@/lib/auth";
+import { AUTH_COOKIE, PEER_HEADER, authRequired, isTrustedPeer, safeEqual } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-/** Lets the UI find out whether it needs to prompt for a token. */
-export async function GET() {
-  return NextResponse.json({ authRequired: authRequired() });
+/**
+ * Lets the UI find out whether it needs to prompt for a token.
+ *
+ * A caller inside `PANEL_TRUSTED_CIDRS` is told `false`, so the LAN never sees
+ * the login screen — matching what the proxy will actually enforce.
+ */
+export async function GET(req: Request) {
+  const trusted = isTrustedPeer(req.headers.get(PEER_HEADER));
+  return NextResponse.json({ authRequired: authRequired() && !trusted });
 }
 
 /** Exchanges the admin token for an HttpOnly session cookie. */

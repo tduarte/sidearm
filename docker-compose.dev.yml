@@ -53,6 +53,8 @@ services:
       DOCKER_PORT: "2375"
       LOG_INGEST_SECRET: ${LOG_INGEST_SECRET:-dev-ingest-secret}
       PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
+      # CIDRs allowed to skip the token. Empty = everyone authenticates.
+      PANEL_TRUSTED_CIDRS: ${PANEL_TRUSTED_CIDRS:-}
       PANEL_URL: http://panel:3000
       # Skip the outbound api.ipify.org lookup on every status poll.
       SERVER_IP: 127.0.0.1
