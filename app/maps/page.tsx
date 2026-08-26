@@ -10,7 +10,6 @@ import { Button } from "@/components/ui/button";
 import {
   Card,
   CardAction,
-  CardContent,
   CardDescription,
   CardFooter,
   CardHeader,
@@ -30,6 +29,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { LoadError } from "@/components/load-error";
+import { RotationCard } from "@/components/maps/rotation-card";
 import { DangerConfirm } from "@/components/danger-confirm";
 import { api } from "@/lib/api/client";
 import {
@@ -187,26 +187,7 @@ export default function MapsPage() {
         </Dialog>
       </div>
 
-      <Card>
-        <CardHeader className="pb-2 flex-row items-center justify-between">
-          <CardTitle className="text-base">Rotation</CardTitle>
-          <Badge variant="outline">{data.rotation.length} maps</Badge>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
-            {data.rotation.map((m) => (
-              <Badge
-                key={m}
-                variant={m === current ? "default" : "secondary"}
-                className="gap-1.5"
-              >
-                {m === current && <MapPin className="h-3 w-3" />}
-                {m}
-              </Badge>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <RotationCard maps={data.all} current={current} />
 
       {workshop.length > 0 && (
         <div>

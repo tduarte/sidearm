@@ -44,6 +44,12 @@ import {
 import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
 import { mapDisplayName, parseMapList } from "@/lib/cs2/maps";
 import {
+  EMPTY_ROTATION,
+  nextMap,
+  sanitizeRotation,
+  type RotationState,
+} from "@/lib/cs2/rotation";
+import {
   PRACTICE_READ_NAMES,
   practiceSpec,
 } from "@/lib/cs2/practice";
@@ -324,6 +330,53 @@ export function updateCache(
 /** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
 function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+const ROTATION_KEY = "map.rotation";
+
+/** Rotation as stored. Panel intent, not server state — see lib/db/config.ts. */
+export function loadRotation(): RotationState {
+  try {
+    return sanitizeRotation(getSavedConfig<RotationState>(ROTATION_KEY) ?? EMPTY_ROTATION);
+  } catch {
+    return EMPTY_ROTATION;
+  }
+}
+
+function saveRotation(state: RotationState): void {
+  try {
+    setSavedConfig(ROTATION_KEY, state);
+  } catch { /* non-critical */ }
+}
+
+/**
+ * Loads the next map when a match ends, if rotation is on.
+ *
+ * Called from the match-lifecycle subscriber in server.ts, so it runs wherever
+ * the `Game Over:` line is observed.
+ */
+export async function advanceRotation(): Promise<string | null> {
+  const rotation = loadRotation();
+  const current = cache().status?.map ?? "";
+  const next = nextMap(rotation, current);
+  if (!next) return null;
+
+  try {
+    await realAdapter.changeMap(next);
+    const ev = makeConsoleEvent("info", "rotation", `Rotating to ${next}`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return next;
+  } catch (err) {
+    const ev = makeConsoleEvent(
+      "error",
+      "rotation",
+      `Could not rotate to ${next}: ${(err as Error).message}`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return null;
+  }
 }
 
 /**
@@ -640,7 +693,7 @@ export const realAdapter = {
     backfillWorkshopMeta(workshop);
     return {
       current: cache().status?.map ?? "unknown",
-      rotation: [],
+      rotation: loadRotation().maps,
       all: [...workshop, ...(await officialLibrary())],
     };
   },
@@ -754,8 +807,19 @@ export const realAdapter = {
     bus.emit({ type: "console.line", event: ev });
   },
 
-  async setRotation(_rotation: string[]): Promise<void> {
-    // Phase F will write mapcycle.txt
+  async setRotation(rotation: string[]): Promise<void> {
+    const current = loadRotation();
+    saveRotation(sanitizeRotation({ enabled: current.enabled, maps: rotation }));
+  },
+
+  async getRotation(): Promise<RotationState> {
+    return loadRotation();
+  },
+
+  async putRotation(next: Partial<RotationState>): Promise<RotationState> {
+    const state = sanitizeRotation({ ...loadRotation(), ...next });
+    saveRotation(state);
+    return state;
   },
 
   async getMatch(): Promise<MatchState> {

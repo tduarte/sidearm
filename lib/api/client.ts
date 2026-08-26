@@ -1,3 +1,4 @@
+import type { RotationState } from "@/lib/cs2/rotation";
 import type {
   ChatMessage,
   CvarGroup,
@@ -115,12 +116,13 @@ export const api = {
       method: "DELETE",
     }),
 
-  setRotation: async (rotation: string[]) => {
-    await request<{ ok: true }>("/api/maps/rotation", {
+  getRotation: () => request<RotationState>("/api/maps/rotation"),
+
+  putRotation: (next: { enabled?: boolean; maps?: string[] }) =>
+    request<RotationState>("/api/maps/rotation", {
       method: "PUT",
-      body: JSON.stringify({ rotation }),
-    });
-  },
+      body: JSON.stringify(next),
+    }),
 
   getMatch: () => request<MatchState>("/api/match"),
 

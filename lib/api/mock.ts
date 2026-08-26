@@ -105,6 +105,7 @@ const initialMockState = {
 
   maps: [...OFFICIAL_MAPS] as MapEntry[],
   rotation: ["de_mirage", "de_inferno", "de_nuke", "de_ancient", "de_anubis"] as string[],
+  rotationEnabled: false,
 
   match: {
     phase: "live",

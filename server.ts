@@ -58,6 +58,7 @@ app.prepare().then(async () => {
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
   const { beginMatch, endMatch } = await import("./lib/db/matches");
+  const { advanceRotation } = await import("./lib/api/server/real");
 
   // Ensure DB is open and migrated before anything else touches it
   getDb();
@@ -81,6 +82,9 @@ app.prepare().then(async () => {
         cache?.players ?? [],
       );
       activeMatchId = null;
+      // Panel-driven rotation: the map only advances while the panel is
+      // running, which is the trade for handling workshop maps at all.
+      if (ev.phase === "ended") void advanceRotation();
     }
   });
 

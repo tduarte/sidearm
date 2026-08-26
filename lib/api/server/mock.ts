@@ -15,6 +15,7 @@ import type {
 import { addConsole, state } from "../mock";
 import { bus } from "@/lib/ws/bus";
 import { PRACTICE_READ_NAMES } from "@/lib/cs2/practice";
+import type { RotationState } from "@/lib/cs2/rotation";
 
 /** Mock cvar values, so the Practice tab is exercisable without a server. */
 const mockCvars: Record<string, string> = { sv_cheats: "0" };
@@ -152,8 +153,16 @@ export const mockAdapter = {
 
   async setRotation(rotation: string[]): Promise<void> {
     state.rotation = rotation;
-    const ev = addConsole("info", "admin", "Map rotation updated");
-    bus.emit({ type: "console.line", event: ev });
+  },
+
+  async getRotation(): Promise<RotationState> {
+    return { enabled: state.rotationEnabled ?? false, maps: state.rotation };
+  },
+
+  async putRotation(next: Partial<RotationState>): Promise<RotationState> {
+    if (next.maps) state.rotation = next.maps;
+    if (next.enabled !== undefined) state.rotationEnabled = next.enabled;
+    return { enabled: state.rotationEnabled ?? false, maps: state.rotation };
   },
 
   async getMatch(): Promise<MatchState> {
