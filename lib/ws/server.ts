@@ -2,7 +2,7 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsEvent } from "@/lib/api/types";
-import { AUTH_COOKIE, safeEqual } from "@/lib/auth";
+import { AUTH_COOKIE, isTrustedPeer, safeEqual } from "@/lib/auth";
 import { bus } from "./bus";
 import { startMockEmitter } from "./mock-emitter";
 
@@ -26,6 +26,8 @@ function readCookie(header: string | undefined, name: string): string {
 function isAuthorized(req: IncomingMessage): boolean {
   const token = process.env.PANEL_ADMIN_TOKEN ?? "";
   if (token === "") return true;
+  // Straight off the socket here — no need for the `server.ts` header hop.
+  if (isTrustedPeer(req.socket.remoteAddress)) return true;
   const cookie = readCookie(req.headers.cookie, AUTH_COOKIE);
   if (safeEqual(cookie, token)) return true;
   const header = req.headers.authorization ?? "";

@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import next from "next";
+import { PEER_HEADER } from "./lib/auth";
 import { attachWsServer } from "./lib/ws/server";
 
 const port = Number.parseInt(process.env.PORT ?? "3000", 10);
@@ -30,7 +31,16 @@ const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 
 app.prepare().then(async () => {
-  const httpServer = createServer((req, res) => handle(req, res));
+  const httpServer = createServer((req, res) => {
+    // Hand the peer address to the Edge-runtime proxy, which cannot see the
+    // socket itself. Deleting first is the security-relevant half: it means an
+    // inbound copy of this header is always discarded, so a client can never
+    // spoof its own address.
+    delete req.headers[PEER_HEADER];
+    const peer = req.socket.remoteAddress;
+    if (peer) req.headers[PEER_HEADER] = peer;
+    return handle(req, res);
+  });
   attachWsServer(httpServer, { path: "/ws" });
 
   httpServer.listen(port, hostname, () => {
