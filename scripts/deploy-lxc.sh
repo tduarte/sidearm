@@ -4,12 +4,19 @@
 # The CS2 container is left running, so nothing re-downloads and no match is
 # interrupted — only `panel` is recreated.
 #
+# Point it at your server with SIDEARM_HOST; there is deliberately no default,
+# so nobody's address ends up committed here.
+#
+#   export SIDEARM_HOST=root@your-server
 #   ./scripts/deploy-lxc.sh              # deploy the current branch
 #   ./scripts/deploy-lxc.sh some-branch  # deploy a specific branch
-#   SIDEARM_HOST=root@10.0.0.5 ./scripts/deploy-lxc.sh
 set -euo pipefail
 
-HOST="${SIDEARM_HOST:-root@192.168.4.26}"
+if [[ -z "${SIDEARM_HOST:-}" ]]; then
+  echo "SIDEARM_HOST is not set (e.g. export SIDEARM_HOST=root@your-server)" >&2
+  exit 2
+fi
+HOST="$SIDEARM_HOST"
 DIR="${SIDEARM_DIR:-/opt/sidearm}"
 BRANCH="${1:-$(git rev-parse --abbrev-ref HEAD)}"
 
