@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { serverApi } from "@/lib/api/server";
+import { route } from "@/lib/api/route";
 
 export const dynamic = "force-dynamic";
 
-export async function POST(req: Request) {
+export const POST = route(async (req: Request) => {
   const body = (await req.json()) as {
     workshopId?: string;
     displayName?: string;
@@ -17,4 +18,4 @@ export async function POST(req: Request) {
   return NextResponse.json(
     await serverApi.subscribeWorkshop(body.workshopId, body.displayName),
   );
-}
+});

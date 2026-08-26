@@ -19,12 +19,27 @@ services:
       CS2_SERVERNAME: ${SERVER_NAME:-sidearm}
       CS2_PW: ${SERVER_PASSWORD:-}
       CS2_RCONPW: ${RCON_PASSWORD}
-      CS2_MAXPLAYERS: ${CS2_MAXPLAYERS:-10}
+      # 11, not 10: GOTV occupies a slot (see TV_ENABLE below), so a 10-slot
+      # server only fits nine people and a 5v5 will not start.
+      CS2_MAXPLAYERS: ${CS2_MAXPLAYERS:-11}
       CS2_GAMETYPE: ${CS2_GAMETYPE:-0}
       CS2_GAMEMODE: ${CS2_GAMEMODE:-1}
       CS2_MAPGROUP: ${CS2_MAPGROUP:-mg_active}
       CS2_STARTMAP: ${CS2_STARTMAP:-de_mirage}
       CS2_PORT: "27015"
+      # GOTV. The image defaults TV_ENABLE to 0, so 27020/udp below was
+      # published with nothing listening on it and demo recording could not
+      # work. These are launch arguments: changing them needs
+      # `docker compose up -d --force-recreate cs2`.
+      TV_ENABLE: ${TV_ENABLE:-1}
+      TV_PORT: "27020"
+      TV_AUTORECORD: ${TV_AUTORECORD:-0}
+      TV_PW: ${TV_PW:-}
+      TV_RELAY_PW: ${TV_RELAY_PW:-}
+      # Seconds of broadcast delay. The image ships 0, which lets anyone
+      # watching GOTV see the game live and call positions.
+      TV_DELAY: ${TV_DELAY:-30}
+      TV_MAXRATE: ${TV_MAXRATE:-0}
     volumes:
       - cs2-data:/home/steam/cs2-dedicated
     ports:

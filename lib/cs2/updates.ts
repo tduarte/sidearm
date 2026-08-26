@@ -16,7 +16,13 @@ const APP_ID = 730;
 const STEAM_UP_TO_DATE_URL = "https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/";
 
 /**
- * Pulls the Steam build number out of RCON `version` (or `status`) output.
+ * Pulls the Steam build number out of RCON `status` output.
+ *
+ * Note there is no `version` command on CS2 — it answers
+ * `Unknown command 'version'!` — which is why the build has to come off the
+ * `version :` line inside `status`:
+ *
+ *   version  : 1.41.7.7/14177 10896 secure  public
  *
  * Like the log and status parsers, this is deliberately tolerant: CS2 has
  * shipped more than one layout and the exact one is only confirmed against a
@@ -25,7 +31,7 @@ const STEAM_UP_TO_DATE_URL = "https://api.steampowered.com/ISteamApps/UpToDateCh
  *
  * Handled shapes, in priority order:
  *   ServerVersion=14177                     (steam.inf)
- *   version : 1.41.7.7/14177 1417 secure    (status / version composite)
+ *   version : 1.41.7.7/14177 1417 secure    (status composite — the live one)
  *   Protocol version 14177                  (Source convention)
  *   Server Version: 14177                   (plain)
  */
@@ -96,7 +102,7 @@ export async function checkSteamVersion(
 }
 
 export interface UpdateCheckDeps {
-  /** Runs an RCON command; the watcher only ever issues `version`. */
+  /** Runs an RCON command; the watcher only ever issues `status`. */
   rconExec: (command: string) => Promise<string>;
   /** Restarts the CS2 container, which re-runs steamcmd on boot. */
   restartContainer: () => Promise<void>;
@@ -141,9 +147,12 @@ export async function runUpdateCheck(
     message: "",
   };
 
+  // `status`, not `version`: CS2 has no `version` command, and asking for one
+  // returns `Unknown command 'version'!`, which parses to null and pins
+  // `upToDate` at "unknown" forever — the update check silently never fires.
   let versionOut: string;
   try {
-    versionOut = await deps.rconExec("version");
+    versionOut = await deps.rconExec("status");
   } catch {
     return {
       update: { ...base, message: "RCON did not answer; cannot read server build" },
@@ -156,7 +165,7 @@ export async function runUpdateCheck(
     return {
       update: {
         ...base,
-        message: "Could not parse a build number from `version` output",
+        message: "Could not read a build number from the `status` version line",
       },
       restarted: false,
     };

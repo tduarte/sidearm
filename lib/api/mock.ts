@@ -61,11 +61,18 @@ const initialMockState = {
     cpuPct: 24,
     memMb: 1840,
     memMaxMb: 4096,
-    fps: 128,
-    tickrate: 128,
+    // null in mock too, because null is what real mode always returns: CS2 has
+    // no server-side FPS or tickrate to report. A mock that invents them sends
+    // the UI down code paths production never takes.
+    fps: null,
+    tickrate: null,
+    vacSecure: true,
+    build: 14177,
+    gotv: { address: "0.0.0.0:27020", delaySec: 30 },
     connectUrl: "steam://connect/192.168.1.20:27015/trusted",
     ip: "192.168.1.20",
     port: 27015,
+    control: { docker: true, rcon: true },
   } as ServerStatus,
 
   config: {

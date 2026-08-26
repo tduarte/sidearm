@@ -6,8 +6,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { usePanelInfo } from "@/components/panel-info";
 
 export default function SettingsPage() {
+  const { apiMode, version } = usePanelInfo();
+
   return (
     <div className="space-y-4">
       <div>
@@ -79,11 +82,13 @@ export default function SettingsPage() {
         <CardContent className="space-y-2 text-sm">
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Version</span>
-            <Badge variant="outline">0.1.0</Badge>
+            <Badge variant="outline">{version}</Badge>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Mode</span>
-            <Badge variant="outline">Mock (no backend)</Badge>
+            <Badge variant="outline">
+              {apiMode === "real" ? "Real (live server)" : "Mock (no backend)"}
+            </Badge>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-muted-foreground">Project</span>

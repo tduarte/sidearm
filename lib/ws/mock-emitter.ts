@@ -46,10 +46,9 @@ export function startMockEmitter() {
   // 1s: status/stats jitter + uptime
   setInterval(() => {
     if (state.status.state !== "running") return;
-    state.status.uptimeSec += 1;
+    state.status.uptimeSec = (state.status.uptimeSec ?? 0) + 1;
     state.status.cpuPct = jitter(state.status.cpuPct, 4, 8, 78);
     state.status.memMb = jitter(state.status.memMb, 30, 1200, state.status.memMaxMb - 200);
-    state.status.fps = jitter(state.status.fps, 3, 90, 128);
     bus.emit({ type: "status.update", status: { ...state.status } });
   }, 1000);
 

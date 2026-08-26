@@ -34,16 +34,71 @@ export interface ServerStatus {
   map: string;
   gameMode: GameMode;
   players: number;
-  maxPlayers: number;
-  uptimeSec: number;
+  /**
+   * The real slot ceiling — `-maxplayers` on the launch line, read from the
+   * container's own env.
+   *
+   * Deliberately NOT taken from `status`'s `(N max)`: with
+   * `sv_visiblemaxplayers` at its default of -1, CS2 prints `(0 max)`, which is
+   * how the panel came to display `0/0` players on a working server.
+   * `null` when the container cannot be inspected.
+   */
+  maxPlayers: number | null;
+  /**
+   * Slots advertised to the server browser (`sv_visiblemaxplayers`), when it
+   * differs from the ceiling. A display knob, never enforcement.
+   */
+  visibleMaxPlayers?: number | null;
+  /** From the container's `StartedAt`; `null` when Docker is unreachable. */
+  uptimeSec: number | null;
   cpuPct: number;
   memMb: number;
   memMaxMb: number;
-  fps: number;
-  tickrate: number;
+  /**
+   * `null` always, for now: CS2 removed the `stats` table that carried server
+   * FPS, and `host_framerate` is a client cvar that reads 0 on a dedicated
+   * server. Kept in the contract so a future source can fill it — never
+   * fabricated as 0.
+   */
+  fps: number | null;
+  /**
+   * `null` unless something authoritative reports it. CS2 has no tickrate cvar
+   * and the image passes no `-tickrate` (that was a CS:GO launch argument), so
+   * there is nothing honest to show.
+   */
+  tickrate: number | null;
+  /**
+   * VAC state from `status`'s `version :` line. `false` is the signature of a
+   * dead GSLT: the server runs and looks healthy but is insecure and unlisted.
+   * `null` when RCON did not answer.
+   */
+  vacSecure: boolean | null;
+  /** Steam build number from the same line; feeds the update check. */
+  build: number | null;
+  /**
+   * GOTV, when it is actually running. Read from `status`'s `sourcetv[0]` line:
+   * `tv_status` is the obvious source and returns an empty string over RCON.
+   *
+   * Note GOTV occupies a player slot, which `maxPlayers` already accounts for.
+   */
+  gotv: { address: string; delaySec: number | null } | null;
   connectUrl: string;
   ip: string;
   port: number;
+  /**
+   * Which control planes answered on the last poll.
+   *
+   * They fail independently and the panel is differently broken by each: with
+   * the Docker socket gone, Start/Stop/Restart and the resource tiles are dead
+   * while RCON and chat keep working; with RCON silent, the reverse. Without
+   * this the UI shows a healthy server and buttons that quietly do nothing.
+   */
+  control: { docker: boolean; rcon: boolean };
+  /**
+   * What the panel is still waiting to see take effect, if anything. Cleared
+   * by the status poll observing the result, never by the request returning.
+   */
+  pendingOp?: PendingOp | null;
   /** Present only while `state` is `updating`. */
   updateProgress?: UpdateProgress | null;
 }
@@ -150,6 +205,26 @@ export interface MatchHistoryDetail extends MatchHistoryEntry {
     d: number;
     a: number;
   }>;
+}
+
+/**
+ * An operation the panel asked for whose effect has not been observed yet.
+ *
+ * These all outlive their HTTP request by a wide margin: a workshop map
+ * downloads before it loads (about a minute on a first fetch), a container
+ * restart takes 30-90s, applying a CS2 update pulls tens of GB. Reporting
+ * success when the request returned 200 told the admin the work was finished
+ * while it had barely started, so the panel now holds the request open until
+ * live status confirms it.
+ */
+export type PendingOpKind = "map" | "restart" | "start" | "stop" | "update";
+
+export interface PendingOp {
+  kind: PendingOpKind;
+  /** The map that was asked for, when `kind` is `map`. */
+  target?: string;
+  /** ISO timestamp of when the panel issued the command. */
+  since: string;
 }
 
 /** steamcmd download progress while the container is fetching game files. */

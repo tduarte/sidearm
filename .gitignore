@@ -46,3 +46,6 @@ next-env.d.ts
 
 # Cursor IDE (hooks, state, local config)
 .cursor/
+
+# impeccable local cache/state
+.impeccable/

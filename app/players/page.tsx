@@ -35,6 +35,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
 import type { Player } from "@/lib/api/types";
@@ -57,13 +58,14 @@ function TeamBadge({ team }: { team: Player["team"] }) {
 }
 
 export default function PlayersPage() {
-  const { data: players, isLoading } = useLivePlayers();
+  const { data: players, isLoading, error, refetch } = useLivePlayers();
   const [search, setSearch] = useState("");
   const [kickTarget, setKickTarget] = useState<Player | null>(null);
   const qc = useQueryClient();
 
   const kick = useMutation({
     mutationFn: (steamId: string) => api.kick(steamId),
+    meta: { action: "Kick" },
     onSuccess: () => {
       toast.success("Player kicked");
       qc.invalidateQueries({ queryKey: ["players"] });
@@ -97,6 +99,10 @@ export default function PlayersPage() {
         />
       </div>
 
+      {error && !players ? (
+        <LoadError what="the roster" error={error} onRetry={() => refetch()} />
+      ) : null}
+
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Live roster</CardTitle>
@@ -121,7 +127,22 @@ export default function PlayersPage() {
                 {filtered.length === 0 && (
                   <TableRow>
                     <TableCell colSpan={7} className="h-24 text-center text-muted-foreground">
-                      No players match.
+                      {(players?.length ?? 0) === 0 ? (
+                        <div className="space-y-1">
+                          <p>Nobody is connected.</p>
+                          <p className="text-xs">
+                            Share the connect URL from the dashboard to get a
+                            game going.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-1">
+                          <p>No player matches “{search}”.</p>
+                          <p className="text-xs">
+                            {players?.length} connected.
+                          </p>
+                        </div>
+                      )}
                     </TableCell>
                   </TableRow>
                 )}
@@ -200,8 +221,20 @@ export default function PlayersPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Kick {kickTarget?.name}?</AlertDialogTitle>
-            <AlertDialogDescription>
-              They will be removed from the current match immediately.
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  They are removed from the match immediately and can rejoin
+                  straight away — a kick is not a ban.
+                </p>
+                {kickTarget && (
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {kickTarget.team} · {kickTarget.k}/{kickTarget.d}/
+                    {kickTarget.a} · {kickTarget.ping}ms ·{" "}
+                    {kickTarget.steamId}
+                  </p>
+                )}
+              </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

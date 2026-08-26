@@ -16,6 +16,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -52,7 +53,7 @@ export default function HistoryPage() {
       <div>
         <h1 className="text-2xl font-semibold">History</h1>
         <p className="text-sm text-muted-foreground">
-          Stored chat and match history (mock persistence).
+          Chat and completed matches, stored in the panel&apos;s database.
         </p>
       </div>
 
@@ -68,7 +69,13 @@ export default function HistoryPage() {
               <CardTitle className="text-base">Match history</CardTitle>
             </CardHeader>
             <CardContent>
-              {matches.isLoading ? (
+              {matches.error ? (
+                <LoadError
+                  what="match history"
+                  error={matches.error}
+                  onRetry={() => matches.refetch()}
+                />
+              ) : matches.isLoading ? (
                 <Skeleton className="h-64" />
               ) : (
                 <Table>
@@ -84,6 +91,21 @@ export default function HistoryPage() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
+                    {(matches.data ?? []).length === 0 && (
+                      <TableRow>
+                        <TableCell
+                          colSpan={7}
+                          className="h-24 text-center text-muted-foreground"
+                        >
+                          <div className="space-y-1">
+                            <p>No completed matches yet.</p>
+                            <p className="text-xs">
+                              A match is recorded once it reaches Game Over.
+                            </p>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
                     {(matches.data ?? []).map((m) => (
                       <TableRow key={m.id}>
                         <TableCell className="text-muted-foreground">

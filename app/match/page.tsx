@@ -43,6 +43,7 @@ import {
   MatchActionGrid,
   MatchActionTile,
 } from "@/components/match/match-action-tile";
+import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import { useMatchState } from "@/lib/hooks/use-match-state";
 import type { MatchPhase } from "@/lib/api/types";
@@ -61,12 +62,13 @@ const PHASES: {
 ];
 
 export default function MatchPage() {
-  const { data: match, isLoading } = useMatchState();
+  const { data: match, isLoading, error, refetch } = useMatchState();
   const qc = useQueryClient();
   const [svCheatsOn, setSvCheatsOn] = useState(false);
 
   const setPhase = useMutation({
     mutationFn: (phase: MatchPhase) => api.setMatchPhase(phase),
+    meta: { action: "Phase change" },
     onSuccess: (_, phase) => {
       toast.success(`Phase: ${phase}`);
       qc.invalidateQueries({ queryKey: ["match"] });
@@ -75,6 +77,7 @@ export default function MatchPage() {
 
   const pause = useMutation({
     mutationFn: () => api.togglePause(),
+    meta: { action: "Pause" },
     onSuccess: (r) => {
       toast(r.paused ? "Match paused" : "Match resumed");
       qc.invalidateQueries({ queryKey: ["match"] });
@@ -83,6 +86,7 @@ export default function MatchPage() {
 
   const demo = useMutation({
     mutationFn: () => api.toggleDemo(),
+    meta: { action: "Demo recording" },
     onSuccess: (r) => {
       toast(
         r.demoRecording
@@ -95,8 +99,13 @@ export default function MatchPage() {
 
   const rcon = useMutation({
     mutationFn: (cmd: string) => api.rcon(cmd),
+    meta: { action: "Command" },
     onSuccess: (_, cmd) => toast(`rcon: ${cmd}`),
   });
+
+  if (error && !match) {
+    return <LoadError what="match state" error={error} onRetry={() => refetch()} />;
+  }
 
   if (isLoading || !match) {
     return <Skeleton className="h-96" />;

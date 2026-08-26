@@ -15,10 +15,16 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusPill } from "@/components/status-pill";
+import { DangerConfirm } from "@/components/danger-confirm";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useUpdateStatus } from "@/lib/hooks/use-update-status";
 import { api } from "@/lib/api/client";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  describePendingOp,
+  formatElapsed,
+  usePendingOp,
+} from "@/lib/hooks/use-pending-op";
 
 /** Bytes → GB with one decimal. steamcmd totals are always in the tens of GB. */
 function gb(bytes: number): string {
@@ -30,8 +36,11 @@ export function TopBar() {
   const { data: update } = useUpdateStatus();
   const qc = useQueryClient();
 
+  // `meta.action` names the action in the global failure toast
+  // (components/providers.tsx). Every mutation carries one.
   const restart = useMutation({
     mutationFn: () => api.restart(),
+    meta: { action: "Restart" },
     onSuccess: () => {
       toast.success("Server restarting");
       qc.invalidateQueries({ queryKey: ["status"] });
@@ -40,22 +49,38 @@ export function TopBar() {
 
   const toggle = useMutation({
     mutationFn: (next: "running" | "stopped") => api.setServerState(next),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["status"] }),
+    meta: { action: "Start/stop" },
+    onSuccess: (_data, next) => {
+      toast.success(next === "running" ? "Server starting" : "Server stopping");
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
   });
 
   const applyUpdate = useMutation({
     mutationFn: () => api.applyUpdate(),
+    meta: { action: "Applying the update" },
     onSuccess: () => {
       toast.success("Restarting to apply the CS2 update", {
         description: "Game files download on boot; this takes a while.",
       });
       qc.invalidateQueries({ queryKey: ["status"] });
     },
-    onError: (err: Error) => toast.error(err.message),
   });
 
+  const { op: pendingOp, elapsedSec } = usePendingOp();
   const updating = status?.state === "updating";
   const progress = status?.updateProgress ?? null;
+  /**
+   * Every lifecycle control goes through the Docker API. With the socket proxy
+   * down they used to look enabled and do nothing at all — say so instead.
+   */
+  const dockerDown = status ? !status.control.docker : false;
+  // Anything but a map change belongs in the header: those are whole-server
+  // operations, and the map page owns its own tile-level pending state.
+  const lifecyclePending =
+    pendingOp && pendingOp.kind !== "map" ? pendingOp : null;
+  const dockerReason =
+    "The Docker socket proxy is unreachable, so the panel cannot control the container. RCON, chat and the console still work.";
   // Only offer the button when we actually know an update is pending and the
   // server is idle enough to be worth interrupting.
   const updateAvailable =
@@ -70,6 +95,17 @@ export function TopBar() {
       ) : (
         <>
           <StatusPill state={status.state} pct={progress?.pct} />
+
+          {lifecyclePending && (
+            <span
+              className="hidden items-center gap-1.5 text-xs text-muted-foreground tabular-nums sm:inline-flex"
+              title={describePendingOp(lifecyclePending).detail}
+            >
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+              {describePendingOp(lifecyclePending).label} ·{" "}
+              {formatElapsed(elapsedSec)}
+            </span>
+          )}
 
           {updating ? (
             <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -102,49 +138,80 @@ export function TopBar() {
               </span>
               <span className="inline-flex items-center gap-1.5">
                 <UsersThree className="h-3.5 w-3.5" />
-                {status.players}/{status.maxPlayers}
+                {status.players}/{status.maxPlayers ?? "?"}
               </span>
             </div>
           )}
 
           <div className="ml-auto flex items-center gap-2">
             {updateAvailable && (
-              <Button
-                size="sm"
-                variant="outline"
-                className="border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300"
-                onClick={() => applyUpdate.mutate()}
-                disabled={applyUpdate.isPending}
-                title={
+              <DangerConfirm
+                title="Apply the CS2 update now?"
+                consequence="Applying the update restarts the container, so everyone connected is dropped. The server downloads the new build on boot, which can take a while."
+                operation={
                   update?.requiredVersion
-                    ? `Build ${update.installedVersion} → ${update.requiredVersion}. Restarts the server.`
-                    : "Restarts the server to download the update."
+                    ? `docker restart cs2 · build ${update.installedVersion} → ${update.requiredVersion}`
+                    : "docker restart cs2"
                 }
+                confirmLabel="Restart and update"
+                onConfirm={() => applyUpdate.mutate()}
               >
-                <CloudArrowDown className="h-4 w-4" />
-                Update available
-              </Button>
+                {(arm) => (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300"
+                    onClick={arm}
+                    disabled={applyUpdate.isPending}
+                  >
+                    <CloudArrowDown className="h-4 w-4" />
+                    Update available
+                  </Button>
+                )}
+              </DangerConfirm>
             )}
             {status.state === "running" ? (
               <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => restart.mutate()}
-                  disabled={restart.isPending}
+                <DangerConfirm
+                  title="Restart the server?"
+                  consequence="Everyone connected is dropped while the container comes back. It usually takes under a minute unless a game update is pending."
+                  operation="docker restart cs2"
+                  confirmLabel="Restart"
+                  onConfirm={() => restart.mutate()}
                 >
-                  <ArrowsClockwise className="h-4 w-4" />
-                  Restart
-                </Button>
-                <Button
-                  size="sm"
-                  variant="destructive"
-                  onClick={() => toggle.mutate("stopped")}
-                  disabled={toggle.isPending}
+                  {(arm) => (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={arm}
+                      disabled={restart.isPending || dockerDown}
+                      title={dockerDown ? dockerReason : undefined}
+                    >
+                      <ArrowsClockwise className="h-4 w-4" />
+                      Restart
+                    </Button>
+                  )}
+                </DangerConfirm>
+                <DangerConfirm
+                  title="Stop the server?"
+                  consequence="Everyone connected is dropped and the server goes offline until you start it again."
+                  operation="docker stop cs2"
+                  confirmLabel="Stop server"
+                  onConfirm={() => toggle.mutate("stopped")}
                 >
-                  <Stop className="h-4 w-4" weight="fill" />
-                  Stop
-                </Button>
+                  {(arm) => (
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={arm}
+                      disabled={toggle.isPending || dockerDown}
+                      title={dockerDown ? dockerReason : undefined}
+                    >
+                      <Stop className="h-4 w-4" weight="fill" />
+                      Stop
+                    </Button>
+                  )}
+                </DangerConfirm>
               </>
             ) : (
               <Button
@@ -152,11 +219,13 @@ export function TopBar() {
                 onClick={() => toggle.mutate("running")}
                 disabled={
                   toggle.isPending ||
+                  dockerDown ||
                   status.state === "starting" ||
                   // Interrupting steamcmd mid-download just restarts the
                   // download; there is nothing useful to do but wait.
                   updating
                 }
+                title={dockerDown ? dockerReason : undefined}
               >
                 <Play className="h-4 w-4" weight="fill" />
                 Start

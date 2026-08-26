@@ -23,7 +23,7 @@ const LEVEL_COLOR: Record<ConsoleLevel, string> = {
 };
 
 export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
-  const events = useConsoleStream();
+  const { events, state: streamState, error: streamError } = useConsoleStream();
   const [levels, setLevels] = useState<ConsoleLevel[]>(
     chatOnly ? ["chat"] : ["info", "warn", "error", "chat"],
   );
@@ -46,6 +46,11 @@ export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
 
   const rcon = useMutation({
     mutationFn: (cmd: string) => api.rcon(cmd),
+    meta: { action: "Command" },
+    // A refused or failed command used to vanish: the input cleared, nothing
+    // was echoed, and the denylist rejection in lib/cs2/sanitize.ts never
+    // reached the user. Put the command back so it can be corrected.
+    onError: (_err, cmd) => setInput(cmd),
   });
 
   function submit(e: React.FormEvent) {
@@ -143,8 +148,36 @@ export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
             </div>
           ))}
           {filtered.length === 0 && (
-            <div className="py-6 text-center text-muted-foreground">
-              No events yet…
+            <div className="space-y-1 py-6 text-center text-muted-foreground">
+              {streamState === "loading" && <p>Loading the log…</p>}
+              {streamState === "error" && (
+                <>
+                  <p className="text-destructive">
+                    Could not load the log backlog.
+                  </p>
+                  <p className="text-xs">{streamError}</p>
+                  <p className="text-xs">
+                    Live lines will still appear here if the server sends any.
+                  </p>
+                </>
+              )}
+              {streamState === "ready" && events.length === 0 && (
+                <>
+                  <p>Nothing logged yet.</p>
+                  <p className="text-xs">
+                    The server streams here as it plays. Run a command below to
+                    see its reply.
+                  </p>
+                </>
+              )}
+              {streamState === "ready" && events.length > 0 && (
+                <>
+                  <p>No lines match these filters.</p>
+                  <p className="text-xs">
+                    {events.length} line{events.length === 1 ? "" : "s"} hidden.
+                  </p>
+                </>
+              )}
             </div>
           )}
         </div>

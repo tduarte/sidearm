@@ -4,6 +4,8 @@ import type {
   MapEntry,
   MatchHistoryDetail,
   MatchState,
+  PendingOp,
+  PendingOpKind,
   Player,
   ServerConfig,
   ServerStatus,
@@ -29,6 +31,7 @@ import {
   safeToken,
 } from "@/lib/cs2/sanitize";
 import {
+  isSameMap,
   shortMapName,
   workshopIdFromMapName,
   workshopMapPath,
@@ -47,6 +50,8 @@ declare global {
     update: UpdateStatus | null;
     /** Workshop map we asked the server to host, until its filename is known. */
     pendingWorkshopMap: { id: string; fromMap: string; at: number } | null;
+    /** Command issued whose effect the status poll has not observed yet. */
+    pendingOp: PendingOp | null;
   };
 }
 global.__cs2Cache ??= {
@@ -65,6 +70,7 @@ global.__cs2Cache ??= {
   workshopMaps: null,
   update: null,
   pendingWorkshopMap: null,
+  pendingOp: null,
 };
 
 const cache = () => global.__cs2Cache;
@@ -190,8 +196,65 @@ function resolveWorkshopMapName(loadedMap: string): void {
   bus.emit({ type: "console.line", event: ev });
 }
 
+/**
+ * How long a pending operation may go unconfirmed before the panel stops
+ * claiming it is still in flight.
+ *
+ * Generous on purpose: a first workshop fetch takes about a minute, and a
+ * container restart that has to pull a CS2 update can run for hours. This is
+ * only a backstop against a pending badge that never clears — the UI already
+ * shows elapsed time, so a slow operation looks slow rather than stuck.
+ */
+const PENDING_OP_MAX_MS = 6 * 60 * 60 * 1000;
+
+/** Records a command whose effect the status poll has yet to observe. */
+export function beginPendingOp(kind: PendingOpKind, target?: string): void {
+  cache().pendingOp = { kind, target, since: new Date().toISOString() };
+}
+
+/**
+ * Decides whether a fresh poll shows the pending operation has landed.
+ *
+ * Everything here is observation, never optimism: the request returning 200
+ * only proves the server accepted the command, which for a map change means
+ * the download has not started yet.
+ */
+export function pendingOpSettled(op: PendingOp, status: ServerStatus): boolean {
+  switch (op.kind) {
+    case "map":
+      // isSameMap understands that `workshop/3070602404` and the short name
+      // the server reports once loaded are the same map.
+      return !!op.target && isSameMap(status.map, op.target);
+
+    case "stop":
+      return status.state === "stopped";
+
+    case "start":
+      return status.state === "running";
+
+    case "restart":
+    case "update": {
+      // A restart is only done once the container we are looking at is a
+      // *newer* one than the request. Waiting for `running` alone would clear
+      // instantly, before Docker had even torn the old process down.
+      if (status.uptimeSec === null) return false;
+      const startedAtMs = Date.now() - status.uptimeSec * 1000;
+      return status.state === "running" &&
+        startedAtMs >= new Date(op.since).getTime();
+    }
+  }
+}
+
 export function updateCache(status: ServerStatus, players: Player[] | null) {
   resolveWorkshopMapName(status.map);
+
+  const op = cache().pendingOp;
+  if (op) {
+    const expired = Date.now() - new Date(op.since).getTime() > PENDING_OP_MAX_MS;
+    if (pendingOpSettled(op, status) || expired) cache().pendingOp = null;
+  }
+  status.pendingOp = cache().pendingOp;
+
   cache().status = status;
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
@@ -319,8 +382,13 @@ export const realAdapter = {
   async setServerState(next: "running" | "stopped"): Promise<ServerStatus> {
     const action = next === "running" ? "start" : "stop";
     await containerAction("cs2", action);
+    beginPendingOp(next === "running" ? "start" : "stop");
     const { status } = await fetchStatus();
-    const updated: ServerStatus = { ...status, state: next === "running" ? "starting" : "stopping" };
+    const updated: ServerStatus = {
+      ...status,
+      state: next === "running" ? "starting" : "stopping",
+      pendingOp: cache().pendingOp,
+    };
     cache().status = updated;
     bus.emit({ type: "status.update", status: updated });
     return updated;
@@ -328,9 +396,14 @@ export const realAdapter = {
 
   async restart(): Promise<void> {
     await containerAction("cs2", "restart");
+    beginPendingOp("restart");
     const s = cache().status;
     if (s) {
-      const updated = { ...s, state: "starting" as const };
+      const updated = {
+        ...s,
+        state: "starting" as const,
+        pendingOp: cache().pendingOp,
+      };
       cache().status = updated;
       bus.emit({ type: "status.update", status: updated });
     }
@@ -450,9 +523,15 @@ export const realAdapter = {
       await rconExec(`changelevel ${map}`);
     }
 
+    // No optimistic rewrite of `status.map` here. It used to be set the moment
+    // RCON accepted the command, so the UI showed the new map while the server
+    // was still downloading it — the panel claiming an outcome it had not
+    // observed. The poll reports the map when the level actually loads; until
+    // then this is a pending operation.
+    beginPendingOp("map", map);
     const s = cache().status;
     if (s) {
-      const updated = { ...s, map };
+      const updated = { ...s, pendingOp: cache().pendingOp };
       cache().status = updated;
       bus.emit({ type: "status.update", status: updated });
     }
@@ -590,6 +669,7 @@ export const realAdapter = {
   /** Restarts the container, which re-runs `steamcmd app_update 730` on boot. */
   async applyUpdate(): Promise<void> {
     await containerAction("cs2", "restart");
+    beginPendingOp("update");
     setServerStatusState("starting");
   },
 
@@ -618,7 +698,7 @@ export function setUpdateStatus(update: UpdateStatus): void {
 function setServerStatusState(state: ServerStatus["state"]): void {
   const s = cache().status;
   if (!s) return;
-  const updated: ServerStatus = { ...s, state };
+  const updated: ServerStatus = { ...s, state, pendingOp: cache().pendingOp };
   cache().status = updated;
   bus.emit({ type: "status.update", status: updated });
 }

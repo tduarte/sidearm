@@ -2,8 +2,11 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   containerStateToServerState,
+  envMaxPlayers,
+  humanSlots,
   parseGameMode,
   parseStatusText,
+  uptimeFrom,
 } from "@/lib/cs2/status";
 import { mergeRoster, updateCache } from "@/lib/api/server/real";
 import type { Player, ServerStatus } from "@/lib/api/types";
@@ -37,6 +40,143 @@ players  : 1 humans, 2 bots (16 max) (not hibernating) (unreserved)
   3   00:05   12    0     active  786432 BOT 'Bot Kyle'
 `;
 
+/**
+ * Verbatim from the live server (CS2 build 1.41.7.7, `CS2_MAXPLAYERS=10`,
+ * `sv_visiblemaxplayers = -1`). Note `(0 max)`: this is exactly the output that
+ * made the panel display "0/0 players" on a healthy server.
+ */
+const REAL_CS2 = `Server:  Running [0.0.0.0:27015]
+Client:  Disconnected
+----- Status -----
+@ Current  :  game
+source   : console
+hostname : sidearm
+spawn    : 1
+version  : 1.41.7.7/14177 10896 secure  public
+steamid  : [G:1:15633205] (85568392935672629)
+udp/ip   : 0.0.0.0:27015 (public 76.226.161.203:27015)
+os/type  : Linux dedicated
+players  : 0 humans, 2 bots (0 max) (not hibernating) (unreserved)
+---------spawngroups----
+loaded spawngroup(  1)  : SV:  [1: de_mirage | main lump | mapload]
+---------players--------
+  id     time ping loss      state   rate adr name
+   0      BOT    0    0     active      0 'Mangos'
+   1      BOT    0    0     active      0 'Rezan'
+#end
+`;
+
+describe("parseStatusText — real CS2 output", () => {
+  const s = parseStatusText(REAL_CS2);
+
+  it("reads hostname and falls back to the spawngroup line for the map", () => {
+    assert.equal(s.hostname, "sidearm");
+    assert.equal(s.map, "de_mirage");
+  });
+
+  it("reports the advertised max as 0 without mistaking it for the ceiling", () => {
+    // Regression: this figure is sv_visiblemaxplayers, which defaults to -1 and
+    // prints as 0. Treating it as maxPlayers is what showed "0/0" in the UI.
+    assert.equal(s.visibleMaxPlayers, 0);
+    assert.equal(s.humans, 0);
+    assert.equal(s.bots, 2);
+  });
+
+  it("counts bots as bots, not as players", () => {
+    assert.equal(s.players.length, 0);
+  });
+
+  it("reads the VAC flag", () => {
+    assert.equal(s.vacSecure, true);
+  });
+});
+
+describe("GOTV", () => {
+  // Verbatim from the live server with TV_ENABLE=1. `tv_status` is the obvious
+  // read-back and is useless: over RCON on CS2 it returns an empty string, so
+  // this line is the only signal that GOTV is up.
+  const WITH_TV = `hostname : sidearm
+version  : 1.41.7.7/14177 10896 secure  public
+sourcetv[0] : 0.0.0.0:27020 (public 76.226.161.203:27020) delay 30.0s
+players  : 0 humans, 3 bots (0 max) (not hibernating) (unreserved)
+`;
+
+  it("reads the address and delay when GOTV is running", () => {
+    const s = parseStatusText(WITH_TV);
+    assert.equal(s.gotv?.address, "0.0.0.0:27020");
+    assert.equal(s.gotv?.delaySec, 30);
+  });
+
+  it("is null when GOTV is off — the line is simply absent", () => {
+    assert.equal(parseStatusText(REAL_CS2).gotv, null);
+  });
+});
+
+describe("humanSlots", () => {
+  it("subtracts the slot GOTV occupies", () => {
+    // Verified live: with -maxplayers 10 and GOTV on, the server lists
+    // 'sidearm CSTV' in slot 0 and only nine people can connect — enough to
+    // break a 5v5 without anything in the launch line hinting at it.
+    assert.equal(humanSlots(10, true), 9);
+    assert.equal(humanSlots(10, false), 10);
+  });
+
+  it("stays null when the ceiling is unknown", () => {
+    assert.equal(humanSlots(null, true), null);
+    assert.equal(humanSlots(null, false), null);
+  });
+
+  it("never goes negative", () => {
+    assert.equal(humanSlots(0, true), 0);
+  });
+});
+
+describe("VAC flag", () => {
+  const withVersion = (line: string) =>
+    parseStatusText(`hostname : x\nversion  : ${line}\n`).vacSecure;
+
+  it("matches `secure` on a word boundary, not inside `insecure`", () => {
+    // The whole point: reporting a dead GSLT as healthy is the worst possible
+    // failure for this field.
+    assert.equal(withVersion("1.41.7.7/14177 10896 secure  public"), true);
+    assert.equal(withVersion("1.41.7.7/14177 10896 insecure  public"), false);
+  });
+
+  it("is null when there is no version line at all", () => {
+    assert.equal(parseStatusText("hostname : x\n").vacSecure, null);
+  });
+});
+
+describe("envMaxPlayers", () => {
+  it("reads the real ceiling off the container launch environment", () => {
+    assert.equal(
+      envMaxPlayers(["CS2_PORT=27015", "CS2_MAXPLAYERS=10", "PATH=/usr/bin"]),
+      10,
+    );
+  });
+
+  it("returns null rather than guessing when it is absent or junk", () => {
+    assert.equal(envMaxPlayers(null), null);
+    assert.equal(envMaxPlayers(["CS2_PORT=27015"]), null);
+    assert.equal(envMaxPlayers(["CS2_MAXPLAYERS="]), null);
+    assert.equal(envMaxPlayers(["CS2_MAXPLAYERS=0"]), null);
+  });
+});
+
+describe("uptimeFrom", () => {
+  it("derives seconds from the container StartedAt", () => {
+    const started = new Date(Date.now() - 90_000).toISOString();
+    const secs = uptimeFrom({ StartedAt: started });
+    assert.ok(secs !== null && secs >= 89 && secs <= 92, `got ${secs}`);
+  });
+
+  it("is null when Docker did not answer or the stamp is unusable", () => {
+    assert.equal(uptimeFrom(null), null);
+    assert.equal(uptimeFrom({ StartedAt: undefined }), null);
+    assert.equal(uptimeFrom({ StartedAt: "not-a-date" }), null);
+  });
+});
+
 describe("parseStatusText — hash table layout", () => {
   const s = parseStatusText(HASH_TABLE);
 
@@ -45,9 +185,10 @@ describe("parseStatusText — hash table layout", () => {
     assert.equal(s.map, "de_mirage");
   });
 
-  it("reads human count and max players from '(10/0 max)'", () => {
+  it("reads human count and the advertised max from '(10/0 max)'", () => {
     assert.equal(s.humans, 2);
-    assert.equal(s.maxPlayers, 10);
+    // Advertised, not the ceiling: `(N max)` reports sv_visiblemaxplayers.
+    assert.equal(s.visibleMaxPlayers, 10);
   });
 
   it("extracts real SteamIDs, not slot numbers", () => {
@@ -84,8 +225,8 @@ describe("parseStatusText — legacy layout", () => {
     assert.equal(s.map, "de_dust2");
   });
 
-  it("reads max players from '(16 max)'", () => {
-    assert.equal(s.maxPlayers, 16);
+  it("reads the advertised max from '(16 max)'", () => {
+    assert.equal(s.visibleMaxPlayers, 16);
   });
 
   it("excludes bots and keeps humans", () => {
@@ -115,6 +256,12 @@ describe("parseGameMode", () => {
     assert.equal(parseGameMode(`"game_type" = "0"\n"game_mode" = "1"`), "competitive");
     assert.equal(parseGameMode(`"game_type" = "0"\n"game_mode" = "2"`), "wingman");
     assert.equal(parseGameMode(`"game_type" = "1"\n"game_mode" = "2"`), "deathmatch");
+  });
+
+  it("reads the unquoted echo format CS2 actually uses", () => {
+    // Live CS2 answers `game_type = 0`, not Source's `"game_type" = "0"`.
+    assert.equal(parseGameMode("game_type = 0\ngame_mode = 1\n"), "competitive");
+    assert.equal(parseGameMode("game_type = 1\ngame_mode = 2\n"), "deathmatch");
   });
 
   it("defaults to competitive on unparseable output", () => {
@@ -276,11 +423,15 @@ describe("updateCache roster handling", () => {
     cpuPct: 0,
     memMb: 0,
     memMaxMb: 8192,
-    fps: 0,
-    tickrate: 64,
+    fps: null,
+    tickrate: null,
+    vacSecure: true,
+    build: 14177,
+    gotv: null,
     connectUrl: "connect 127.0.0.1:27015",
     ip: "127.0.0.1",
     port: 27015,
+    control: { docker: true, rcon: true },
   };
 
   it("keeps the last known roster when the poll could not read one", () => {
