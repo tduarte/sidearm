@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { MagnifyingGlass, Trophy } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
@@ -17,6 +17,7 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadError } from "@/components/load-error";
+import { RoundTimeline } from "@/components/history/round-timeline";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -107,7 +108,8 @@ export default function HistoryPage() {
                       </TableRow>
                     )}
                     {(matches.data ?? []).map((m) => (
-                      <TableRow key={m.id}>
+                      <Fragment key={m.id}>
+                      <TableRow>
                         <TableCell className="text-muted-foreground">
                           {new Date(m.startedAt).toLocaleString()}
                         </TableCell>
@@ -137,6 +139,14 @@ export default function HistoryPage() {
                         </TableCell>
                         <TableCell className="text-right">{m.playerCount}</TableCell>
                       </TableRow>
+                      {m.rounds && m.rounds.length > 0 && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={7} className="pt-0">
+                            <RoundTimeline rounds={m.rounds} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      </Fragment>
                     ))}
                   </TableBody>
                 </Table>

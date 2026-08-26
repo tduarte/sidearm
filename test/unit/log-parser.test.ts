@@ -262,3 +262,61 @@ describe("robustness", () => {
     assert.equal(new Set(chatMessages.map((m) => m.id)).size, 20);
   });
 });
+
+describe("round outcomes", () => {
+  it("reads the win condition that used to be discarded", () => {
+    // The reason sits in group 2 of the team-trigger line and was matched and
+    // thrown away, so a defuse was indistinguishable from a timeout.
+    const r = parseLine(
+      'L 08/26/2026 - 07:45:01: Team "CT" triggered "SFUI_Notice_Bomb_Defused" (CT "5") (T "3")',
+    );
+    const end = r.events.find((e) => e.type === "round.end");
+    assert.ok(end && end.type === "round.end");
+    assert.equal(end.winner, "CT");
+    assert.equal(end.reason, "bomb_defused");
+    assert.equal(end.round, 8);
+    assert.deepEqual(end.score, { ct: 5, t: 3 });
+  });
+
+  it("still emits the score event alongside it", () => {
+    const r = parseLine(
+      'Team "TERRORIST" triggered "SFUI_Notice_Terrorists_Win" (CT "5") (T "4")',
+    );
+    assert.ok(r.events.some((e) => e.type === "match.score"));
+    assert.ok(r.events.some((e) => e.type === "round.end"));
+  });
+
+  it("keeps an unrecognised condition readable instead of flattening it", () => {
+    const r = parseLine('Team "CT" triggered "SFUI_Notice_Some_New_Thing" (CT "1") (T "0")');
+    const end = r.events.find((e) => e.type === "round.end");
+    assert.ok(end && end.type === "round.end");
+    assert.equal(end.reason, "some_new_thing");
+  });
+
+  it("sees bomb plants and MVPs, which were invisible before", () => {
+    // Player-triggered lines fell through: WORLD_TRIGGER_RE and
+    // TEAM_TRIGGER_RE are anchored to ^World and ^Team.
+    const plant = parseLine('"Neo<2><[U:1:1]><TERRORIST>" triggered "Bomb_Planted"');
+    const ev = plant.events.find((e) => e.type === "round.event");
+    assert.ok(ev && ev.type === "round.event");
+    assert.equal(ev.kind, "bomb_planted");
+    assert.equal(ev.steamId, "[U:1:1]");
+
+    const mvp = parseLine('"Neo<2><[U:1:1]><CT>" triggered "Round_MVP"');
+    assert.ok(
+      mvp.events.some((e) => e.type === "round.event" && e.kind === "mvp"),
+    );
+  });
+
+  it("attaches the player to the console line", () => {
+    // ConsoleEvent.player is in the contract and the real parser never set it.
+    const r = parseLine('"Neo<2><[U:1:1]><CT>" triggered "Bomb_Defused"');
+    assert.equal(r.consoleEvents[0].player?.name, "Neo");
+    assert.equal(r.consoleEvents[0].player?.team, "CT");
+  });
+
+  it("marks a round start without treating it as a phase change", () => {
+    const r = parseLine('World triggered "Round_Start"');
+    assert.ok(r.events.some((e) => e.type === "round.start"));
+  });
+});

@@ -282,6 +282,8 @@ export interface MatchHistoryEntry {
 }
 
 export interface MatchHistoryDetail extends MatchHistoryEntry {
+  /** Round-by-round record, when the log stream captured one. */
+  rounds?: RoundRecord[];
   players: Array<{
     steamId: string;
     name: string;
@@ -342,6 +344,18 @@ export interface UpdateStatus {
   message: string;
 }
 
+/** Things worth recording inside a round. */
+export type RoundEventKind = "bomb_planted" | "bomb_defused" | "mvp";
+
+/** One completed round, as the log stream reports it. */
+export interface RoundRecord {
+  round: number;
+  winner: Team;
+  /** Win condition, e.g. `bomb_defused`, `t_win_elimination`, `target_saved`. */
+  reason: string;
+  score: { ct: number; t: number };
+}
+
 export type WsEvent =
   | { type: "status.update"; status: ServerStatus }
   | { type: "player.join"; player: Player }
@@ -354,4 +368,12 @@ export type WsEvent =
   | { type: "chat.message"; message: ChatMessage }
   | { type: "match.phase"; phase: MatchPhase }
   | { type: "match.score"; score: { ct: number; t: number }; round: number }
-  | { type: "server.update"; update: UpdateStatus };
+  | { type: "server.update"; update: UpdateStatus }
+  | { type: "round.start" }
+  | ({ type: "round.end" } & RoundRecord)
+  | {
+      type: "round.event";
+      kind: RoundEventKind;
+      steamId: string;
+      name: string;
+    };

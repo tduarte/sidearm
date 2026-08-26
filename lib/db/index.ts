@@ -48,6 +48,17 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (match_id, steam_id)
     );
 
+    CREATE TABLE IF NOT EXISTS match_rounds (
+      match_id   TEXT NOT NULL REFERENCES matches(id),
+      round      INTEGER NOT NULL,
+      winner     TEXT NOT NULL,
+      reason     TEXT NOT NULL,
+      ct_score   INTEGER NOT NULL,
+      t_score    INTEGER NOT NULL,
+      ended_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      PRIMARY KEY (match_id, round)
+    );
+
     CREATE TABLE IF NOT EXISTS saved_config (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL

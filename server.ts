@@ -57,7 +57,7 @@ app.prepare().then(async () => {
   const { updateCache, realAdapter } = await import("./lib/api/server/real");
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
-  const { beginMatch, endMatch } = await import("./lib/db/matches");
+  const { beginMatch, endMatch, insertRound } = await import("./lib/db/matches");
   const { advanceRotation } = await import("./lib/api/server/real");
 
   // Ensure DB is open and migrated before anything else touches it
@@ -68,6 +68,21 @@ app.prepare().then(async () => {
   // which has its own module registry.
   let activeMatchId: string | null = null;
   bus.subscribe((ev) => {
+    // Rounds are recorded against the open match, not the match lifecycle:
+    // Round_End fires ~24 times a game and must not close the record.
+    if (ev.type === "round.end") {
+      if (activeMatchId) {
+        try {
+          insertRound(activeMatchId, {
+            round: ev.round,
+            winner: ev.winner,
+            reason: ev.reason,
+            score: ev.score,
+          });
+        } catch { /* non-critical */ }
+      }
+      return;
+    }
     if (ev.type !== "match.phase") return;
     const cache = globalThis.__cs2Cache;
     if (ev.phase === "live" && !activeMatchId) {
