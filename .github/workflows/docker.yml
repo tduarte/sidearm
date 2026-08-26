@@ -12,6 +12,77 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  # Decides whether the Docker image could possibly have changed, so a docs- or
+  # compose-only PR does not spend two minutes rebuilding a byte-identical image.
+  #
+  # Deliberately a DENYLIST: anything not matched below counts as image-relevant.
+  # A path nobody thought about therefore still triggers a build, which wastes
+  # CPU; an allowlist would silently skip it and publish a stale image. Wrong in
+  # the cheap direction on purpose.
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.filter.outputs.image }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect image-relevant changes
+        id: filter
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+
+          # A release tag always rebuilds, whatever it points at.
+          if [ "$REF_TYPE" = "tag" ]; then
+            echo "tag push - building"
+            echo "image=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ "$EVENT" = "pull_request" ]; then
+            git fetch -q --no-tags origin "$BASE_REF"
+            files=$(git diff --name-only "origin/$BASE_REF...HEAD")
+          elif [ -n "${BEFORE:-}" ] && git rev-parse -q --verify "${BEFORE}^{commit}" >/dev/null 2>&1; then
+            files=$(git diff --name-only "$BEFORE" HEAD)
+          else
+            files=""
+          fi
+
+          # No diff we can trust (first push, force-push, unknown base): build.
+          if [ -z "$files" ]; then
+            echo "could not determine changed files - building to be safe"
+            echo "image=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "changed files:"
+          echo "$files" | sed 's/^/  /'
+
+          # None of these end up in the runtime image. The Dockerfile copies only
+          # .next, public, app, components, hooks, lib, server.ts and the config
+          # and manifest files, so tests and scripts cannot alter it -- and a type
+          # error in a test is still caught by `verify`, which always runs.
+          # .github/ is absent on purpose: changing CI should revalidate the build.
+          IGNORED='(\.md$|^docker-compose[^/]*\.ya?ml$|^\.env\.example$|^scripts/|^test/|^\.gitignore$|^LICENSE$)'
+
+          relevant=$(echo "$files" | grep -vE "$IGNORED" || true)
+
+          if [ -n "$relevant" ]; then
+            echo "image-relevant changes:"
+            echo "$relevant" | sed 's/^/  /'
+            echo "image=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no image-relevant changes - skipping the Docker build"
+            echo "image=false" >> "$GITHUB_OUTPUT"
+          fi
+
   verify:
     runs-on: ubuntu-latest
     steps:
@@ -40,7 +111,10 @@ jobs:
         run: npm run test:integration
 
   build:
-    needs: verify
+    needs: [verify, changes]
+    # Skipped (not failed) when nothing touched the image; a skipped job still
+    # satisfies a required status check, should one ever be configured.
+    if: needs.changes.outputs.image == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
