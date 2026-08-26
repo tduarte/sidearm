@@ -34,7 +34,11 @@ services:
       - "27020:27020/udp"
     networks: [panel-net]
     healthcheck:
-      test: ["CMD", "nc", "-z", "-u", "127.0.0.1", "27015"]
+      # Probes RCON's TCP port with bash's /dev/tcp, because the image ships
+      # neither nc nor curl -- the previous `nc -z -u` exited 127 on every run,
+      # so the container was permanently unhealthy. TCP is also the only honest
+      # signal here: `nc -z -u` cannot tell an open UDP port from a silent one.
+      test: ["CMD", "bash", "-c", "exec 3<>/dev/tcp/127.0.0.1/27015"]
       interval: 30s
       timeout: 5s
       retries: 6
