@@ -28,8 +28,13 @@ describe("quoteArg", () => {
     assert.equal(quoteArg("x".repeat(500)).length, 255);
   });
 
-  it("leaves ordinary hostnames intact apart from spaces", () => {
+  it("leaves ordinary hostnames intact, spaces included", () => {
     assert.equal(quoteArg("sidearm-5v5-comp"), "sidearm-5v5-comp");
+    // Spaces are safe inside the double quotes every caller wraps this in, and
+    // stripping them would turn a server name into `sidearm|5v5comp` and a kick
+    // reason into one run-on word.
+    assert.equal(quoteArg("sidearm | 5v5 comp"), "sidearm | 5v5 comp");
+    assert.equal(quoteArg("no toxicity please"), "no toxicity please");
   });
 });
 
