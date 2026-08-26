@@ -38,21 +38,27 @@ RUN addgroup --system --gid 1001 nodejs \
 # / hooks / public) + production deps. `tsx` is a runtime TypeScript loader;
 # we stay with it rather than pre-compiling because the custom server also
 # imports `./lib/**/*.ts` directly.
-COPY --from=deps  /app/node_modules ./node_modules
-COPY --from=build /app/.next         ./.next
-COPY --from=build /app/public        ./public
-COPY --from=build /app/app           ./app
-COPY --from=build /app/components    ./components
-COPY --from=build /app/hooks         ./hooks
-COPY --from=build /app/lib           ./lib
-COPY --from=build /app/server.ts        ./server.ts
-COPY --from=build /app/next.config.ts   ./next.config.ts
-COPY --from=build /app/tsconfig.json    ./tsconfig.json
-COPY --from=build /app/package.json     ./package.json
-COPY --from=build /app/package-lock.json ./package-lock.json
+COPY --from=deps  --chown=sidearm:nodejs /app/node_modules ./node_modules
+COPY --from=build --chown=sidearm:nodejs /app/.next         ./.next
+COPY --from=build --chown=sidearm:nodejs /app/public        ./public
+COPY --from=build --chown=sidearm:nodejs /app/app           ./app
+COPY --from=build --chown=sidearm:nodejs /app/components    ./components
+COPY --from=build --chown=sidearm:nodejs /app/hooks         ./hooks
+COPY --from=build --chown=sidearm:nodejs /app/lib           ./lib
+COPY --from=build --chown=sidearm:nodejs /app/server.ts        ./server.ts
+COPY --from=build --chown=sidearm:nodejs /app/next.config.ts   ./next.config.ts
+COPY --from=build --chown=sidearm:nodejs /app/tsconfig.json    ./tsconfig.json
+COPY --from=build --chown=sidearm:nodejs /app/package.json     ./package.json
+COPY --from=build --chown=sidearm:nodejs /app/package-lock.json ./package-lock.json
 
 # /data holds the SQLite DB (Phase E); create it so the non-root user can write.
-RUN mkdir -p /data && chown -R sidearm:nodejs /data /app
+#
+# Deliberately NOT `chown -R ... /app`: on overlayfs every ownership change
+# forces a copy-up, so recursing through node_modules rewrites the entire
+# dependency tree file-by-file. That measured 607s on a ZFS-backed
+# unprivileged LXC. The COPY --chown flags above set ownership as the layers
+# are written, which costs nothing.
+RUN mkdir -p /data && chown sidearm:nodejs /data /app
 
 USER sidearm
 EXPOSE 3000
