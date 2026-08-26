@@ -81,6 +81,8 @@ declare global {
     pendingOp: PendingOp | null;
     /** Installed maps from `maps *`; null until asked, and only asked once. */
     officialMaps: MapEntry[] | null;
+    /** Workshop ids already looked up on Steam this process. */
+    metaAttempted: Set<string>;
   };
 }
 global.__cs2Cache ??= {
@@ -102,6 +104,7 @@ global.__cs2Cache ??= {
   pendingWorkshopMap: null,
   pendingOp: null,
   officialMaps: null,
+  metaAttempted: new Set<string>(),
 };
 
 const cache = () => global.__cs2Cache;
@@ -321,6 +324,45 @@ export function updateCache(
 /** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
 function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+/**
+ * Fills in title and thumbnail for workshop maps added before the panel knew
+ * how to ask Steam for them.
+ *
+ * Deliberately not awaited: the map list must render immediately, and a slow
+ * or absent internet connection must not hold it up. The result lands in the
+ * database and appears on the next refresh.
+ *
+ * Each id is attempted once per panel lifetime, so a map Steam has no record of
+ * — a mistyped id, or a delisted item — does not mean a request on every poll.
+ */
+function backfillWorkshopMeta(entries: MapEntry[]): void {
+  for (const entry of entries) {
+    const id = entry.workshopId;
+    if (!id || entry.thumbnailUrl) continue;
+    if (cache().metaAttempted.has(id)) continue;
+    cache().metaAttempted.add(id);
+
+    void (async () => {
+      const meta = await fetchWorkshopMeta(id);
+      if (!meta) return;
+      const thumbFile = meta.previewUrl
+        ? await mirrorThumbnail(id, meta.previewUrl)
+        : null;
+      try {
+        setWorkshopMeta(id, {
+          title: meta.title,
+          previewUrl: meta.previewUrl,
+          fileSize: meta.fileSize,
+          timeUpdated: meta.timeUpdated,
+          thumbFile,
+        });
+        // Drop the cached library so the next read picks the new columns up.
+        cache().workshopMaps = null;
+      } catch { /* non-critical */ }
+    })();
+  }
 }
 
 /**
@@ -594,10 +636,12 @@ export const realAdapter = {
   },
 
   async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {
+    const workshop = workshopLibrary();
+    backfillWorkshopMeta(workshop);
     return {
       current: cache().status?.map ?? "unknown",
       rotation: [],
-      all: [...workshopLibrary(), ...(await officialLibrary())],
+      all: [...workshop, ...(await officialLibrary())],
     };
   },
 

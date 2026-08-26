@@ -146,7 +146,7 @@ export default function MapsPage() {
                   id="ws-id"
                   value={subInput}
                   onChange={(e) => setSubInput(e.target.value)}
-                  placeholder="3070602404 or …filedetails/?id=3070602404"
+                  placeholder="e.g. 3070563536 or a …filedetails/?id=… URL"
                 />
               </div>
               <div className="space-y-1.5">
