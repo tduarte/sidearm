@@ -68,6 +68,7 @@ const initialMockState = {
     tickrate: null,
     vacSecure: true,
     build: 14177,
+    gotv: { address: "0.0.0.0:27020", delaySec: 30 },
     connectUrl: "steam://connect/192.168.1.20:27015/trusted",
     ip: "192.168.1.20",
     port: 27015,

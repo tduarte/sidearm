@@ -97,6 +97,8 @@ export interface ParsedStatus {
   bots: number;
   /** VAC state from the `version :` line; `null` when the line is absent. */
   vacSecure: boolean | null;
+  /** Present only while GOTV is actually running. */
+  gotv: { address: string; delaySec: number | null } | null;
   players: Player[];
 }
 
@@ -109,6 +111,17 @@ export interface ParsedStatus {
  * `insecure`, and getting that backwards would report a dead GSLT as healthy.
  */
 const VAC_RE = /^\s*version\s*:.*?\b(in)?secure\b/im;
+
+/**
+ * GOTV's own line in `status`, present only when it is running:
+ *
+ *   sourcetv[0] : 0.0.0.0:27020 (public 76.226.161.203:27020) delay 30.0s
+ *
+ * This is the only usable read-back for GOTV. `tv_status` looks like the
+ * obvious source and is not: over RCON on CS2 it returns an empty string.
+ */
+const SOURCETV_RE =
+  /^\s*sourcetv\[\d+\]\s*:\s*(\S+)(?:.*?delay\s+([\d.]+)s)?/im;
 
 /**
  * Parses RCON `status` output.
@@ -144,6 +157,14 @@ export function parseStatusText(text: string): ParsedStatus {
   const vacMatch = VAC_RE.exec(text);
   const vacSecure = vacMatch ? vacMatch[1] === undefined : null;
 
+  const tvMatch = SOURCETV_RE.exec(text);
+  const gotv = tvMatch
+    ? {
+        address: tvMatch[1],
+        delaySec: tvMatch[2] ? Number.parseFloat(tvMatch[2]) : null,
+      }
+    : null;
+
   const players: Player[] = [];
   for (const rawLine of text.split("\n")) {
     const line = rawLine.replace(/\r$/, "");
@@ -168,7 +189,16 @@ export function parseStatusText(text: string): ParsedStatus {
     }
   }
 
-  return { hostname, map, humans, bots, visibleMaxPlayers, vacSecure, players };
+  return {
+    hostname,
+    map,
+    humans,
+    bots,
+    visibleMaxPlayers,
+    vacSecure,
+    gotv,
+    players,
+  };
 }
 
 function makePlayer(
@@ -291,11 +321,14 @@ export async function fetchStatus(): Promise<{
     gameMode,
     players: parsed.humans,
     // The launch argument, not `status`'s advertised `(N max)` — see
-    // `envMaxPlayers`. Falls back to the advertised figure only when Docker is
-    // unreachable and it is actually meaningful (> 0).
-    maxPlayers:
+    // `envMaxPlayers` — minus the slot GOTV holds. Falls back to the advertised
+    // figure only when Docker is unreachable and it is meaningful (> 0).
+    maxPlayers: humanSlots(
       envMaxPlayers(containerEnv) ??
-      (parsed.visibleMaxPlayers > 0 ? parsed.visibleMaxPlayers : null),
+        (parsed.visibleMaxPlayers > 0 ? parsed.visibleMaxPlayers : null),
+      parsed.gotv !== null,
+    ),
+    gotv: parsed.gotv,
     visibleMaxPlayers: parsed.visibleMaxPlayers > 0 ? parsed.visibleMaxPlayers : null,
     uptimeSec: uptimeFrom(containerState),
     cpuPct: docker.cpuPct,
@@ -338,6 +371,19 @@ export function envMaxPlayers(env: string[] | null): number | null {
     return Number.isFinite(n) && n > 0 ? n : null;
   }
   return null;
+}
+
+/**
+ * Slots a human can actually take.
+ *
+ * GOTV joins as a player: with `-maxplayers 10` and GOTV on, the server lists
+ * `'sidearm CSTV'` in slot 0 and only nine people can connect — enough to break
+ * a 5v5. Verified on a live server; the launch line still says 10, so nothing
+ * but the player table gives this away.
+ */
+export function humanSlots(ceiling: number | null, gotvRunning: boolean): number | null {
+  if (ceiling === null) return null;
+  return gotvRunning ? Math.max(0, ceiling - 1) : ceiling;
 }
 
 /** Seconds since the container started; `null` when Docker is unreachable. */

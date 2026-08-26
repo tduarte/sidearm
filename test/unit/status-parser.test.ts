@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   containerStateToServerState,
   envMaxPlayers,
+  humanSlots,
   parseGameMode,
   parseStatusText,
   uptimeFrom,
@@ -87,6 +88,46 @@ describe("parseStatusText — real CS2 output", () => {
 
   it("reads the VAC flag", () => {
     assert.equal(s.vacSecure, true);
+  });
+});
+
+describe("GOTV", () => {
+  // Verbatim from the live server with TV_ENABLE=1. `tv_status` is the obvious
+  // read-back and is useless: over RCON on CS2 it returns an empty string, so
+  // this line is the only signal that GOTV is up.
+  const WITH_TV = `hostname : sidearm
+version  : 1.41.7.7/14177 10896 secure  public
+sourcetv[0] : 0.0.0.0:27020 (public 76.226.161.203:27020) delay 30.0s
+players  : 0 humans, 3 bots (0 max) (not hibernating) (unreserved)
+`;
+
+  it("reads the address and delay when GOTV is running", () => {
+    const s = parseStatusText(WITH_TV);
+    assert.equal(s.gotv?.address, "0.0.0.0:27020");
+    assert.equal(s.gotv?.delaySec, 30);
+  });
+
+  it("is null when GOTV is off — the line is simply absent", () => {
+    assert.equal(parseStatusText(REAL_CS2).gotv, null);
+  });
+});
+
+describe("humanSlots", () => {
+  it("subtracts the slot GOTV occupies", () => {
+    // Verified live: with -maxplayers 10 and GOTV on, the server lists
+    // 'sidearm CSTV' in slot 0 and only nine people can connect — enough to
+    // break a 5v5 without anything in the launch line hinting at it.
+    assert.equal(humanSlots(10, true), 9);
+    assert.equal(humanSlots(10, false), 10);
+  });
+
+  it("stays null when the ceiling is unknown", () => {
+    assert.equal(humanSlots(null, true), null);
+    assert.equal(humanSlots(null, false), null);
+  });
+
+  it("never goes negative", () => {
+    assert.equal(humanSlots(0, true), 0);
   });
 });
 
@@ -386,6 +427,7 @@ describe("updateCache roster handling", () => {
     tickrate: null,
     vacSecure: true,
     build: 14177,
+    gotv: null,
     connectUrl: "connect 127.0.0.1:27015",
     ip: "127.0.0.1",
     port: 27015,

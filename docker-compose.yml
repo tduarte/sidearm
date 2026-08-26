@@ -19,7 +19,9 @@ services:
       CS2_SERVERNAME: ${SERVER_NAME:-sidearm}
       CS2_PW: ${SERVER_PASSWORD:-}
       CS2_RCONPW: ${RCON_PASSWORD}
-      CS2_MAXPLAYERS: ${CS2_MAXPLAYERS:-10}
+      # 11, not 10: GOTV occupies a slot (see TV_ENABLE below), so a 10-slot
+      # server only fits nine people and a 5v5 will not start.
+      CS2_MAXPLAYERS: ${CS2_MAXPLAYERS:-11}
       CS2_GAMETYPE: ${CS2_GAMETYPE:-0}
       CS2_GAMEMODE: ${CS2_GAMEMODE:-1}
       CS2_MAPGROUP: ${CS2_MAPGROUP:-mg_active}

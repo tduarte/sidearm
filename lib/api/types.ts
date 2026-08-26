@@ -75,6 +75,13 @@ export interface ServerStatus {
   vacSecure: boolean | null;
   /** Steam build number from the same line; feeds the update check. */
   build: number | null;
+  /**
+   * GOTV, when it is actually running. Read from `status`'s `sourcetv[0]` line:
+   * `tv_status` is the obvious source and returns an empty string over RCON.
+   *
+   * Note GOTV occupies a player slot, which `maxPlayers` already accounts for.
+   */
+  gotv: { address: string; delaySec: number | null } | null;
   connectUrl: string;
   ip: string;
   port: number;
