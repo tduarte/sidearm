@@ -160,7 +160,12 @@ export interface MatchState {
   phase: MatchPhase;
   score: { ct: number; t: number };
   round: number;
-  maxRounds: number;
+  /**
+   * From `mp_maxrounds`, read on the status poll. `null` until the server has
+   * answered — it used to be the hardcoded constant 24, which is simply wrong
+   * on any server not running the default competitive length.
+   */
+  maxRounds: number | null;
   paused: boolean;
   demoRecording: boolean;
 }

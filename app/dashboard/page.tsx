@@ -168,7 +168,9 @@ export default function DashboardPage() {
                   {match.paused ? " · paused" : ""}
                 </Badge>
                 <p className="text-xs text-muted-foreground">
-                  Round {match.round} of {match.maxRounds}
+                  {match.maxRounds === null
+                    ? `Round ${match.round}`
+                    : `Round ${match.round} of ${match.maxRounds}`}
                 </p>
               </div>
               <div className="min-w-[5rem] text-center">

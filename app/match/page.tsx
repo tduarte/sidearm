@@ -155,7 +155,8 @@ export default function MatchPage() {
                     {match.paused ? " · paused" : ""}
                   </Badge>
                   <p className="text-sm text-muted-foreground">
-                    Round {match.round} / {match.maxRounds}
+                    Round {match.round}
+                    {match.maxRounds === null ? "" : ` / ${match.maxRounds}`}
                   </p>
                   {match.demoRecording && (
                     <Badge

@@ -102,7 +102,8 @@ export function startMockEmitter() {
     if (winner === "CT") state.match.score.ct++;
     else state.match.score.t++;
     state.match.round++;
-    if (state.match.score.ct + state.match.score.t >= state.match.maxRounds) {
+    const limit = state.match.maxRounds;
+    if (limit !== null && state.match.score.ct + state.match.score.t >= limit) {
       state.match.phase = "ended";
       bus.emit({ type: "match.phase", phase: "ended" });
     }

@@ -61,7 +61,7 @@ global.__cs2Cache ??= {
     phase: "idle",
     score: { ct: 0, t: 0 },
     round: 0,
-    maxRounds: 24,
+    maxRounds: null,
     paused: false,
     demoRecording: false,
   },
@@ -245,8 +245,16 @@ export function pendingOpSettled(op: PendingOp, status: ServerStatus): boolean {
   }
 }
 
-export function updateCache(status: ServerStatus, players: Player[] | null) {
+export function updateCache(
+  status: ServerStatus,
+  players: Player[] | null,
+  cvars?: { maxRounds: number | null },
+) {
   resolveWorkshopMapName(status.map);
+
+  // Only overwrite when the server actually answered: a dropped RCON tick must
+  // not wipe a known match length back to unknown.
+  if (cvars?.maxRounds != null) cache().match.maxRounds = cvars.maxRounds;
 
   const op = cache().pendingOp;
   if (op) {
@@ -259,6 +267,11 @@ export function updateCache(status: ServerStatus, players: Player[] | null) {
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
   if (players !== null) cache().players = mergeRoster(cache().players, players);
+}
+
+/** Current match state from the cache. Exported for tests. */
+export function getMatchState(): MatchState {
+  return cache().match;
 }
 
 export function updateMatchState(match: Partial<MatchState>) {
