@@ -58,7 +58,9 @@ app.prepare().then(async () => {
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
   const { beginMatch, endMatch, insertRound } = await import("./lib/db/matches");
-  const { advanceRotation } = await import("./lib/api/server/real");
+  const { advanceRotation, reapplyBans, sweepExpiredBans } = await import(
+    "./lib/api/server/real"
+  );
 
   // Ensure DB is open and migrated before anything else touches it
   getDb();
@@ -106,6 +108,14 @@ app.prepare().then(async () => {
   const secret = process.env.LOG_INGEST_SECRET ?? "";
   const panelUrl = process.env.PANEL_URL ?? `http://panel:${port}`;
 
+  /**
+   * Bans live in the game server's memory, so every container restart drops
+   * them. Sweeping expiries and re-applying the rest is what makes the panel's
+   * clock mean anything.
+   */
+  const BAN_SWEEP_MS = 60_000;
+  setInterval(() => void sweepExpiredBans(), BAN_SWEEP_MS);
+
   rconConnect(async () => {
     try {
       await rconExec(`logaddress_add_http "${panelUrl}/api/ingest/logs/${secret}"`);
@@ -114,6 +124,13 @@ app.prepare().then(async () => {
       console.log("[rcon] log ingest configured");
     } catch (err) {
       console.error("[rcon] failed to configure log ingest:", err);
+    }
+    // The server has just come up with an empty ban list, whatever the panel
+    // still considers banned.
+    try {
+      await reapplyBans();
+    } catch (err) {
+      console.error("[rcon] failed to re-apply bans:", err);
     }
   });
 

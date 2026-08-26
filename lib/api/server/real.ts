@@ -30,6 +30,15 @@ import {
   upsertWorkshopMap,
 } from "@/lib/db/maps";
 import { fetchWorkshopMeta } from "@/lib/cs2/workshop-meta";
+import {
+  banCommands,
+  expiredBans,
+  expiryFrom,
+  formatDuration as formatBanDuration,
+  unbanCommand,
+  type BanRecord,
+} from "@/lib/cs2/bans";
+import { deleteBan, insertBan, listBans } from "@/lib/db/bans";
 import { mirrorThumbnail } from "@/lib/maps/thumbnails";
 import {
   assertCommandAllowed,
@@ -330,6 +339,55 @@ export function updateCache(
 /** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
 function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+/**
+ * Lifts bans whose clock has run out.
+ *
+ * The game server has no expiry of its own for a `banid 0`, so this is the
+ * only thing that ends a timed ban.
+ */
+export async function sweepExpiredBans(): Promise<void> {
+  let bans: BanRecord[];
+  try { bans = listBans(); } catch { return; }
+
+  for (const ban of expiredBans(bans)) {
+    try {
+      await rconExec(unbanCommand(safeToken(ban.steamId)));
+    } catch { /* the server may have forgotten it already */ }
+    try { deleteBan(ban.steamId); } catch { /* non-critical */ }
+    const ev = makeConsoleEvent("info", "admin", `Ban on ${ban.name} expired`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  }
+}
+
+/**
+ * Re-applies unexpired bans after the game server has forgotten them.
+ *
+ * `banid` lives in the server's memory, so a container restart drops every
+ * ban. Without this, "banned for an hour" quietly becomes "banned until the
+ * next CS2 update".
+ */
+export async function reapplyBans(): Promise<void> {
+  let bans: BanRecord[];
+  try { bans = listBans(); } catch { return; }
+
+  const active = bans.filter(
+    (b) => b.expiresAt === null || new Date(b.expiresAt).getTime() > Date.now(),
+  );
+  for (const ban of active) {
+    try { await rconExec(`banid 0 ${safeToken(ban.steamId)}`); } catch { /* best effort */ }
+  }
+  if (active.length > 0) {
+    const ev = makeConsoleEvent(
+      "info",
+      "admin",
+      `Re-applied ${active.length} ban(s) after the server restarted`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  }
 }
 
 const ROTATION_KEY = "map.rotation";
@@ -686,6 +744,58 @@ export const realAdapter = {
     await rconExec(cmd);
     cache().players = cache().players.filter((p) => p.steamId !== steamId);
     bus.emit({ type: "player.leave", steamId });
+  },
+
+  /**
+   * Bans a player until the panel lifts it.
+   *
+   * `banid 0`, never the minutes form: a timed Source ban is deleted at the
+   * next map change, so it would look right and quietly stop working. The
+   * panel holds the clock instead (lib/cs2/bans.ts).
+   */
+  async banPlayer(
+    steamId: string,
+    minutes: number | null,
+    reason?: string,
+  ): Promise<BanRecord> {
+    const player = cache().players.find((p) => p.steamId === steamId);
+    // `banid`/`kickid` take the per-connection slot id; the SteamID is what we
+    // store, because the slot is not stable across reconnects.
+    const target = player?.userId ?? steamId;
+
+    for (const cmd of banCommands(safeToken(target))) await rconExec(cmd);
+
+    const ban: BanRecord = {
+      steamId,
+      name: player?.name ?? steamId,
+      reason: reason?.trim().slice(0, 200) || null,
+      bannedAt: new Date().toISOString(),
+      expiresAt: expiryFrom(minutes),
+    };
+    try { insertBan(ban); } catch { /* non-critical */ }
+
+    cache().players = cache().players.filter((p) => p.steamId !== steamId);
+    bus.emit({ type: "player.leave", steamId });
+    const ev = makeConsoleEvent(
+      "warn",
+      "admin",
+      `Banned ${ban.name} (${formatBanDuration(minutes)})`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return ban;
+  },
+
+  async unbanPlayer(steamId: string): Promise<void> {
+    try { await rconExec(unbanCommand(safeToken(steamId))); } catch {
+      // The server may not hold it any more (a restart clears the list); the
+      // panel's record still has to go, or it would be re-applied on reconnect.
+    }
+    try { deleteBan(steamId); } catch { /* non-critical */ }
+  },
+
+  async getBans(): Promise<BanRecord[]> {
+    try { return listBans(); } catch { return []; }
   },
 
   async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {

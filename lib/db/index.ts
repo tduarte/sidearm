@@ -59,6 +59,14 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (match_id, round)
     );
 
+    CREATE TABLE IF NOT EXISTS bans (
+      steam_id   TEXT PRIMARY KEY,
+      name       TEXT NOT NULL,
+      reason     TEXT,
+      banned_at  TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS saved_config (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL

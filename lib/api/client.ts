@@ -1,4 +1,5 @@
 import type { RotationState } from "@/lib/cs2/rotation";
+import type { BanRecord } from "@/lib/cs2/bans";
 import type {
   ChatMessage,
   CvarGroup,
@@ -95,6 +96,16 @@ export const api = {
       json({ steamId, reason }),
     );
   },
+
+  banPlayer: (steamId: string, minutes: number | null, reason?: string) =>
+    request<BanRecord>("/api/players/ban", json({ steamId, minutes, reason })),
+
+  unbanPlayer: (steamId: string) =>
+    request<void>(`/api/players/ban?steamId=${encodeURIComponent(steamId)}`, {
+      method: "DELETE",
+    }),
+
+  getBans: () => request<BanRecord[]>("/api/players/ban"),
 
   getMaps: () =>
     request<{ current: string; rotation: string[]; all: MapEntry[] }>(
