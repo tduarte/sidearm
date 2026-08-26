@@ -22,6 +22,19 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+/**
+ * The panel must be rendered per request, not prerendered at build time.
+ *
+ * `API_MODE` is a property of the running container. With the default static
+ * prerender, the root layout executes during `next build` — where it is unset —
+ * and "mock" is frozen into the HTML for every page. That is the same
+ * build-time trap that `NEXT_PUBLIC_API_MODE` fell into, one level up.
+ *
+ * Nothing here benefits from being static anyway: every page is a client shell
+ * that fetches live server state on mount.
+ */
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
   title: "sidearm · CS2 server panel",
   description:
