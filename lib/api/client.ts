@@ -110,6 +110,11 @@ export const api = {
       json({ workshopId, displayName }),
     ),
 
+  unsubscribeWorkshop: (id: string) =>
+    request<void>(`/api/maps/workshop?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
   setRotation: async (rotation: string[]) => {
     await request<{ ok: true }>("/api/maps/rotation", {
       method: "PUT",

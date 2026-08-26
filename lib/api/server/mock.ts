@@ -145,6 +145,11 @@ export const mockAdapter = {
     return entry;
   },
 
+  async unsubscribeWorkshop(workshopId: string): Promise<void> {
+    state.maps = state.maps.filter((m) => m.workshopId !== workshopId);
+    addConsole("info", "admin", `Workshop map ${workshopId} removed`);
+  },
+
   async setRotation(rotation: string[]): Promise<void> {
     state.rotation = rotation;
     const ev = addConsole("info", "admin", "Map rotation updated");

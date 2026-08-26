@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, MapPin, Plus } from "@phosphor-icons/react";
+import { ArrowRight, MapPin, Plus, Trash } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -83,6 +83,18 @@ export default function MapsPage() {
     },
   });
 
+  const unsubscribe = useMutation({
+    mutationFn: (id: string) => api.unsubscribeWorkshop(id),
+    meta: { action: "Removing the workshop map" },
+    onSuccess: () => {
+      toast.success("Workshop map removed", {
+        description:
+          "The panel forgets it; the downloaded files stay until the cs2-data volume is wiped.",
+      });
+      qc.invalidateQueries({ queryKey: ["maps"] });
+    },
+  });
+
   const [subOpen, setSubOpen] = useState(false);
   const [subInput, setSubInput] = useState("");
   const [subName, setSubName] = useState("");
@@ -139,6 +151,9 @@ export default function MapsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="ws-name">Display name (optional)</Label>
+                <p className="text-xs text-muted-foreground">
+                  Leave blank to use the map&apos;s own Workshop title.
+                </p>
                 <Input
                   id="ws-name"
                   value={subName}
@@ -204,8 +219,11 @@ export default function MapsPage() {
                 key={m.name}
                 name={m.name}
                 displayName={m.displayName}
-                imageSrc={getOfficialMapArtPath(m.name)}
+                imageSrc={m.thumbnailUrl ?? getOfficialMapArtPath(m.name)}
                 badge={m.workshopId}
+                onRemove={() =>
+                  m.workshopId ? unsubscribe.mutate(m.workshopId) : undefined
+                }
                 isCurrent={isSameMap(m.name, current)}
                 isBusy={changeMap.isPending || !!mapPending}
                 isLoadingNow={!!mapPending && isSameMap(m.name, mapPending.target ?? "")}
@@ -251,6 +269,7 @@ function MapTile({
   isLoadingNow,
   elapsedSec,
   onPlay,
+  onRemove,
 }: {
   name: string;
   displayName: string;
@@ -262,6 +281,8 @@ function MapTile({
   isLoadingNow?: boolean;
   elapsedSec?: number;
   onPlay: () => void;
+  /** Workshop maps only — official maps ship with the game. */
+  onRemove?: () => void;
 }) {
   return (
     <Card
@@ -340,6 +361,28 @@ function MapTile({
               <Button className="w-full" onClick={arm} disabled={isBusy}>
                 Play
                 <ArrowRight className="h-4 w-4" />
+              </Button>
+            )}
+          </DangerConfirm>
+        )}
+        {onRemove && !isCurrent && (
+          <DangerConfirm
+            title={`Remove ${displayName} from the list?`}
+            consequence="The panel forgets this map. The files it already downloaded stay in the cs2-data volume until that volume is wiped, and adding the ID again brings it straight back."
+            operation={`forget workshop ${badge}`}
+            confirmLabel="Remove"
+            onConfirm={onRemove}
+          >
+            {(arm) => (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={arm}
+                disabled={isBusy}
+              >
+                <Trash className="h-4 w-4" />
+                Remove
               </Button>
             )}
           </DangerConfirm>

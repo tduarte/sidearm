@@ -60,4 +60,27 @@ function migrate(db: Database.Database): void {
       added_at     TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
+  // Columns added after the initial schema. `CREATE TABLE IF NOT EXISTS` above
+  // does nothing to a table that already exists, so an existing install needs
+  // these added explicitly. Guarded, so it is safe to run on every boot.
+  addColumn(db, "workshop_maps", "title", "TEXT");
+  addColumn(db, "workshop_maps", "preview_url", "TEXT");
+  addColumn(db, "workshop_maps", "file_size", "INTEGER");
+  addColumn(db, "workshop_maps", "time_updated", "INTEGER");
+  addColumn(db, "workshop_maps", "thumb_file", "TEXT");
+  addColumn(db, "chat_messages", "team_only", "INTEGER");
+}
+
+/** Adds a column when it is missing. SQLite has no `ADD COLUMN IF NOT EXISTS`. */
+function addColumn(
+  db: Database.Database,
+  table: string,
+  column: string,
+  type: string,
+): void {
+  const cols = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+    name: string;
+  }>;
+  if (cols.some((c) => c.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
 }

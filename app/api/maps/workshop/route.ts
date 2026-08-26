@@ -19,3 +19,12 @@ export const POST = route(async (req: Request) => {
     await serverApi.subscribeWorkshop(body.workshopId, body.displayName),
   );
 });
+
+export const DELETE = route(async (req: Request) => {
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) {
+    return NextResponse.json({ error: "id required" }, { status: 400 });
+  }
+  await serverApi.unsubscribeWorkshop(id);
+  return NextResponse.json({ ok: true });
+});

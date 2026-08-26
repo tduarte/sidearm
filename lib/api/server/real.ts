@@ -21,10 +21,16 @@ import { containerAction } from "@/lib/cs2/docker";
 import { runUpdateCheck } from "@/lib/cs2/updates";
 import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
-import { OFFICIAL_MAPS } from "@/lib/api/mock";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
 import { getMatches, getMatchDetail } from "@/lib/db/matches";
-import { getWorkshopMaps, upsertWorkshopMap } from "@/lib/db/maps";
+import {
+  deleteWorkshopMap,
+  getWorkshopMaps,
+  setWorkshopMeta,
+  upsertWorkshopMap,
+} from "@/lib/db/maps";
+import { fetchWorkshopMeta } from "@/lib/cs2/workshop-meta";
+import { mirrorThumbnail } from "@/lib/maps/thumbnails";
 import {
   assertCommandAllowed,
   assertValidMapName,
@@ -36,6 +42,7 @@ import {
   safeToken,
 } from "@/lib/cs2/sanitize";
 import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import { mapDisplayName, parseMapList } from "@/lib/cs2/maps";
 import {
   PRACTICE_READ_NAMES,
   practiceSpec,
@@ -72,6 +79,8 @@ declare global {
     pendingWorkshopMap: { id: string; fromMap: string; at: number } | null;
     /** Command issued whose effect the status poll has not observed yet. */
     pendingOp: PendingOp | null;
+    /** Installed maps from `maps *`; null until asked, and only asked once. */
+    officialMaps: MapEntry[] | null;
   };
 }
 global.__cs2Cache ??= {
@@ -92,6 +101,7 @@ global.__cs2Cache ??= {
   update: null,
   pendingWorkshopMap: null,
   pendingOp: null,
+  officialMaps: null,
 };
 
 const cache = () => global.__cs2Cache;
@@ -311,6 +321,39 @@ export function updateCache(
 /** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
 function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+/**
+ * Maps the server actually has, asked for once and kept.
+ *
+ * The installed set only changes when the game updates, which means the
+ * container restarted — and that clears this process's cache anyway. Asking
+ * every time would spend an RCON round-trip on a large reply for an answer
+ * that cannot have changed.
+ */
+async function officialLibrary(): Promise<MapEntry[]> {
+  const cached = cache().officialMaps;
+  if (cached) return cached;
+
+  // No point asking a server that is not up; leaving the cache empty means the
+  // next call retries rather than pinning an empty list for the process.
+  if (cache().status?.state !== "running") return [];
+
+  let names: string[];
+  try {
+    names = parseMapList(await rconExec("maps *"));
+  } catch {
+    return [];
+  }
+  if (names.length === 0) return [];
+
+  const entries: MapEntry[] = names.map((name) => ({
+    name,
+    displayName: mapDisplayName(name),
+    type: "official" as const,
+  }));
+  cache().officialMaps = entries;
+  return entries;
 }
 
 /** Current match state from the cache. Exported for tests. */
@@ -554,7 +597,7 @@ export const realAdapter = {
     return {
       current: cache().status?.map ?? "unknown",
       rotation: [],
-      all: [...workshopLibrary(), ...OFFICIAL_MAPS],
+      all: [...workshopLibrary(), ...(await officialLibrary())],
     };
   },
 
@@ -605,6 +648,12 @@ export const realAdapter = {
     // play, when `changeMap` issues `host_workshop_map`. Doing it now would
     // mean changing the level out from under whoever is playing, since that
     // command hosts the map as well as fetching it.
+    // Steam knows the item's real title, so the display-name field is an
+    // override rather than something the admin has to supply. No API key is
+    // needed for this call. It is best-effort: a panel with no internet still
+    // adds the map, just without a title or a thumbnail.
+    const meta = await fetchWorkshopMeta(workshopId);
+
     const entry: MapEntry = {
       // Keep a filename already learned from an earlier play (see
       // `resolveWorkshopMapName`) rather than dropping back to the bare id.
@@ -614,6 +663,7 @@ export const realAdapter = {
           : workshopMapPath(workshopId),
       displayName:
         displayName?.trim().slice(0, 64) ||
+        meta?.title?.slice(0, 64) ||
         existing?.displayName ||
         `Workshop ${workshopId}`,
       type: "workshop",
@@ -621,6 +671,22 @@ export const realAdapter = {
     };
 
     try { upsertWorkshopMap({ ...entry, workshopId }); } catch { /* non-critical */ }
+
+    if (meta) {
+      const thumbFile = meta.previewUrl
+        ? await mirrorThumbnail(workshopId, meta.previewUrl)
+        : null;
+      try {
+        setWorkshopMeta(workshopId, {
+          title: meta.title,
+          previewUrl: meta.previewUrl,
+          fileSize: meta.fileSize,
+          timeUpdated: meta.timeUpdated,
+          thumbFile,
+        });
+      } catch { /* non-critical */ }
+      if (thumbFile) entry.thumbnailUrl = `/api/maps/thumb/${workshopId}`;
+    }
     if (idx >= 0) list[idx] = entry; else list.push(entry);
 
     const ev = makeConsoleEvent(
@@ -631,6 +697,17 @@ export const realAdapter = {
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
     return entry;
+  },
+
+  async unsubscribeWorkshop(workshopId: string): Promise<void> {
+    const id = assertWorkshopId(workshopId);
+    deleteWorkshopMap(id);
+    cache().workshopMaps = null;
+    // Not an error if it was mid-resolution; just stop waiting for its name.
+    if (cache().pendingWorkshopMap?.id === id) cache().pendingWorkshopMap = null;
+    const ev = makeConsoleEvent("info", "admin", `Workshop map ${id} removed`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
   },
 
   async setRotation(_rotation: string[]): Promise<void> {
