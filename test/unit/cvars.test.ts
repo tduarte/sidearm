@@ -47,6 +47,20 @@ describe("parseCvarEcho — shapes", () => {
     assert.equal(r.values.get("game_mode"), "1");
   });
 
+  it("does not let an empty value swallow the next line", () => {
+    // Verbatim shape from a live server. `mp_ct_default_primary =` has nothing
+    // after the `=`, and a `\\s*` there consumes the newline and captures the
+    // following cvar's whole line — which then gets written back on restore.
+    const r = parseCvarEcho(
+      "mp_ct_default_primary =\n" +
+        "mp_ct_default_secondary = weapon_hkp2000\n" +
+        "mp_ct_default_melee = weapon_knife\n",
+    );
+    assert.equal(r.values.get("mp_ct_default_primary"), "");
+    assert.equal(r.values.get("mp_ct_default_secondary"), "weapon_hkp2000");
+    assert.equal(r.values.get("mp_ct_default_melee"), "weapon_knife");
+  });
+
   it("keeps an empty value, which is meaningful", () => {
     // `sv_password = ` means the server has no password — quite different from
     // not knowing what the password setting is.

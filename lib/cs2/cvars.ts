@@ -26,9 +26,15 @@
  *
  * Source and CS:GO used `"name" = "value"`, and some builds still do, so both
  * shapes are accepted. Verified against a live CS2 server (build 1.41.7.7).
+ *
+ * Horizontal whitespace only around the `=`, never `\s`: an empty value is
+ * printed as `mp_ct_default_primary =` with nothing after it, and `\s*` there
+ * swallows the newline and captures the NEXT cvar's line as this one's value.
+ * That produced a baseline of `mp_ct_default_primary = "mp_ct_default_secondary
+ * = weapon_hkp2000"`, which restore then wrote back into the cvar.
  */
 const ECHO_RE =
-  /^\s*"?([a-z0-9_]+)"?\s*=\s*(?:"([^"]*)"|([^\r\n(]*?))\s*(?:\(\s*(?:def|default)[^)]*\)\s*)?$/gim;
+  /^[ \t]*"?([a-z0-9_]+)"?[ \t]*=[ \t]*(?:"([^"]*)"|([^\r\n(]*?))[ \t]*(?:\([ \t]*(?:def|default)[^)]*\)[ \t]*)?$/gim;
 
 /** `Unknown command 'sv_grenade_trajectory'!` — single quotes, trailing bang. */
 const UNKNOWN_RE = /Unknown command\s+['"]([^'"]+)['"]/gi;
