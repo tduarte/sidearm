@@ -59,9 +59,23 @@ describe("parseServerVersion", () => {
     );
   });
 
+  it("reads the build out of real CS2 `status` output", () => {
+    // Verbatim from a live CS2 server (build 1.41.7.7), which is where the
+    // build now comes from: `version` is not a command on CS2.
+    const REAL_STATUS = [
+      "----- Status -----",
+      "hostname : sidearm",
+      "version  : 1.41.7.7/14177 10896 secure  public",
+      "steamid  : [G:1:15633205] (85568392935672629)",
+      "players  : 0 humans, 2 bots (0 max) (not hibernating) (unreserved)",
+    ].join("\n");
+    assert.equal(parseServerVersion(REAL_STATUS), 14177);
+  });
+
   it("returns null rather than guessing when nothing matches", () => {
     assert.equal(parseServerVersion(""), null);
-    assert.equal(parseServerVersion("Unknown command 'version'"), null);
+    // What CS2 actually answers if you ask it for `version`.
+    assert.equal(parseServerVersion("Unknown command 'version'!"), null);
   });
 });
 
@@ -204,6 +218,22 @@ describe("runUpdateCheck", () => {
     const r = await runUpdateCheck(baseDeps({ rconExec: async () => "???" }));
     assert.equal(r.update.upToDate, null);
     assert.equal(r.restarted, false);
+  });
+
+  it("asks the server for `status`, never `version`", async () => {
+    // Regression guard: CS2 answers `Unknown command 'version'!`, which parses
+    // to null, so asking for `version` pinned upToDate at "unknown" forever and
+    // the update check could never fire.
+    const asked: string[] = [];
+    await runUpdateCheck(
+      baseDeps({
+        rconExec: async (cmd) => {
+          asked.push(cmd);
+          return "version  : 1.41.7.7/14177 10896 secure  public";
+        },
+      }),
+    );
+    assert.deepEqual(asked, ["status"]);
   });
 
   it("reports unknown when Steam is unreachable", async () => {
