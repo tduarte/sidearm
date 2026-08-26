@@ -59,8 +59,25 @@ describe("assertValidMapName", () => {
     );
   });
 
+  it("accepts a workshop map whose filename is not known yet", () => {
+    // What `host_workshop_map` takes, and all the panel knows before the
+    // server has downloaded the map.
+    assert.equal(
+      assertValidMapName("workshop/3070563536"),
+      "workshop/3070563536",
+    );
+  });
+
   it("rejects anything that could carry a second command", () => {
-    for (const bad of ["de_mirage; quit", 'de_mirage"', "../../etc/passwd", ""]) {
+    for (const bad of [
+      "de_mirage; quit",
+      'de_mirage"',
+      "../../etc/passwd",
+      "",
+      "workshop/",
+      "workshop/abc",
+      "workshop/123/de_cache/../../etc",
+    ]) {
       assert.throws(() => assertValidMapName(bad), `should reject ${JSON.stringify(bad)}`);
     }
   });
