@@ -126,9 +126,22 @@ December 2025, so the compose file uses the maintained community fork.
 |---|---|---|
 | `3000` | TCP | Admin panel |
 | `27015` | UDP | CS2 game traffic |
-| `27020` | UDP | SourceTV relay |
+| `27020` | UDP | GOTV / SourceTV |
 
 RCON (TCP 27015) is intentionally **not** published to the host — it only lives on the internal Docker network between the panel and the CS2 container.
+
+### GOTV
+
+GOTV is on by default (`TV_ENABLE=1`). The upstream image ships it disabled, which
+left `27020/udp` published with nothing behind it and made demo recording
+impossible — `tv_record` needs GOTV running.
+
+`TV_DELAY` defaults to **30 seconds** here rather than the image's `0`: with no
+delay, anyone connecting to GOTV watches the game live and can call positions.
+
+Every `TV_*` variable is a launch argument, so changing one needs
+`docker compose up -d --force-recreate cs2` — do it while nobody is playing.
+Turn GOTV off with `TV_ENABLE=0` in `.env` if you don't want it.
 
 ---
 
