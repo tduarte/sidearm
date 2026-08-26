@@ -5,14 +5,7 @@ import type { MatchState } from "@/lib/api/types";
 
 export const dynamic = "force-dynamic";
 
-const PHASES: MatchState["phase"][] = [
-  "idle",
-  "warmup",
-  "knife",
-  "live",
-  "halftime",
-  "ended",
-];
+const PHASES: MatchState["phase"][] = ["idle", "warmup", "live", "ended"];
 
 export const POST = route(async (req: Request) => {
   const body = (await req.json()) as { phase?: MatchState["phase"] };

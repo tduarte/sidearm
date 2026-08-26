@@ -17,13 +17,20 @@ export type GameMode =
 
 export type Team = "CT" | "T" | "SPEC";
 
-export type MatchPhase =
-  | "idle"
-  | "warmup"
-  | "knife"
-  | "live"
-  | "halftime"
-  | "ended";
+/**
+ * Only phases the log stream can actually report.
+ *
+ * `knife` and `halftime` used to be members and were the panel's clearest lie:
+ * `setMatchPhase` mapped both to an empty command list, so nothing was sent,
+ * the cache was updated anyway and success was toasted. Neither can ever come
+ * back from the server either — `PHASE_TRIGGERS` in lib/cs2/log-parser.ts can
+ * only emit warmup, live and ended — so a phase the server can never confirm
+ * could only ever be the panel talking to itself.
+ *
+ * Both survive as explicit actions instead; see `knife()` and `mp_swapteams`
+ * in lib/api/server/real.ts.
+ */
+export type MatchPhase = "idle" | "warmup" | "live" | "ended";
 
 export type ConsoleLevel = "info" | "warn" | "error" | "chat";
 
@@ -183,6 +190,12 @@ export interface MatchState {
    * asked for, which is the panel's own record, not the server's.
    */
   demo: { state: DemoState; name: string | null };
+  /**
+   * Whether the panel has applied the knife-round cvars and holds a baseline
+   * to undo them with. Persisted, so a panel restart mid-knife can still put
+   * the server back.
+   */
+  knifeSetupApplied: boolean;
 }
 
 export type PauseState =

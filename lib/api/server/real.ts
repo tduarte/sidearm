@@ -3,6 +3,7 @@ import type {
   ConsoleEvent,
   MapEntry,
   MatchHistoryDetail,
+  MatchPhase,
   MatchState,
   PendingOp,
   PendingOpKind,
@@ -30,6 +31,17 @@ import {
   safeInt,
   safeToken,
 } from "@/lib/cs2/sanitize";
+import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import {
+  KNIFE_CVARS,
+  restoreCommands,
+  setupCommands,
+} from "@/lib/cs2/knife";
+import {
+  deleteSavedConfig,
+  getSavedConfig,
+  setSavedConfig,
+} from "@/lib/db/config";
 import {
   isSameMap,
   shortMapName,
@@ -64,6 +76,7 @@ global.__cs2Cache ??= {
     maxRounds: null,
     pause: "unknown",
     demo: { state: "unknown", name: null },
+    knifeSetupApplied: false,
   },
   console: [],
   chat: [],
@@ -74,6 +87,9 @@ global.__cs2Cache ??= {
 };
 
 const cache = () => global.__cs2Cache;
+
+/** Where the pre-knife cvar values live, so a restart cannot strand a server. */
+const KNIFE_BASELINE_KEY = "knife.baseline";
 
 /** Does this string look like a real Steam identity rather than a name fallback? */
 function looksLikeSteamId(s: string): boolean {
@@ -614,18 +630,78 @@ export const realAdapter = {
     return { ...cache().match };
   },
 
-  async setMatchPhase(phase: MatchState["phase"]): Promise<MatchState> {
-    const cmds: Record<string, string[]> = {
+  async setMatchPhase(phase: MatchPhase): Promise<MatchState> {
+    /**
+     * Every member must map to real commands. `knife` and `halftime` were
+     * silently mapped to `[]` here: no RCON was sent, the cache was updated
+     * regardless, and the UI reported success. The `Record<MatchPhase, ...>`
+     * type is what now makes an empty entry impossible to add by accident, and
+     * the assertion below catches one added on purpose.
+     */
+    const cmds: Record<MatchPhase, string[]> = {
       warmup: ["mp_warmup_start"],
       live: ["mp_warmup_end", "mp_restartgame 3"],
-      halftime: [],
       ended: ["mp_restartgame 1"],
+      // Panel-side only: "no match in progress". Nothing to tell the server.
       idle: [],
-      knife: [],
     };
-    for (const cmd of cmds[phase] ?? []) await rconExec(cmd);
+
+    if (phase !== "idle" && cmds[phase].length === 0) {
+      throw new Error(`No commands defined for match phase "${phase}"`);
+    }
+
+    for (const cmd of cmds[phase]) await rconExec(cmd);
     cache().match = { ...cache().match, phase };
     bus.emit({ type: "match.phase", phase });
+    return { ...cache().match };
+  },
+
+  /**
+   * Applies or undoes the knife-round cvars.
+   *
+   * `setup` reads the current values first and persists them, so `restore`
+   * puts back what this server had rather than what a default cfg contains —
+   * and so a panel restart mid-knife can still undo it.
+   */
+  async knife(action: "setup" | "restore"): Promise<MatchState> {
+    if (action === "restore") {
+      const baseline = getSavedConfig<Record<string, string>>(KNIFE_BASELINE_KEY);
+      if (!baseline) {
+        throw new Error(
+          "No knife baseline was recorded, so the panel does not know what to restore. Set the gameplay cvars you want by hand, or run `exec gamemode_competitive.cfg`.",
+        );
+      }
+      for (const cmd of restoreCommands(baseline)) await rconExec(cmd);
+      await rconExec("mp_restartgame 1");
+      deleteSavedConfig(KNIFE_BASELINE_KEY);
+      cache().match = { ...cache().match, knifeSetupApplied: false };
+      return { ...cache().match };
+    }
+
+    // Read before writing. Anything the build does not have is left out of the
+    // baseline entirely rather than recorded as a guess.
+    const echo = await rconExec(cvarReadCommand(KNIFE_CVARS));
+    const read = parseCvarEcho(echo);
+    const baseline: Record<string, string> = {};
+    for (const name of KNIFE_CVARS) {
+      const value = read.values.get(name);
+      if (value !== undefined) baseline[name] = value;
+    }
+    setSavedConfig(KNIFE_BASELINE_KEY, baseline);
+
+    for (const cmd of setupCommands()) await rconExec(cmd);
+    cache().match = { ...cache().match, knifeSetupApplied: true };
+    return { ...cache().match };
+  },
+
+  /** Swaps sides now. What people actually want when they say "halftime". */
+  async swapTeams(): Promise<MatchState> {
+    const out = await rconExec("mp_swapteams");
+    // Command support cannot be probed safely, so it is discovered here, from
+    // the reply to a real invocation.
+    if (/Unknown command/i.test(out)) {
+      throw new Error("This CS2 build has no `mp_swapteams` command.");
+    }
     return { ...cache().match };
   },
 

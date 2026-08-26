@@ -119,6 +119,11 @@ export const api = {
   setMatchPhase: (phase: MatchState["phase"]) =>
     request<MatchState>("/api/match/phase", json({ phase })),
 
+  knife: (action: "setup" | "restore") =>
+    request<MatchState>("/api/match/knife", json({ action })),
+
+  swapTeams: () => request<MatchState>("/api/match/swap", json({})),
+
   setPause: (action: "pause" | "unpause") =>
     request<MatchState>("/api/match/pause", json({ action })),
 

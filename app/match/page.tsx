@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowCounterClockwise,
+  ArrowsLeftRight,
   ChartLine,
   Coffee,
   Crosshair,
@@ -55,11 +56,12 @@ const PHASES: {
   icon: Icon;
   iconWeight?: "fill" | "regular";
 }[] = [
+  // Only phases the server can actually report. Knife and Halftime used to sit
+  // here and sent no RCON at all while reporting success; both are now explicit
+  // actions below, labelled for what they really do.
   { value: "warmup", label: "Warmup", icon: Timer },
-  { value: "knife", label: "Knife", icon: Knife },
   { value: "live", label: "Live", icon: Play, iconWeight: "fill" },
-  { value: "halftime", label: "Halftime", icon: Pause },
-  { value: "ended", label: "Ended", icon: Flag },
+  { value: "ended", label: "End match", icon: Flag },
 ];
 
 export default function MatchPage() {
@@ -103,6 +105,26 @@ export default function MatchPage() {
     },
   });
 
+  const knife = useMutation({
+    mutationFn: (action: "setup" | "restore") => api.knife(action),
+    meta: { action: "Knife round" },
+    onSuccess: (_r, action) => {
+      toast.success(
+        action === "setup" ? "Knife round set up" : "Gameplay cvars restored",
+      );
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
+  const swap = useMutation({
+    mutationFn: () => api.swapTeams(),
+    meta: { action: "Swapping sides" },
+    onSuccess: () => {
+      toast.success("Sides swapped");
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
   const rcon = useMutation({
     mutationFn: (cmd: string) => api.rcon(cmd),
     meta: { action: "Command" },
@@ -129,7 +151,7 @@ export default function MatchPage() {
       <div>
         <h1 className="font-heading text-2xl font-semibold">Match Control</h1>
         <p className="text-sm text-muted-foreground">
-          Drive the match flow: warmup → knife → live, pause, score.
+          Drive the match: warmup → live → end, pause, sides, demos.
         </p>
       </div>
 
@@ -217,6 +239,50 @@ export default function MatchPage() {
                     />
                   );
                 })}
+              </MatchActionGrid>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Round setup</CardTitle>
+              <CardDescription>
+                CS2 has no native knife round, and vanilla halftime happens on
+                its own at <span className="font-mono">mp_maxrounds/2</span>.
+                These are cvar approximations: the panel sets the loadout and
+                swaps sides, but it cannot detect who won a knife round or run a
+                match flow for you. That needs a plugin such as Get5 or MatchZy.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <MatchActionGrid layout="actions">
+                <MatchActionTile
+                  icon={Knife}
+                  label="Set up knife"
+                  description="knives only, no buy, restart"
+                  variant={match.knifeSetupApplied ? "default" : "outline"}
+                  disabled={knife.isPending || match.knifeSetupApplied}
+                  pending={knife.isPending}
+                  onClick={() => knife.mutate("setup")}
+                />
+                <MatchActionTile
+                  icon={ArrowCounterClockwise}
+                  label="Restore gameplay"
+                  description="puts back the values from before"
+                  variant="outline"
+                  disabled={knife.isPending || !match.knifeSetupApplied}
+                  pending={knife.isPending}
+                  onClick={() => knife.mutate("restore")}
+                />
+                <MatchActionTile
+                  icon={ArrowsLeftRight}
+                  label="Swap sides"
+                  description="mp_swapteams"
+                  variant="outline"
+                  disabled={swap.isPending}
+                  pending={swap.isPending}
+                  onClick={() => swap.mutate()}
+                />
               </MatchActionGrid>
             </CardContent>
           </Card>

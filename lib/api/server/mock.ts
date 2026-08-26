@@ -160,6 +160,24 @@ export const mockAdapter = {
     return { ...state.match };
   },
 
+  async knife(action: "setup" | "restore"): Promise<MatchState> {
+    state.match.knifeSetupApplied = action === "setup";
+    addConsole(
+      "info",
+      "admin",
+      action === "setup" ? "Knife round cvars applied" : "Knife cvars restored",
+    );
+    return { ...state.match };
+  },
+
+  async swapTeams(): Promise<MatchState> {
+    const { ct, t } = state.match.score;
+    state.match.score = { ct: t, t: ct };
+    addConsole("info", "admin", "Teams swapped (mp_swapteams)");
+    bus.emit({ type: "match.score", score: state.match.score, round: state.match.round });
+    return { ...state.match };
+  },
+
   async setPause(action: "pause" | "unpause"): Promise<MatchState> {
     state.match.pause = action === "pause" ? "pause_requested" : "running";
     addConsole(
