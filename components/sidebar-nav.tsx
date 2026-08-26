@@ -25,6 +25,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
+import { usePanelInfo } from "@/components/panel-info";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: Gauge },
@@ -39,6 +40,7 @@ const NAV = [
 
 export function SidebarNav() {
   const pathname = usePathname();
+  const { apiMode, version } = usePanelInfo();
 
   return (
     <Sidebar collapsible="icon">
@@ -92,7 +94,7 @@ export function SidebarNav() {
       </SidebarContent>
       <SidebarFooter className="px-1 py-1">
         <div className="px-2 py-3 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden">
-          v0.1.0 · {process.env.NEXT_PUBLIC_API_MODE === "real" ? "real mode" : "mock mode"}
+          v{version} · {apiMode === "real" ? "real mode" : "mock mode"}
         </div>
       </SidebarFooter>
     </Sidebar>

@@ -13,9 +13,11 @@ const nextConfig: NextConfig = {
    * without a compiler, so this only reproduces in Docker.
    */
   serverExternalPackages: ["better-sqlite3", "dockerode"],
-  env: {
-    NEXT_PUBLIC_API_MODE: process.env.API_MODE === "real" ? "real" : "mock",
-  },
+  // No `env` block. NEXT_PUBLIC_API_MODE used to be inlined here, which
+  // evaluates at BUILD time — and the Dockerfile builds without API_MODE set,
+  // so every containerized deploy shipped a bundle claiming "mock mode" while
+  // the server ran in real mode. The mode now reaches the client from the
+  // server layout at request time (components/panel-info.tsx).
 };
 
 export default nextConfig;

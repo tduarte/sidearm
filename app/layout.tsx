@@ -4,6 +4,8 @@ import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Providers } from "@/components/providers";
 import { AppShell } from "@/components/app-shell";
+import { PanelInfoProvider } from "@/components/panel-info";
+import pkg from "../package.json";
 
 const geistSans = Geist({
   subsets: ["latin"],
@@ -42,9 +44,20 @@ export default function RootLayout({
       )}
     >
       <body className="min-h-full flex flex-col font-sans">
-        <Providers>
-          <AppShell>{children}</AppShell>
-        </Providers>
+        {/*
+          Read here, in a server component, so it reflects the running
+          container rather than whatever was set when the image was built.
+        */}
+        <PanelInfoProvider
+          value={{
+            apiMode: process.env.API_MODE === "real" ? "real" : "mock",
+            version: pkg.version,
+          }}
+        >
+          <Providers>
+            <AppShell>{children}</AppShell>
+          </Providers>
+        </PanelInfoProvider>
       </body>
     </html>
   );
