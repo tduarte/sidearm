@@ -209,6 +209,47 @@ export type PauseState =
 
 export type DemoState = "idle" | "recording" | "unknown";
 
+/** A cvar the panel is allowed to write, and how to render it. */
+export interface CvarSpec {
+  name: string;
+  label: string;
+  kind: "toggle" | "stepper";
+  /** Value that turns it on / raises it. */
+  on: string;
+  /** Value that turns it off, used when no baseline was captured. */
+  off: string;
+  min?: number;
+  max?: number;
+  /** Requires `sv_cheats 1`; the server refuses it otherwise. */
+  cheatProtected: boolean;
+}
+
+/**
+ * What the server said about one cvar.
+ *
+ * `value: null` means the server has not answered — NOT that the cvar is off.
+ * Collapsing those two is how a panel ends up confidently showing a state it
+ * never observed, so the UI renders unknown distinctly.
+ */
+export interface CvarState {
+  name: string;
+  value: string | null;
+  /** False when the build answered `Unknown command`. */
+  supported: boolean;
+  /** Value seen before the panel first changed it, for a truthful "off". */
+  baseline: string | null;
+  readAt: string | null;
+}
+
+export type CvarGroup = "practice";
+
+export interface CvarSnapshot {
+  group: CvarGroup;
+  cvars: CvarState[];
+  /** Null when the read failed outright. */
+  readAt: string | null;
+}
+
 export interface ConsoleEvent {
   id: string;
   ts: string;

@@ -7,7 +7,6 @@ import {
   ArrowsLeftRight,
   ChartLine,
   Coffee,
-  Crosshair,
   FastForward,
   Fire,
   Flag,
@@ -15,7 +14,6 @@ import {
   Infinity as InfinityIcon,
   Knife,
   Package,
-  Path,
   Pause,
   PictureInPicture,
   Play,
@@ -45,10 +43,14 @@ import {
   MatchActionTile,
 } from "@/components/match/match-action-tile";
 import { LoadError } from "@/components/load-error";
+import { CvarTile } from "@/components/match/cvar-tile";
+import { useCvarGroup } from "@/lib/hooks/use-cvar-group";
+import { asBool } from "@/lib/cs2/cvars";
+import { practiceSpec } from "@/lib/cs2/practice";
 import { api } from "@/lib/api/client";
 import { useMatchState } from "@/lib/hooks/use-match-state";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
-import type { MatchPhase } from "@/lib/api/types";
+import type { CvarSpec, MatchPhase } from "@/lib/api/types";
 
 const PHASES: {
   value: MatchPhase;
@@ -68,7 +70,10 @@ export default function MatchPage() {
   const { data: match, isLoading, error, refetch } = useMatchState();
   const { data: status } = useServerStatus();
   const qc = useQueryClient();
-  const [svCheatsOn, setSvCheatsOn] = useState(false);
+  // Which tab is open gates the cvar polling: RCON is one serialised socket,
+  // so the practice values are only read while they are on screen.
+  const [tab, setTab] = useState("competitive");
+  const cvars = useCvarGroup("practice", tab === "practice");
 
   const setPhase = useMutation({
     mutationFn: (phase: MatchPhase) => api.setMatchPhase(phase),
@@ -139,7 +144,15 @@ export default function MatchPage() {
     return <Skeleton className="h-96" />;
   }
 
-  const cheatLocked = !svCheatsOn;
+  // Read back from the server, not remembered. The old local boolean reset to
+  // false on every reload and re-locked the dependent tiles even when the
+  // server still had cheats on.
+  const cheatsOn = asBool(cvars.byName.get("sv_cheats")?.value ?? undefined);
+  const specOf = (name: string): CvarSpec => {
+    const spec = practiceSpec(name);
+    if (!spec) throw new Error(`No practice spec for ${name}`);
+    return spec;
+  };
   const paused = match.pause === "paused" || match.pause === "pause_requested";
   const recording = match.demo.state === "recording";
   // Demo recording runs through GOTV; without it `tv_record` fails, so the
@@ -155,7 +168,7 @@ export default function MatchPage() {
         </p>
       </div>
 
-      <Tabs defaultValue="competitive">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="competitive">Competitive 5v5</TabsTrigger>
           <TabsTrigger value="casual">Casual / DM</TabsTrigger>
@@ -410,20 +423,23 @@ export default function MatchPage() {
                 <div>
                   <Label htmlFor="sv-cheats">sv_cheats</Label>
                   <p className="text-xs text-muted-foreground">
-                    Sends <span className="font-mono text-foreground">sv_cheats 1</span>{" "}
-                    or <span className="font-mono text-foreground">0</span> via
-                    RCON. While off, cheat-dependent utility below is disabled.
+                    Read from the server, not remembered here. While off, the
+                    cheat-dependent tiles below are locked and say so.
+                    {cheatsOn === null
+                      ? " The server has not reported a value yet."
+                      : ""}
                   </p>
                 </div>
                 <Switch
                   id="sv-cheats"
-                  checked={svCheatsOn}
-                  disabled={rcon.isPending}
-                  onCheckedChange={(on) => {
-                    rcon.mutate(on ? "sv_cheats 1" : "sv_cheats 0", {
-                      onSuccess: () => setSvCheatsOn(on),
-                    });
-                  }}
+                  checked={cheatsOn === true}
+                  disabled={cvars.setCvar.isPending || cheatsOn === null}
+                  onCheckedChange={(on) =>
+                    cvars.setCvar.mutate({
+                      name: "sv_cheats",
+                      value: on ? "1" : "0",
+                    })
+                  }
                   aria-label="Toggle sv_cheats"
                 />
               </div>
@@ -470,23 +486,25 @@ export default function MatchPage() {
                   pending={rcon.isPending}
                   onClick={() => rcon.mutate("bot_kick")}
                 />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("sv_infinite_ammo")}
+                  state={cvars.byName.get("sv_infinite_ammo")}
                   icon={InfinityIcon}
-                  label="Infinite ammo"
-                  description="sv_infinite_ammo 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("sv_infinite_ammo 1")}
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({ name: "sv_infinite_ammo", value })
+                  }
                 />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("mp_buy_anywhere")}
+                  state={cvars.byName.get("mp_buy_anywhere")}
                   icon={ShoppingCart}
-                  label="Buy anywhere"
-                  description="mp_buy_anywhere 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("mp_buy_anywhere 1")}
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({ name: "mp_buy_anywhere", value })
+                  }
                 />
               </MatchActionGrid>
             </CardContent>
@@ -496,65 +514,63 @@ export default function MatchPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Grenade practice</CardTitle>
               <CardDescription>
-                CS2 utility helpers: picture-in-picture landing preview, aim
-                trajectory, and post-throw flight trails. Turn on{" "}
+                Server-side grenade helpers, which need{" "}
                 <span className="font-medium text-foreground">
                   Developer cheats
                 </span>{" "}
-                above first. Only works on servers where cheats / RCON are
-                allowed (not Valve matchmaking).
+                on. Each tile shows the value the server currently reports and
+                toggles it back off again.
+                <br />
+                <span className="mt-2 block">
+                  Grenade <em>preview</em> is a client setting — the server
+                  cannot turn it on for you. Paste{" "}
+                  <code className="font-mono text-foreground">
+                    cl_grenadepreview 1
+                  </code>{" "}
+                  into your own console.
+                </span>
               </CardDescription>
             </CardHeader>
             <CardContent>
               <MatchActionGrid layout="nades">
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("sv_grenade_trajectory_prac_pipreview")}
+                  state={cvars.byName.get("sv_grenade_trajectory_prac_pipreview")}
                   icon={PictureInPicture}
-                  label="Landing PIP"
-                  description="sv_grenade_trajectory_prac_pipreview 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() =>
-                    rcon.mutate("sv_grenade_trajectory_prac_pipreview 1")
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({
+                      name: "sv_grenade_trajectory_prac_pipreview",
+                      value,
+                    })
                   }
                 />
-                <MatchActionTile
-                  icon={Crosshair}
-                  label="Aim trajectory"
-                  description="cl_grenadepreview 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("cl_grenadepreview 1")}
-                />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("sv_grenade_trajectory_prac_trailtime")}
+                  state={cvars.byName.get("sv_grenade_trajectory_prac_trailtime")}
                   icon={ChartLine}
-                  label="Flight trail"
-                  description="sv_grenade_trajectory_prac_trailtime 8"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() =>
-                    rcon.mutate("sv_grenade_trajectory_prac_trailtime 8")
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({
+                      name: "sv_grenade_trajectory_prac_trailtime",
+                      value,
+                    })
                   }
                 />
-                <MatchActionTile
-                  icon={Path}
-                  label="Trajectory lines"
-                  description="sv_grenade_trajectory 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("sv_grenade_trajectory 1")}
-                />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("ammo_grenade_limit_total")}
+                  state={cvars.byName.get("ammo_grenade_limit_total")}
                   icon={Package}
-                  label="5 grenades"
-                  description="ammo_grenade_limit_total 5"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("ammo_grenade_limit_total 5")}
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({
+                      name: "ammo_grenade_limit_total",
+                      value,
+                    })
+                  }
                 />
               </MatchActionGrid>
             </CardContent>

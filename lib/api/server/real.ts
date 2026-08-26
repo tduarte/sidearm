@@ -3,6 +3,9 @@ import type {
   ConsoleEvent,
   MapEntry,
   MatchHistoryDetail,
+  CvarGroup,
+  CvarSnapshot,
+  CvarState,
   MatchPhase,
   MatchState,
   PendingOp,
@@ -29,9 +32,14 @@ import {
   quoteArg,
   REDACTED,
   safeInt,
+  assertManagedCvarName,
   safeToken,
 } from "@/lib/cs2/sanitize";
 import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import {
+  PRACTICE_READ_NAMES,
+  practiceSpec,
+} from "@/lib/cs2/practice";
 import {
   KNIFE_CVARS,
   restoreCommands,
@@ -90,6 +98,9 @@ const cache = () => global.__cs2Cache;
 
 /** Where the pre-knife cvar values live, so a restart cannot strand a server. */
 const KNIFE_BASELINE_KEY = "knife.baseline";
+
+/** Pre-change values for managed cvars, so "off" restores what was there. */
+const CVAR_BASELINE_KEY = "cvar.baseline";
 
 /** Does this string look like a real Steam identity rather than a name fallback? */
 function looksLikeSteamId(s: string): boolean {
@@ -654,6 +665,82 @@ export const realAdapter = {
     cache().match = { ...cache().match, phase };
     bus.emit({ type: "match.phase", phase });
     return { ...cache().match };
+  },
+
+  /**
+   * Reads the practice cvars in one batched round-trip.
+   *
+   * Called only while the Practice tab is mounted (the client query is
+   * `enabled` on that), because RCON is a single serialised socket and the 2s
+   * status poll already owns most of its budget.
+   */
+  async getCvars(group: CvarGroup): Promise<CvarSnapshot> {
+    if (group !== "practice") throw new Error(`Unknown cvar group "${group}"`);
+
+    // Reading while the container is down would just fill the RCON queue.
+    if (cache().status?.state !== "running") {
+      return { group, cvars: [], readAt: null };
+    }
+
+    const echo = await rconExec(cvarReadCommand(PRACTICE_READ_NAMES));
+    const read = parseCvarEcho(echo);
+    const readAt = new Date().toISOString();
+    const baselines = getSavedConfig<Record<string, string>>(CVAR_BASELINE_KEY) ?? {};
+
+    const cvars: CvarState[] = PRACTICE_READ_NAMES.map((name) => {
+      const value = read.values.get(name) ?? null;
+      const spec = practiceSpec(name);
+      // First sighting of a value that is not the "on" value is the truthful
+      // baseline for restoring later.
+      if (spec && value !== null && baselines[name] === undefined && value !== spec.on) {
+        baselines[name] = value;
+      }
+      return {
+        name,
+        value,
+        supported: !read.unknown.has(name),
+        baseline: baselines[name] ?? null,
+        readAt,
+      };
+    });
+
+    setSavedConfig(CVAR_BASELINE_KEY, baselines);
+    return { group, cvars, readAt };
+  },
+
+  /**
+   * Writes a managed cvar and reads it back in the same round-trip.
+   *
+   * The reply is what gets returned, never the requested value: that is what
+   * catches a refusal (a cheat-protected cvar while `sv_cheats 0` echoes back
+   * unchanged) instead of the tile flipping to a state the server rejected.
+   */
+  async setCvar(name: string, value: string): Promise<CvarState> {
+    const allowed = [...PRACTICE_READ_NAMES];
+    const safeName = assertManagedCvarName(name, allowed);
+    const spec = practiceSpec(safeName);
+
+    let safeValue: string;
+    if (spec?.kind === "stepper") {
+      safeValue = String(
+        safeInt(value, spec.min ?? 0, spec.max ?? 100, Number(spec.off)),
+      );
+    } else {
+      // Booleans and sv_cheats: only ever 0 or 1 reaches the server.
+      safeValue = value.trim() === "1" || value.trim() === "true" ? "1" : "0";
+    }
+
+    const echo = await rconExec(`${safeName} ${safeValue}; ${safeName}`);
+    const read = parseCvarEcho(echo);
+    const baselines = getSavedConfig<Record<string, string>>(CVAR_BASELINE_KEY) ?? {};
+
+    return {
+      name: safeName,
+      value: read.values.get(safeName) ?? null,
+      supported: !read.unknown.has(safeName),
+      baseline: baselines[safeName] ?? null,
+      readAt: new Date().toISOString(),
+    };
   },
 
   /**

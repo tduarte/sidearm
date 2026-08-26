@@ -1,4 +1,7 @@
 import type {
+  CvarGroup,
+  CvarSnapshot,
+  CvarState,
   ChatMessage,
   ConsoleEvent,
   MapEntry,
@@ -11,6 +14,10 @@ import type {
 } from "../types";
 import { addConsole, state } from "../mock";
 import { bus } from "@/lib/ws/bus";
+import { PRACTICE_READ_NAMES } from "@/lib/cs2/practice";
+
+/** Mock cvar values, so the Practice tab is exercisable without a server. */
+const mockCvars: Record<string, string> = { sv_cheats: "0" };
 import { workshopIdFromMapName, workshopMapPath } from "@/lib/cs2/workshop";
 
 /**
@@ -158,6 +165,32 @@ export const mockAdapter = {
     bus.emit({ type: "console.line", event: ev });
     bus.emit({ type: "match.phase", phase });
     return { ...state.match };
+  },
+
+  async getCvars(group: CvarGroup): Promise<CvarSnapshot> {
+    const readAt = new Date().toISOString();
+    return {
+      group,
+      cvars: PRACTICE_READ_NAMES.map((name) => ({
+        name,
+        value: mockCvars[name] ?? "0",
+        supported: true,
+        baseline: null,
+        readAt,
+      })),
+      readAt,
+    };
+  },
+
+  async setCvar(name: string, value: string): Promise<CvarState> {
+    mockCvars[name] = value;
+    return {
+      name,
+      value,
+      supported: true,
+      baseline: null,
+      readAt: new Date().toISOString(),
+    };
   },
 
   async knife(action: "setup" | "restore"): Promise<MatchState> {

@@ -1,5 +1,8 @@
 import type {
   ChatMessage,
+  CvarGroup,
+  CvarSnapshot,
+  CvarState,
   ConsoleEvent,
   MapEntry,
   MatchHistoryDetail,
@@ -118,6 +121,12 @@ export const api = {
 
   setMatchPhase: (phase: MatchState["phase"]) =>
     request<MatchState>("/api/match/phase", json({ phase })),
+
+  getCvars: (group: CvarGroup) =>
+    request<CvarSnapshot>(`/api/match/cvars?group=${encodeURIComponent(group)}`),
+
+  setCvar: (name: string, value: string) =>
+    request<CvarState>("/api/match/cvars", json({ name, value })),
 
   knife: (action: "setup" | "restore") =>
     request<MatchState>("/api/match/knife", json({ action })),
