@@ -119,11 +119,11 @@ export const api = {
   setMatchPhase: (phase: MatchState["phase"]) =>
     request<MatchState>("/api/match/phase", json({ phase })),
 
-  togglePause: () =>
-    request<MatchState>("/api/match/pause", { method: "POST" }),
+  setPause: (action: "pause" | "unpause") =>
+    request<MatchState>("/api/match/pause", json({ action })),
 
-  toggleDemo: () =>
-    request<MatchState>("/api/match/demo", { method: "POST" }),
+  setDemo: (action: "start" | "stop") =>
+    request<MatchState>("/api/match/demo", json({ action })),
 
   getConsole: () => request<ConsoleEvent[]>("/api/console"),
 

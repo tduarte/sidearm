@@ -46,6 +46,7 @@ import {
 import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import { useMatchState } from "@/lib/hooks/use-match-state";
+import { useServerStatus } from "@/lib/hooks/use-server-status";
 import type { MatchPhase } from "@/lib/api/types";
 
 const PHASES: {
@@ -63,6 +64,7 @@ const PHASES: {
 
 export default function MatchPage() {
   const { data: match, isLoading, error, refetch } = useMatchState();
+  const { data: status } = useServerStatus();
   const qc = useQueryClient();
   const [svCheatsOn, setSvCheatsOn] = useState(false);
 
@@ -76,22 +78,26 @@ export default function MatchPage() {
   });
 
   const pause = useMutation({
-    mutationFn: () => api.togglePause(),
+    mutationFn: (action: "pause" | "unpause") => api.setPause(action),
     meta: { action: "Pause" },
-    onSuccess: (r) => {
-      toast(r.paused ? "Match paused" : "Match resumed");
+    onSuccess: (_r, action) => {
+      toast(
+        action === "pause" ? "Pause requested" : "Match resumed",
+        action === "pause"
+          ? { description: "CS2 applies it at the end of the current round." }
+          : undefined,
+      );
       qc.invalidateQueries({ queryKey: ["match"] });
     },
   });
 
   const demo = useMutation({
-    mutationFn: () => api.toggleDemo(),
+    mutationFn: (action: "start" | "stop") => api.setDemo(action),
     meta: { action: "Demo recording" },
-    onSuccess: (r) => {
+    onSuccess: (r, action) => {
       toast(
-        r.demoRecording
-          ? "Demo recording started"
-          : "Demo recording stopped",
+        action === "start" ? "Recording started" : "Recording stopped",
+        r.demo.name ? { description: `${r.demo.name}.dem` } : undefined,
       );
       qc.invalidateQueries({ queryKey: ["match"] });
     },
@@ -112,6 +118,11 @@ export default function MatchPage() {
   }
 
   const cheatLocked = !svCheatsOn;
+  const paused = match.pause === "paused" || match.pause === "pause_requested";
+  const recording = match.demo.state === "recording";
+  // Demo recording runs through GOTV; without it `tv_record` fails, so the
+  // tile says why rather than offering a button that cannot work.
+  const gotvUp = !!status?.gotv;
 
   return (
     <div className="space-y-6">
@@ -143,22 +154,25 @@ export default function MatchPage() {
                 </div>
                 <div className="max-w-xs flex-1 space-y-2 text-center">
                   <Badge
-                    variant={match.paused ? "destructive" : "outline"}
+                    variant={paused ? "destructive" : "outline"}
                     className="gap-1.5 capitalize"
                   >
-                    {match.paused ? (
+                    {paused ? (
                       <Pause className="h-3 w-3" />
                     ) : (
                       <Timer className="h-3 w-3" />
                     )}
                     {match.phase}
-                    {match.paused ? " · paused" : ""}
+                    {match.pause === "paused" ? " · paused" : ""}
+                    {match.pause === "pause_requested"
+                      ? " · pausing at round end"
+                      : ""}
                   </Badge>
                   <p className="text-sm text-muted-foreground">
                     Round {match.round}
                     {match.maxRounds === null ? "" : ` / ${match.maxRounds}`}
                   </p>
-                  {match.demoRecording && (
+                  {match.demo.state === "recording" && (
                     <Badge
                       variant="outline"
                       className="gap-1.5 border-red-500/40 text-red-400"
@@ -213,14 +227,29 @@ export default function MatchPage() {
             </CardHeader>
             <CardContent>
               <MatchActionGrid layout="actions">
+                {/*
+                  Two tiles, not one toggle. CS2 exposes no pause state to read
+                  back, so a single button has to guess which way to go — and
+                  after a panel restart it guesses wrong.
+                */}
                 <MatchActionTile
-                  icon={match.paused ? Play : Pause}
-                  iconWeight={match.paused ? "fill" : "regular"}
-                  label={match.paused ? "Resume" : "Pause"}
-                  variant={match.paused ? "default" : "outline"}
+                  icon={Pause}
+                  label="Pause"
+                  description="mp_pause_match · at round end"
+                  variant={match.pause === "pause_requested" ? "default" : "outline"}
                   disabled={pause.isPending}
                   pending={pause.isPending}
-                  onClick={() => pause.mutate()}
+                  onClick={() => pause.mutate("pause")}
+                />
+                <MatchActionTile
+                  icon={Play}
+                  iconWeight="fill"
+                  label="Resume"
+                  description="mp_unpause_match"
+                  variant="outline"
+                  disabled={pause.isPending}
+                  pending={pause.isPending}
+                  onClick={() => pause.mutate("unpause")}
                 />
                 <MatchActionTile
                   icon={ArrowCounterClockwise}
@@ -231,15 +260,32 @@ export default function MatchPage() {
                   pending={rcon.isPending}
                   onClick={() => rcon.mutate("mp_restartgame 1")}
                 />
-                <MatchActionTile
-                  icon={match.demoRecording ? Stop : Record}
-                  iconWeight={match.demoRecording ? "fill" : "regular"}
-                  label={match.demoRecording ? "Stop demo" : "Record demo"}
-                  variant={match.demoRecording ? "destructive" : "outline"}
-                  disabled={demo.isPending}
-                  pending={demo.isPending}
-                  onClick={() => demo.mutate()}
-                />
+                {recording ? (
+                  <MatchActionTile
+                    icon={Stop}
+                    iconWeight="fill"
+                    label="Stop demo"
+                    description="tv_stoprecord"
+                    variant="destructive"
+                    disabled={demo.isPending || !gotvUp}
+                    pending={demo.isPending}
+                    onClick={() => demo.mutate("stop")}
+                  />
+                ) : (
+                  <MatchActionTile
+                    icon={Record}
+                    label="Record demo"
+                    description={
+                      gotvUp
+                        ? "tv_record"
+                        : "needs GOTV — set TV_ENABLE=1 and recreate the container"
+                    }
+                    variant="outline"
+                    disabled={demo.isPending || !gotvUp}
+                    pending={demo.isPending}
+                    onClick={() => demo.mutate("start")}
+                  />
+                )}
               </MatchActionGrid>
             </CardContent>
           </Card>

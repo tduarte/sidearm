@@ -160,27 +160,28 @@ export const mockAdapter = {
     return { ...state.match };
   },
 
-  async togglePause(): Promise<MatchState> {
-    state.match.paused = !state.match.paused;
-    const ev = addConsole(
+  async setPause(action: "pause" | "unpause"): Promise<MatchState> {
+    state.match.pause = action === "pause" ? "pause_requested" : "running";
+    addConsole(
       "info",
-      "match",
-      state.match.paused ? "Match paused" : "Match resumed",
+      "admin",
+      action === "pause" ? "Match pause requested" : "Match resumed",
     );
-    bus.emit({ type: "console.line", event: ev });
+    bus.emit({ type: "match.phase", phase: state.match.phase });
     return { ...state.match };
   },
 
-  async toggleDemo(): Promise<MatchState> {
-    state.match.demoRecording = !state.match.demoRecording;
-    const ev = addConsole(
+  async setDemo(action: "start" | "stop"): Promise<MatchState> {
+    const name = action === "start" ? `sidearm_${state.status.map}_mock` : state.match.demo.name;
+    state.match.demo = {
+      state: action === "start" ? "recording" : "idle",
+      name: name ?? null,
+    };
+    addConsole(
       "info",
-      "match",
-      state.match.demoRecording
-        ? "Demo recording started"
-        : "Demo recording stopped",
+      "admin",
+      action === "start" ? `Recording ${name}` : "Recording stopped",
     );
-    bus.emit({ type: "console.line", event: ev });
     return { ...state.match };
   },
 

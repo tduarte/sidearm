@@ -166,9 +166,35 @@ export interface MatchState {
    * on any server not running the default competitive length.
    */
   maxRounds: number | null;
-  paused: boolean;
-  demoRecording: boolean;
+  /**
+   * CS2 has no `mp_paused` cvar and `status` carries no pause column, so this
+   * cannot be read back. It is also not instantaneous: `mp_pause_match` takes
+   * effect at the END of the current round, so even an optimistic flip is
+   * wrong for up to a couple of minutes.
+   *
+   * Hence a state rather than a boolean, and two explicit actions rather than
+   * a toggle — a toggle driven by panel memory sends the wrong command after
+   * any reload.
+   */
+  pause: PauseState;
+  /**
+   * Demo recording goes through GOTV (`tv_record`). `state` is `unknown` when
+   * the panel has not issued anything this process; `name` is the file it
+   * asked for, which is the panel's own record, not the server's.
+   */
+  demo: { state: DemoState; name: string | null };
 }
+
+export type PauseState =
+  /** Not paused, as far as the panel knows. */
+  | "running"
+  /** `mp_pause_match` sent; CS2 applies it at the end of the current round. */
+  | "pause_requested"
+  | "paused"
+  /** Fresh panel, or after a map change — nothing observed yet. */
+  | "unknown";
+
+export type DemoState = "idle" | "recording" | "unknown";
 
 export interface ConsoleEvent {
   id: string;

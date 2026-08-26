@@ -97,7 +97,7 @@ export function startMockEmitter() {
   // 8s: match score progression when live
   setInterval(() => {
     if (state.status.state !== "running") return;
-    if (state.match.phase !== "live" || state.match.paused) return;
+    if (state.match.phase !== "live" || state.match.pause === "paused") return;
     const winner: Team = Math.random() > 0.5 ? "CT" : "T";
     if (winner === "CT") state.match.score.ct++;
     else state.match.score.t++;

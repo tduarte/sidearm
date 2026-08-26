@@ -62,8 +62,8 @@ global.__cs2Cache ??= {
     score: { ct: 0, t: 0 },
     round: 0,
     maxRounds: null,
-    paused: false,
-    demoRecording: false,
+    pause: "unknown",
+    demo: { state: "unknown", name: null },
   },
   console: [],
   chat: [],
@@ -256,6 +256,18 @@ export function updateCache(
   // not wipe a known match length back to unknown.
   if (cvars?.maxRounds != null) cache().match.maxRounds = cvars.maxRounds;
 
+  // A level change cannot carry a pause across, and GOTV stops recording at
+  // the same moment. The pause is knowable (it is gone); the recording is not,
+  // so it goes back to unknown rather than being asserted either way.
+  const previousMap = cache().status?.map;
+  if (previousMap && previousMap !== status.map) {
+    cache().match = {
+      ...cache().match,
+      pause: "running",
+      demo: { state: "unknown", name: cache().match.demo.name },
+    };
+  }
+
   const op = cache().pendingOp;
   if (op) {
     const expired = Date.now() - new Date(op.since).getTime() > PENDING_OP_MAX_MS;
@@ -267,6 +279,11 @@ export function updateCache(
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
   if (players !== null) cache().players = mergeRoster(cache().players, players);
+}
+
+/** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
+function nowStamp(): string {
+  return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
 }
 
 /** Current match state from the cache. Exported for tests. */
@@ -612,19 +629,54 @@ export const realAdapter = {
     return { ...cache().match };
   },
 
-  async togglePause(): Promise<MatchState> {
-    await rconExec(cache().match.paused ? "mp_unpause_match" : "mp_pause_match");
-    cache().match = { ...cache().match, paused: !cache().match.paused };
+  /**
+   * Explicit verbs, deliberately not a toggle.
+   *
+   * The old `togglePause` chose its command from a panel-local boolean that
+   * reset on every panel restart, so after one it would send `mp_pause_match`
+   * to an already-paused server. There is nothing to read back — CS2 exposes no
+   * pause cvar — so the fix is to remove the guess: the caller says which way
+   * it wants to go, and a wrong-direction send becomes impossible.
+   */
+  async setPause(action: "pause" | "unpause"): Promise<MatchState> {
+    await rconExec(action === "pause" ? "mp_pause_match" : "mp_unpause_match");
+    // `mp_pause_match` lands at the end of the current round, so claiming
+    // "paused" now would be wrong for up to a couple of minutes.
+    cache().match = {
+      ...cache().match,
+      pause: action === "pause" ? "pause_requested" : "running",
+    };
     return { ...cache().match };
   },
 
-  async toggleDemo(): Promise<MatchState> {
-    if (cache().match.demoRecording) {
-      await rconExec("stop");
-    } else {
-      await rconExec(`record ${safeToken(`demo_${Date.now()}`)}`);
+  /**
+   * Demo recording via GOTV.
+   *
+   * `record` / `stop` — what this used to send — are the *client* demo
+   * commands and do nothing useful over RCON. The server-side path is
+   * `tv_record` / `tv_stoprecord`, and it needs GOTV running, which is why
+   * TV_ENABLE is now on by default in docker-compose.yml.
+   */
+  async setDemo(action: "start" | "stop"): Promise<MatchState> {
+    if (!cache().status?.gotv) {
+      throw new Error(
+        "GOTV is not running, so the server cannot record a demo. Set TV_ENABLE=1 and run `docker compose up -d --force-recreate cs2`.",
+      );
     }
-    cache().match = { ...cache().match, demoRecording: !cache().match.demoRecording };
+
+    if (action === "stop") {
+      await rconExec("tv_stoprecord");
+      cache().match = {
+        ...cache().match,
+        demo: { state: "idle", name: cache().match.demo.name },
+      };
+      return { ...cache().match };
+    }
+
+    const map = shortMapName(cache().status?.map ?? "demo");
+    const name = safeToken(`sidearm_${map}_${nowStamp()}`);
+    await rconExec(`tv_record ${name}`);
+    cache().match = { ...cache().match, demo: { state: "recording", name } };
     return { ...cache().match };
   },
 
