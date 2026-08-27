@@ -320,3 +320,24 @@ describe("round outcomes", () => {
     assert.ok(r.events.some((e) => e.type === "round.start"));
   });
 });
+
+describe("panel self-chatter", () => {
+  it("drops the server's echo of commands the panel sent", () => {
+    // The 2s status poll issues two commands a tick, so these are ~40 lines a
+    // minute for ever — they buried real events and would have filled the
+    // persisted console table with the panel talking to itself.
+    for (const line of [
+      'rcon from "172.18.0.4:56058": command "status"',
+      'rcon from "172.18.0.4:56058": command "game_type; game_mode; mp_maxrounds"',
+    ]) {
+      const r = parseLine(line);
+      assert.deepEqual(r.consoleEvents, [], line);
+      assert.deepEqual(r.events, [], line);
+    }
+  });
+
+  it("still keeps real server lines", () => {
+    const r = parseLine('World triggered "Round_Start"');
+    assert.ok(r.consoleEvents.length > 0);
+  });
+});

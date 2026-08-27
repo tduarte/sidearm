@@ -4,6 +4,7 @@ import {
   containerStateToServerState,
   envMaxPlayers,
   humanSlots,
+  isServerReboot,
   parseGameMode,
   parseStatusText,
   uptimeFrom,
@@ -544,5 +545,37 @@ describe("updateCache — pause across a map change", () => {
     updateMatchState({ pause: "paused" });
     updateCache(at("de_nuke"), []);
     assert.equal(getMatchState().pause, "paused");
+  });
+});
+
+describe("isServerReboot", () => {
+  const A = "2026-08-27T10:00:00.000Z";
+  const B = "2026-08-27T11:00:00.000Z";
+
+  it("fires when the container start time changes", () => {
+    // The case that was broken: a CS2 restart left the log sink dropped and
+    // the panel's cvars and bans un-reapplied until someone restarted the
+    // panel — and restarting the container is how a CS2 update is applied.
+    assert.equal(isServerReboot(A, B, true), true);
+  });
+
+  it("does not fire on the first observation", () => {
+    // Nothing to compare against; panel start is handled by the RCON connect
+    // callback instead.
+    assert.equal(isServerReboot(null, A, true), false);
+  });
+
+  it("does not fire while the container is unchanged", () => {
+    assert.equal(isServerReboot(A, A, true), false);
+  });
+
+  it("waits for RCON before reconciling", () => {
+    // Mid-boot there is nothing to configure yet, and trying would just fill
+    // the serialised command queue.
+    assert.equal(isServerReboot(A, B, false), false);
+  });
+
+  it("does not fire when Docker cannot report a start time", () => {
+    assert.equal(isServerReboot(A, null, true), false);
   });
 });
