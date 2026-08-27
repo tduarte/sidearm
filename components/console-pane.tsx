@@ -2,14 +2,16 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { PaperPlaneRight, Broom, PushPin, PushPinSlash } from "@phosphor-icons/react";
+import {
+  PaperPlaneRight,
+  Broom,
+  PushPin,
+  PushPinSlash,
+} from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import {
-  ToggleGroup,
-  ToggleGroupItem,
-} from "@/components/ui/toggle-group";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api/client";
 import { useConsoleStream } from "@/lib/hooks/use-console-stream";
@@ -23,11 +25,14 @@ const LEVEL_COLOR: Record<ConsoleLevel, string> = {
   chat: "text-emerald-300",
 };
 
-export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
+export function ConsolePane() {
   const { events, state: streamState, error: streamError } = useConsoleStream();
-  const [levels, setLevels] = useState<ConsoleLevel[]>(
-    chatOnly ? ["chat"] : ["info", "warn", "error", "chat"],
-  );
+  const [levels, setLevels] = useState<ConsoleLevel[]>([
+    "info",
+    "warn",
+    "error",
+    "chat",
+  ]);
   // Derived rather than copied into state: the saved preference is the
   // default, and a toggle in this session overrides it until unmount. The
   // Settings switch that claimed to control this was never wired to anything.
@@ -94,47 +99,45 @@ export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
 
   return (
     <div className="flex h-full min-h-[500px] flex-col gap-3">
-      {!chatOnly && (
-        <div className="flex flex-wrap items-center gap-2">
-          <ToggleGroup
-            type="multiple"
-            value={levels}
-            onValueChange={(v) =>
-              setLevels((v.length > 0 ? v : levels) as ConsoleLevel[])
-            }
+      <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup
+          type="multiple"
+          value={levels}
+          onValueChange={(v) =>
+            setLevels((v.length > 0 ? v : levels) as ConsoleLevel[])
+          }
+          size="sm"
+          variant="outline"
+        >
+          <ToggleGroupItem value="info">info</ToggleGroupItem>
+          <ToggleGroupItem value="warn">warn</ToggleGroupItem>
+          <ToggleGroupItem value="error">error</ToggleGroupItem>
+          <ToggleGroupItem value="chat">chat</ToggleGroupItem>
+        </ToggleGroup>
+        <div className="ml-auto flex items-center gap-2">
+          <Button
             size="sm"
-            variant="outline"
+            variant="ghost"
+            onClick={() => setAutoscrollOverride(!autoscroll)}
+            title={autoscroll ? "Pause autoscroll" : "Resume autoscroll"}
           >
-            <ToggleGroupItem value="info">info</ToggleGroupItem>
-            <ToggleGroupItem value="warn">warn</ToggleGroupItem>
-            <ToggleGroupItem value="error">error</ToggleGroupItem>
-            <ToggleGroupItem value="chat">chat</ToggleGroupItem>
-          </ToggleGroup>
-          <div className="ml-auto flex items-center gap-2">
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => setAutoscrollOverride(!autoscroll)}
-              title={autoscroll ? "Pause autoscroll" : "Resume autoscroll"}
-            >
-              {autoscroll ? (
-                <PushPinSlash className="h-4 w-4" />
-              ) : (
-                <PushPin className="h-4 w-4" />
-              )}
-              {autoscroll ? "Follow" : "Paused"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => viewportRef.current?.scrollTo({ top: 0 })}
-            >
-              <Broom className="h-4 w-4" />
-              Top
-            </Button>
-          </div>
+            {autoscroll ? (
+              <PushPinSlash className="h-4 w-4" />
+            ) : (
+              <PushPin className="h-4 w-4" />
+            )}
+            {autoscroll ? "Follow" : "Paused"}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => viewportRef.current?.scrollTo({ top: 0 })}
+          >
+            <Broom className="h-4 w-4" />
+            Top
+          </Button>
         </div>
-      )}
+      </div>
 
       <ScrollArea className="flex-1 rounded-md border bg-background/50">
         <div
@@ -191,23 +194,21 @@ export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
         </div>
       </ScrollArea>
 
-      {!chatOnly && (
-        <form onSubmit={submit} className="flex gap-2">
-          <Input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={onKeyDown}
-            placeholder="RCON command (e.g. status, mp_restartgame 1)"
-            className="font-mono"
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Button type="submit" disabled={!input.trim() || rcon.isPending}>
-            <PaperPlaneRight className="h-4 w-4" weight="fill" />
-            Send
-          </Button>
-        </form>
-      )}
+      <form onSubmit={submit} className="flex gap-2">
+        <Input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={onKeyDown}
+          placeholder="RCON command (e.g. status, mp_restartgame 1)"
+          className="font-mono"
+          autoComplete="off"
+          spellCheck={false}
+        />
+        <Button type="submit" disabled={!input.trim() || rcon.isPending}>
+          <PaperPlaneRight className="h-4 w-4" weight="fill" />
+          Send
+        </Button>
+      </form>
     </div>
   );
 }

@@ -98,6 +98,10 @@ services:
       SQLITE_PATH: /data/sidearm.db
     volumes:
       - panel-data:/data
+      # Read-only: lets the panel list and serve recorded demos, which are
+      # written inside the CS2 volume and otherwise have no way out. Read-only
+      # so the panel cannot touch the 70 GB of game files it is looking at.
+      - cs2-data:/cs2:ro
     ports:
       - "3000:3000"
     networks: [panel-net]

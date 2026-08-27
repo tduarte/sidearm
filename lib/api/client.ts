@@ -1,5 +1,6 @@
 import type { RotationState } from "@/lib/cs2/rotation";
 import type { BanRecord } from "@/lib/cs2/bans";
+import type { DemoFile } from "@/lib/cs2/demos";
 import type {
   ChatMessage,
   CvarGroup,
@@ -113,6 +114,8 @@ export const api = {
     }),
 
   getBans: () => request<BanRecord[]>("/api/players/ban"),
+
+  getDemos: () => request<DemoFile[]>("/api/demos"),
 
   getMaps: () =>
     request<{ current: string; rotation: string[]; all: MapEntry[] }>(

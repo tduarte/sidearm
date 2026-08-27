@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Image from "next/image";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowRight, MapPin, Plus, Trash } from "@phosphor-icons/react";
+import { ArrowRight, Plus, Trash } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -30,6 +30,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 import { LoadError } from "@/components/load-error";
 import { RotationCard } from "@/components/maps/rotation-card";
+import { MapPlaceholder } from "@/components/maps/map-placeholder";
 import { DangerConfirm } from "@/components/danger-confirm";
 import { api } from "@/lib/api/client";
 import {
@@ -283,9 +284,7 @@ function MapTile({
             className="object-cover object-center"
           />
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-zinc-800 via-zinc-900 to-zinc-950">
-            <MapPin className="h-10 w-10 text-zinc-600" weight="duotone" />
-          </div>
+          <MapPlaceholder name={name} />
         )}
       </div>
       <CardHeader className="gap-2">
