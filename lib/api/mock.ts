@@ -113,6 +113,9 @@ const initialMockState = {
     pause: "running",
     demo: { state: "recording", name: "sidearm_de_mirage_mock" },
     knifeSetupApplied: false,
+    // No match config loaded: the panel's own controls are all live, which is
+    // the state with more interface to show.
+    matchzyState: null,
   } as MatchState,
 
   console: [] as ConsoleEvent[],

@@ -20,10 +20,21 @@ import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
 import { runUpdateCheck } from "@/lib/cs2/updates";
 import { fetchStatus } from "@/lib/cs2/status";
+import type { Get5Status } from "@/lib/cs2/plugins";
 import { bus } from "@/lib/ws/bus";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
 import { getMatches, getMatchDetail } from "@/lib/db/matches";
 import { mergeHistory, readMatchZyMaps } from "@/lib/cs2/matchzy-db";
+import { buildMatchConfig, type MatchDefinition } from "@/lib/cs2/match-config";
+import { loadMatchCommand } from "@/lib/cs2/match-load";
+import {
+  deleteMatchConfig,
+  getMatchConfig,
+  listMatchConfigs,
+  markMatchConfigLoaded,
+  saveMatchConfig,
+  type StoredMatchConfig,
+} from "@/lib/db/match-configs";
 import {
   deleteWorkshopMap,
   getWorkshopMaps,
@@ -113,6 +124,7 @@ global.__cs2Cache ??= {
     pause: "unknown",
     demo: { state: "unknown", name: null },
     knifeSetupApplied: false,
+    matchzyState: null,
   },
   console: [],
   chat: [],
@@ -334,13 +346,73 @@ function notePluginState(status: ServerStatus): void {
   status.plugins.regressed = seen && status.plugins.matchzy === false;
 }
 
+/**
+ * Maps MatchZy's gamestate onto the panel's own phase vocabulary.
+ *
+ * Only the states that have an honest equivalent are translated. `knife` and
+ * `waiting_for_knife_decision` deliberately map to `live`: the panel's
+ * `MatchPhase` has no knife value, and calling them `warmup` would say the
+ * round does not count when it decides which side everyone plays.
+ */
+function phaseFromGamestate(g: string): MatchPhase | null {
+  switch (g) {
+    case "warmup":
+    case "waiting_for_players":
+      return "warmup";
+    case "knife":
+    case "waiting_for_knife_decision":
+    case "going_live":
+    case "live":
+      return "live";
+    case "post_game":
+      return "ended";
+    case "none":
+      return null;
+    default:
+      // A gamestate a future MatchZy adds. Better to leave the phase where the
+      // log parser put it than to guess.
+      return null;
+  }
+}
+
+/**
+ * Applies MatchZy's own match state, when there is one.
+ *
+ * This is the first time `pause` is *read* rather than inferred. CS2 has no
+ * `mp_paused` cvar and no pause column in `status`, so the panel could only
+ * ever say "a pause was requested" and hope; `get5_status` answers the question
+ * directly. Where MatchZy knows, MatchZy wins.
+ */
+function applyMatchZyState(get5: Get5Status | null): void {
+  const gamestate = get5?.gamestate ?? null;
+  cache().match = { ...cache().match, matchzyState: gamestate };
+
+  // No config loaded — including every pug started in-game with `.start`, which
+  // get5_status does not report on. Leave the log-derived state alone.
+  if (!gamestate || gamestate === "none") return;
+
+  const phase = phaseFromGamestate(gamestate);
+  if (phase) cache().match = { ...cache().match, phase };
+
+  if (get5?.paused !== null && get5?.paused !== undefined) {
+    cache().match = {
+      ...cache().match,
+      // A real reading, so no `pause_requested` limbo: MatchZy either has the
+      // match paused or it does not.
+      pause: get5.paused ? "paused" : "running",
+    };
+  }
+}
+
 export function updateCache(
   status: ServerStatus,
   players: Player[] | null,
   cvars?: { maxRounds: number | null },
+  get5?: Get5Status | null,
 ) {
   resolveWorkshopMapName(status.map);
   notePluginState(status);
+  applyMatchZyState(get5 ?? null);
 
   // Only overwrite when the server actually answered: a dropped RCON tick must
   // not wipe a known match length back to unknown.
@@ -404,8 +476,25 @@ export async function reapplyConfig(): Promise<void> {
   }
   if (!cvars || cvars.length === 0) return;
 
+  // A boot mid-series (a crash, or a CS2 update applied during a match) would
+  // otherwise replay the panel's gameplay cvars straight over the ones
+  // MatchZy's live.cfg just set.
+  const { safe, held } = matchzyOwnsMatch()
+    ? partitionOwnedCvars(cvars)
+    : { safe: cvars, held: [] as string[] };
+
+  if (held.length > 0) {
+    const ev = makeConsoleEvent(
+      "info",
+      "admin",
+      `Held back ${held.length} gameplay cvar(s) while MatchZy runs the match; its live.cfg owns them.`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  }
+
   let applied = 0;
-  for (const cvar of cvars) {
+  for (const cvar of safe) {
     try {
       await rconExec(cvar);
       applied += 1;
@@ -413,9 +502,9 @@ export async function reapplyConfig(): Promise<void> {
   }
 
   const ev = makeConsoleEvent(
-    applied === cvars.length ? "info" : "warn",
+    applied === safe.length ? "info" : "warn",
     "admin",
-    `Re-applied ${applied}/${cvars.length} saved config cvars after the server restarted`,
+    `Re-applied ${applied}/${safe.length} saved config cvars after the server restarted`,
   );
   appendConsole(ev);
   bus.emit({ type: "console.line", event: ev });
@@ -493,11 +582,80 @@ function saveRotation(state: RotationState): void {
  * Called from the match-lifecycle subscriber in server.ts, so it runs wherever
  * the `Game Over:` line is observed.
  */
+/**
+ * Is MatchZy currently running a match?
+ *
+ * Read from `get5_status` on the poll, never remembered: the panel's own memory
+ * of match state is exactly what went wrong with the pause and demo toggles
+ * before. `none` means MatchZy is loaded but idle, which is not ownership.
+ *
+ * While this is true MatchZy owns the map cycle, the gameplay cvars (its
+ * `live.cfg` hard-sets around a hundred of them on going live) and demo
+ * recording. The panel doing any of those anyway does not produce an error — it
+ * produces two systems fighting over one server, which is worse.
+ */
+export function matchzyOwnsMatch(): boolean {
+  const state = cache().match.matchzyState;
+  return state !== null && state !== "none";
+}
+
+/**
+ * Cvars `live.cfg` claims, which the panel must not write during a match.
+ *
+ * Identity and access are deliberately absent: MatchZy does not touch
+ * `hostname` (beyond the format cvar the panel now aligns with it) or
+ * `sv_password`, so renaming the server or setting a password mid-match is
+ * still perfectly reasonable. Only the ones that would be reverted — or would
+ * revert MatchZy — are held back.
+ */
+const MATCHZY_OWNED_CVARS = new Set([
+  "game_type",
+  "game_mode",
+  "bot_quota",
+  "bot_difficulty",
+  "sv_visiblemaxplayers",
+  "mp_maxrounds",
+  "mp_overtime_enable",
+  "mp_overtime_maxrounds",
+  "mp_freezetime",
+  "mp_roundtime",
+  "mp_roundtime_defuse",
+]);
+
+/** Splits saved cvar commands into what is safe to send and what is not. */
+export function partitionOwnedCvars(cvars: string[]): {
+  safe: string[];
+  held: string[];
+} {
+  const safe: string[] = [];
+  const held: string[] = [];
+  for (const cvar of cvars) {
+    const name = cvar.trim().split(/\s+/)[0]?.toLowerCase() ?? "";
+    (MATCHZY_OWNED_CVARS.has(name) ? held : safe).push(cvar);
+  }
+  return { safe, held };
+}
+
 export async function advanceRotation(): Promise<string | null> {
   const rotation = loadRotation();
   const current = cache().status?.map ?? "";
   const next = nextMap(rotation, current);
   if (!next) return null;
+
+  // MatchZy changes level itself between maps of a series and after a veto.
+  // Racing it with our own `changelevel` leaves the series pointing at a map
+  // nobody picked. Said out loud rather than silently skipped, because a
+  // rotation that just stops looks like a bug.
+  if (matchzyOwnsMatch()) {
+    const ev = makeConsoleEvent(
+      "info",
+      "rotation",
+      `Not rotating to ${next}: MatchZy is running the match and owns the map cycle.`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return null;
+  }
 
   try {
     await realAdapter.changeMap(next);
@@ -829,13 +987,37 @@ export const realAdapter = {
       );
     }
 
-    for (const cvar of cvars) await rconExec(cvar);
+    // Mid-match, MatchZy's live.cfg owns the gameplay cvars. Sending ours would
+    // either be reverted immediately or would change the rules underneath a
+    // match in progress. Identity and access still apply — MatchZy does not
+    // touch hostname or sv_password.
+    const { safe, held } = matchzyOwnsMatch()
+      ? partitionOwnedCvars(cvars)
+      : { safe: cvars, held: [] as string[] };
+
+    for (const cvar of safe) await rconExec(cvar);
 
     // Remembered so a container restart does not silently undo it. Every cvar
     // here lives in the game server's memory, and restarting IS how a CS2
     // update is applied — so the panel's own auto-update was reverting the
     // admin's settings and never mentioning it.
+    //
+    // The full list is saved even when part of it was held back, so the
+    // gameplay settings do get applied once the match is over and the server
+    // next restarts.
     saveAppliedCvars(cvars);
+
+    if (held.length > 0) {
+      const skipped = makeConsoleEvent(
+        "warn",
+        "admin",
+        `Saved, but held back ${held.length} gameplay setting(s) while MatchZy runs the match: ${held
+          .map((c) => c.split(/\s+/)[0])
+          .join(", ")}. They apply after the match.`,
+      );
+      appendConsole(skipped);
+      bus.emit({ type: "console.line", event: skipped });
+    }
 
     const ev = makeConsoleEvent("info", "admin", "Config applied via RCON");
     appendConsole(ev);
@@ -1242,6 +1424,16 @@ export const realAdapter = {
       );
     }
 
+    // MatchZy drives tv_record and tv_stoprecord itself for the match it is
+    // running, and its docs warn against touching GOTV per-phase. Stopping its
+    // recording from here loses the demo of the match in progress, which is
+    // precisely the demo anyone would want.
+    if (matchzyOwnsMatch()) {
+      throw new Error(
+        "MatchZy is running the match and records its own demo to the MatchZy folder. Starting or stopping recording here would fight it.",
+      );
+    }
+
     if (action === "stop") {
       await rconExec("tv_stoprecord");
       cache().match = {
@@ -1321,6 +1513,68 @@ export const realAdapter = {
     await containerAction("cs2", "restart");
     beginPendingOp("update");
     setServerStatusState("starting");
+  },
+
+  /** Match definitions the panel has set up, newest first. */
+  async getMatchConfigs(): Promise<StoredMatchConfig[]> {
+    try { return listMatchConfigs(); } catch { return []; }
+  },
+
+  /**
+   * Saves a match definition, refusing anything MatchZy would reject.
+   *
+   * Validated here as well as in the form, because the config endpoint runs on
+   * the game thread and is no place to discover a roster full of bots.
+   */
+  async saveMatch(def: MatchDefinition): Promise<{ warnings: string[] }> {
+    const { config, errors, warnings } = buildMatchConfig(def);
+    if (!config) throw new Error(errors.join(" "));
+    saveMatchConfig(def);
+    return { warnings };
+  },
+
+  /**
+   * Tells CS2 to fetch and load a match.
+   *
+   * This reloads the map and restarts the game for everyone connected, which is
+   * why callers confirm first. `matchzy_loadmatch_url` blocks the game thread
+   * on the HTTP call, so the URL points at the panel's compose service name
+   * rather than out through the host.
+   */
+  async loadMatch(id: string): Promise<void> {
+    if (cache().status?.plugins?.matchzy !== true) {
+      throw new Error(
+        "MatchZy is not loaded, so the server cannot run a match config.",
+      );
+    }
+    const stored = getMatchConfig(id);
+    if (!stored) throw new Error(`No match setup called ${id}.`);
+
+    const { config, errors } = buildMatchConfig(stored.definition);
+    if (!config) throw new Error(errors.join(" "));
+
+    await rconExec(loadMatchCommand(id));
+    markMatchConfigLoaded(id);
+
+    const ev = makeConsoleEvent(
+      "info",
+      "admin",
+      `Loading match ${id}: ${config.team1.name} vs ${config.team2.name} (BO${config.num_maps})`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  /** Ends whatever MatchZy is running and returns the server to warmup. */
+  async endMatchZyMatch(): Promise<void> {
+    await rconExec("css_endmatch");
+    const ev = makeConsoleEvent("info", "admin", "Ended the MatchZy match");
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  async deleteMatchConfig(id: string): Promise<void> {
+    deleteMatchConfig(id);
   },
 
   async getHistory(): Promise<MatchHistoryDetail[]> {

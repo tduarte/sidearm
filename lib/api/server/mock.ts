@@ -21,6 +21,47 @@ import { expiryFrom, type BanRecord } from "@/lib/cs2/bans";
 /** Mock cvar values, so the Practice tab is exercisable without a server. */
 const mockCvars: Record<string, string> = { sv_cheats: "0" };
 import { workshopIdFromMapName, workshopMapPath } from "@/lib/cs2/workshop";
+import { buildMatchConfig, type MatchDefinition } from "@/lib/cs2/match-config";
+import type { StoredMatchConfig } from "@/lib/db/match-configs";
+
+/**
+ * One saved match setup, so the form has something to show without a database.
+ *
+ * Steam ids are real-shaped rather than placeholders: the whole point of the
+ * setup form is that it converts SteamID3 to Steam64, and a mock full of
+ * `12345` would never exercise that.
+ */
+const mockMatchConfigs: StoredMatchConfig[] = [
+  {
+    id: "friday-scrim",
+    createdAt: new Date(Date.now() - 7200000).toISOString(),
+    loadedAt: null,
+    definition: {
+      id: "friday-scrim",
+      team1: {
+        name: "Astra",
+        players: [
+          { steamId: "[U:1:22202]", name: "vex" },
+          { steamId: "[U:1:22203]", name: "kori" },
+        ],
+      },
+      team2: {
+        name: "Nova",
+        players: [
+          { steamId: "[U:1:33301]", name: "brim" },
+          { steamId: "[U:1:33302]", name: "sova" },
+        ],
+      },
+      maps: ["de_mirage", "de_inferno", "de_nuke"],
+      numMaps: 1,
+      playersPerTeam: 5,
+      minPlayersToReady: 1,
+      skipVeto: false,
+      clinchSeries: true,
+      wingman: false,
+    },
+  },
+];
 
 /**
  * Mock backend adapter. Mirrors the shape of `lib/api/client.ts` but runs
@@ -297,6 +338,49 @@ export const mockAdapter = {
 
   async getHistory(): Promise<MatchHistoryDetail[]> {
     return [...state.history];
+  },
+
+  async getMatchConfigs(): Promise<StoredMatchConfig[]> {
+    return [...mockMatchConfigs];
+  },
+
+  async saveMatch(def: MatchDefinition): Promise<{ warnings: string[] }> {
+    // Validated in mock too: the form's error handling is a real code path and
+    // a mock that accepts anything hides it.
+    const { config, errors, warnings } = buildMatchConfig(def);
+    if (!config) throw new Error(errors.join(" "));
+
+    const existing = mockMatchConfigs.findIndex((m) => m.id === def.id);
+    const row: StoredMatchConfig = {
+      id: def.id,
+      createdAt:
+        existing >= 0 ? mockMatchConfigs[existing].createdAt : new Date().toISOString(),
+      loadedAt: existing >= 0 ? mockMatchConfigs[existing].loadedAt : null,
+      definition: def,
+    };
+    if (existing >= 0) mockMatchConfigs[existing] = row;
+    else mockMatchConfigs.unshift(row);
+    return { warnings };
+  },
+
+  async loadMatch(id: string): Promise<void> {
+    const row = mockMatchConfigs.find((m) => m.id === id);
+    if (!row) throw new Error(`No match setup called ${id}.`);
+    row.loadedAt = new Date().toISOString();
+    // Loading a match puts MatchZy into warmup waiting for players to ready —
+    // the same transition the real server makes, so the UI can be seen doing it.
+    state.match = { ...state.match, matchzyState: "warmup", phase: "warmup" };
+    bus.emit({ type: "match.phase", phase: "warmup" });
+  },
+
+  async endMatchZyMatch(): Promise<void> {
+    state.match = { ...state.match, matchzyState: "none", phase: "idle" };
+    bus.emit({ type: "match.phase", phase: "idle" });
+  },
+
+  async deleteMatchConfig(id: string): Promise<void> {
+    const i = mockMatchConfigs.findIndex((m) => m.id === id);
+    if (i >= 0) mockMatchConfigs.splice(i, 1);
   },
 
   async getUpdateStatus(): Promise<UpdateStatus> {

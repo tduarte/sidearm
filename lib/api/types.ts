@@ -231,7 +231,37 @@ export interface MatchState {
    * the server back.
    */
   knifeSetupApplied: boolean;
+  /**
+   * MatchZy's own gamestate, read from `get5_status`, when a match config is
+   * loaded. `null` when MatchZy is absent or nothing is loaded — which includes
+   * pug matches started in-game with `.start`, since `get5_status` only
+   * populates for config-loaded matches.
+   *
+   * While this is non-null, MatchZy owns the map cycle, the gameplay cvars and
+   * demo recording, and the panel stands down from all three.
+   */
+  matchzyState: MatchZyGameState | null;
 }
+
+/**
+ * The values MatchZy reports for `gamestate`.
+ *
+ * `none` is deliberately part of the union rather than mapped to `null`: it is
+ * a real answer meaning "MatchZy is loaded and running nothing", which is a
+ * different thing from "MatchZy is not there".
+ */
+export type MatchZyGameState =
+  | "none"
+  | "pending_restore"
+  | "waiting_for_players"
+  | "warmup"
+  | "knife"
+  | "waiting_for_knife_decision"
+  | "going_live"
+  | "live"
+  | "post_game"
+  /** Anything a future MatchZy adds; carried through rather than dropped. */
+  | (string & {});
 
 export type PauseState =
   /** Not paused, as far as the panel knows. */
