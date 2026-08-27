@@ -79,26 +79,16 @@ const initialMockState = {
   config: {
     identity: {
       hostname: "sidearm | 5v5 comp",
-      tags: ["competitive", "friends-only"],
-      region: "us-east",
     },
     access: {
       serverPassword: "",
-      rconPassword: "changeme-rcon-pw",
-      gsltToken: "",
     },
     gameplay: {
       mode: "competitive",
-      tickrate: 128,
-      maxPlayers: 10,
+      visibleMaxPlayers: 10,
       botsEnabled: false,
       botDifficulty: 2,
       botQuota: 0,
-    },
-    networking: {
-      port: 27015,
-      tvPort: 27020,
-      workshopCollectionId: "",
     },
   } as ServerConfig,
 

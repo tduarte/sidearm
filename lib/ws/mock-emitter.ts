@@ -122,7 +122,7 @@ export function startMockEmitter() {
       state.status.players = state.players.length;
       bus.emit({ type: "player.leave", steamId: removed.steamId });
       addConsole("info", "server", `${removed.name} disconnected`);
-    } else if (state.players.length < state.config.gameplay.maxPlayers) {
+    } else if (state.players.length < state.config.gameplay.visibleMaxPlayers) {
       const idx = state.players.length;
       const p: Player = {
         steamId: `7656119800099${String(idx).padStart(4, "0")}`,

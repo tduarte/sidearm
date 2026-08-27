@@ -11,7 +11,14 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(req: Request) {
   const trusted = isTrustedPeer(req.headers.get(PEER_HEADER));
-  return NextResponse.json({ authRequired: authRequired() && !trusted });
+  const configured = authRequired();
+  return NextResponse.json({
+    authRequired: configured && !trusted,
+    /** Whether PANEL_ADMIN_TOKEN is set at all, regardless of this caller. */
+    tokenConfigured: configured,
+    /** This caller is exempt because its address is in PANEL_TRUSTED_CIDRS. */
+    trustedPeer: trusted,
+  });
 }
 
 /** Exchanges the admin token for an HttpOnly session cookie. */
@@ -42,6 +49,19 @@ export async function POST(req: Request) {
     // silently drop the cookie there. Opt in when running behind TLS.
     secure: process.env.PANEL_HTTPS === "1",
     maxAge: 60 * 60 * 24 * 30,
+  });
+  return res;
+}
+
+/** Clears the session cookie. The token itself is unchanged, of course. */
+export async function DELETE() {
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set(AUTH_COOKIE, "", {
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.PANEL_HTTPS === "1",
+    maxAge: 0,
   });
   return res;
 }

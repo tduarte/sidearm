@@ -21,12 +21,11 @@ import { Sparkline } from "@/components/sparkline";
 import { StatCard } from "@/components/stat-card";
 import { StatusPill } from "@/components/status-pill";
 import { LoadError } from "@/components/load-error";
+import { FirstRun, isFirstRun } from "@/components/first-run";
+import { Roster } from "@/components/players/roster";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useStatHistory } from "@/lib/hooks/use-stat-history";
 import { useMatchState } from "@/lib/hooks/use-match-state";
-import { useLivePlayers } from "@/lib/hooks/use-live-players";
-import { MatchScoreboard } from "@/components/match-scoreboard";
-import { RecentPlayersDataTable } from "@/components/recent-players/recent-players-data-table";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 
@@ -60,11 +59,15 @@ export default function DashboardPage() {
   const isNarrow = useMediaQuery("(max-width: 639px)");
   const { data: status, isPending, error, refetch } = useServerStatus();
   const { data: match } = useMatchState();
-  const { data: livePlayers, isLoading: playersLoading } = useLivePlayers();
   const { cpu } = useStatHistory();
 
   if (error && !status) {
     return <LoadError what="server status" error={error} onRetry={() => refetch()} />;
+  }
+
+  // A server that has never been reachable is downloading itself, not broken.
+  if (status && isFirstRun(status)) {
+    return <FirstRun status={status} />;
   }
 
   if (isPending || !status) {
@@ -186,32 +189,28 @@ export default function DashboardPage() {
           ) : (
             <Skeleton className="h-24 w-full max-w-2xl mx-auto" />
           )}
-          {playersLoading ? (
-            <Skeleton className="min-h-48 w-full" />
-          ) : (
-            <MatchScoreboard players={livePlayers ?? []} />
-          )}
         </CardContent>
       </Card>
 
+      {/* The roster, absorbed from /players — see components/players/roster.tsx */}
+      <Roster />
+
       {/* Stats */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-h-0">
+        {/*
+          The Players tile used to embed a second, smaller roster table — a
+          third rendering of the same query, on the same screen as the real one.
+        */}
         <StatCard
           label="Players"
           value={`${status.players}/${status.maxPlayers ?? "?"}`}
           sub={
-            <div className="flex min-h-0 flex-col gap-2">
-              {match ? (
-                <p className="text-xs text-muted-foreground">
-                  round {match.round}/{match.maxRounds}
-                </p>
-              ) : null}
-              <RecentPlayersDataTable
-                players={livePlayers}
-                loading={playersLoading}
-                max={4}
-              />
-            </div>
+            status.visibleMaxPlayers &&
+            status.visibleMaxPlayers !== status.maxPlayers ? (
+              <p className="text-xs text-muted-foreground">
+                advertising {status.visibleMaxPlayers}
+              </p>
+            ) : null
           }
           icon={<UsersThree className="h-5 w-5" />}
         />

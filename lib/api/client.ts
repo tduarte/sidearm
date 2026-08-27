@@ -66,7 +66,14 @@ const json = (body: unknown): RequestInit => ({
 
 export const api = {
   /** Whether the panel is configured to require an admin token. */
-  authStatus: () => request<{ authRequired: boolean }>("/api/auth"),
+  authStatus: () =>
+    request<{
+      authRequired: boolean;
+      tokenConfigured: boolean;
+      trustedPeer: boolean;
+    }>("/api/auth"),
+
+  logout: () => request<{ ok: true }>("/api/auth", { method: "DELETE" }),
 
   /** Exchanges the admin token for a session cookie. */
   login: (token: string) => request<{ ok: true }>("/api/auth", json({ token })),

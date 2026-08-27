@@ -110,29 +110,34 @@ export interface ServerStatus {
   updateProgress?: UpdateProgress | null;
 }
 
+/**
+ * Server settings the panel can actually change, and nothing else.
+ *
+ * Nine fields used to live here that `putConfig` silently dropped — tags,
+ * region, tickrate, both ports, the workshop collection, and the RCON password
+ * and GSLT — while the form reported "Config saved". They are launch arguments
+ * or have no cvar at all, so the panel cannot apply them at any price; showing
+ * them as editable was the lie. What is left is exactly what goes over RCON.
+ */
 export interface ServerConfig {
   identity: {
     hostname: string;
-    tags: string[];
-    region: string;
   };
   access: {
+    /** Empty means an open server. Never echoed back; see REDACTED. */
     serverPassword: string;
-    rconPassword: string;
-    gsltToken: string;
   };
   gameplay: {
     mode: GameMode;
-    tickrate: 64 | 128;
-    maxPlayers: number;
+    /**
+     * `sv_visiblemaxplayers` — what the server browser advertises. NOT the
+     * slot ceiling, which is the `-maxplayers` launch argument and is reported
+     * read-only as `ServerStatus.maxPlayers`.
+     */
+    visibleMaxPlayers: number;
     botsEnabled: boolean;
     botDifficulty: 0 | 1 | 2 | 3;
     botQuota: number;
-  };
-  networking: {
-    port: number;
-    tvPort: number;
-    workshopCollectionId: string;
   };
 }
 

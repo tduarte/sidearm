@@ -39,6 +39,7 @@ import {
   type BanRecord,
 } from "@/lib/cs2/bans";
 import { deleteBan, insertBan, listBans } from "@/lib/db/bans";
+import { getConsoleEvents, insertConsoleEvent } from "@/lib/db/console";
 import { mirrorThumbnail } from "@/lib/maps/thumbnails";
 import {
   assertCommandAllowed,
@@ -50,7 +51,7 @@ import {
   assertManagedCvarName,
   safeToken,
 } from "@/lib/cs2/sanitize";
-import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import { asInt, cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
 import { mapDisplayName, parseMapList } from "@/lib/cs2/maps";
 import {
   EMPTY_ROTATION,
@@ -341,6 +342,51 @@ function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
 }
 
+const APPLIED_CVARS_KEY = "config.applied";
+
+/** The exact commands last applied by `putConfig`, for replay after a restart. */
+function saveAppliedCvars(cvars: string[]): void {
+  try {
+    setSavedConfig(APPLIED_CVARS_KEY, cvars);
+  } catch { /* non-critical */ }
+}
+
+/**
+ * Re-applies the last saved config after the game server restarted.
+ *
+ * These are all in-memory cvars, so every restart drops them — including the
+ * panel's own auto-update restart, which meant applying a CS2 update quietly
+ * reset the hostname, password, game mode and bot settings.
+ *
+ * Deliberately not silent: the console line is how an admin finds out this
+ * happened at all.
+ */
+export async function reapplyConfig(): Promise<void> {
+  let cvars: string[] | null;
+  try {
+    cvars = getSavedConfig<string[]>(APPLIED_CVARS_KEY);
+  } catch {
+    return;
+  }
+  if (!cvars || cvars.length === 0) return;
+
+  let applied = 0;
+  for (const cvar of cvars) {
+    try {
+      await rconExec(cvar);
+      applied += 1;
+    } catch { /* keep going; one bad cvar must not block the rest */ }
+  }
+
+  const ev = makeConsoleEvent(
+    applied === cvars.length ? "info" : "warn",
+    "admin",
+    `Re-applied ${applied}/${cvars.length} saved config cvars after the server restarted`,
+  );
+  appendConsole(ev);
+  bus.emit({ type: "console.line", event: ev });
+}
+
 /**
  * Lifts bans whose clock has run out.
  *
@@ -521,6 +567,9 @@ export function updateMatchState(match: Partial<MatchState>) {
 export function appendConsole(event: ConsoleEvent) {
   cache().console.push(event);
   if (cache().console.length > 500) cache().console.shift();
+  // Also to disk, so a deploy or a panel crash does not throw away the log
+  // someone is reading to work out what went wrong.
+  try { insertConsoleEvent(event); } catch { /* non-critical */ }
 }
 
 export function appendChat(msg: ChatMessage) {
@@ -663,31 +712,45 @@ export const realAdapter = {
   },
 
   async getConfig(): Promise<ServerConfig> {
+    // Read from the server rather than invented. botsEnabled, botDifficulty
+    // and botQuota used to be the constants false/1/0 regardless of what the
+    // server had, so the form opened showing settings nobody had chosen.
+    let bots = { quota: 0, difficulty: 1 };
+    let visible = 0;
+    try {
+      const read = parseCvarEcho(
+        await rconExec(
+          cvarReadCommand(["bot_quota", "bot_difficulty", "sv_visiblemaxplayers"]),
+        ),
+      );
+      bots = {
+        quota: asInt(read.values.get("bot_quota")) ?? 0,
+        difficulty: asInt(read.values.get("bot_difficulty")) ?? 1,
+      };
+      visible = asInt(read.values.get("sv_visiblemaxplayers")) ?? 0;
+    } catch {
+      // RCON silent: fall through with defaults rather than failing the page.
+    }
+
+    const difficulty = Math.min(3, Math.max(0, bots.difficulty)) as 0 | 1 | 2 | 3;
+
     return {
       identity: {
         hostname: cache().status?.hostname ?? "CS2 Server",
-        tags: [],
-        region: "local",
       },
       // Secrets are write-only. `GET /api/config` previously returned the live
       // RCON password and GSLT in plain JSON to any browser that asked.
       access: {
         serverPassword: REDACTED,
-        rconPassword: REDACTED,
-        gsltToken: REDACTED,
       },
       gameplay: {
         mode: cache().status?.gameMode ?? "competitive",
-        tickrate: 64,
-        maxPlayers: cache().status?.maxPlayers ?? 10,
-        botsEnabled: false,
-        botDifficulty: 1,
-        botQuota: 0,
-      },
-      networking: {
-        port: cache().status?.port ?? 27015,
-        tvPort: 27020,
-        workshopCollectionId: "",
+        // -1 is the default meaning "no override"; show the real ceiling then.
+        visibleMaxPlayers:
+          visible > 0 ? visible : (cache().status?.maxPlayers ?? 10),
+        botsEnabled: bots.quota > 0,
+        botDifficulty: difficulty,
+        botQuota: bots.quota,
       },
     };
   },
@@ -710,23 +773,29 @@ export const realAdapter = {
       `game_mode ${gm}`,
       // Was `mp_maxrounds ${maxPlayers}` — max *players* written to max
       // *rounds*, so changing the slot count silently rewrote match length.
-      `sv_visiblemaxplayers ${safeInt(cfg.gameplay.maxPlayers, 1, 64, 10)}`,
+      `sv_visiblemaxplayers ${safeInt(cfg.gameplay.visibleMaxPlayers, 1, 64, 10)}`,
       `bot_quota ${cfg.gameplay.botsEnabled ? safeInt(cfg.gameplay.botQuota, 0, 64, 0) : 0}`,
       `bot_difficulty ${safeInt(cfg.gameplay.botDifficulty, 0, 3, 1)}`,
     ];
 
     for (const cvar of cvars) await rconExec(cvar);
 
+    // Remembered so a container restart does not silently undo it. Every cvar
+    // here lives in the game server's memory, and restarting IS how a CS2
+    // update is applied — so the panel's own auto-update was reverting the
+    // admin's settings and never mentioning it.
+    saveAppliedCvars(cvars);
+
     const ev = makeConsoleEvent("info", "admin", "Config applied via RCON");
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
 
-    // Fields that cannot be hot-applied are reported back rather than silently
-    // dropped: tickrate and maxplayers are launch arguments, and rotating the
-    // GSLT or RCON password needs the container recreated.
+    // Every field in ServerConfig is applied above; the ones that could not be
+    // are no longer part of the type. The password comes back redacted because
+    // it is write-only.
     return {
       ...cfg,
-      access: { serverPassword: REDACTED, rconPassword: REDACTED, gsltToken: REDACTED },
+      access: { serverPassword: REDACTED },
     };
   },
 
@@ -1139,6 +1208,13 @@ export const realAdapter = {
   },
 
   async getConsole(): Promise<ConsoleEvent[]> {
+    // Disk first: after a panel restart the in-memory ring is empty but the
+    // log is not, and an empty console is exactly the wrong thing to show
+    // someone who just restarted the panel to investigate something.
+    try {
+      const stored = getConsoleEvents(500);
+      if (stored.length > 0) return stored;
+    } catch { /* fall back to memory */ }
     return cache().console.slice(-500);
   },
 
