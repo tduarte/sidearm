@@ -119,6 +119,54 @@ const initialMockState = {
   chat: [] as ChatMessage[],
 
   history: [
+    // A MatchZy-recorded match, so the plugin's scoreboard and its team-based
+    // score can be seen without installing anything. This is a real production
+    // shape, not an invention: MatchZy records every match it runs, and the
+    // panel reads them straight out of its database.
+    {
+      id: "matchzy:7:0",
+      startedAt: new Date(Date.now() - 3600000).toISOString(),
+      endedAt: new Date(Date.now() - 3600000 + 2580000).toISOString(),
+      map: "de_nuke",
+      gameMode: "competitive",
+      finalScore: { ct: 13, t: 10 },
+      winner: "CT",
+      playerCount: 4,
+      source: "matchzy",
+      teams: [
+        { name: "Astra", score: 13 },
+        { name: "Nova", score: 10 },
+      ],
+      winnerLabel: "Astra",
+      matchzyPlayers: [
+        {
+          steamId64: "76561197960265728", name: "vex", team: "Astra",
+          kills: 27, deaths: 15, assists: 5, damage: 2185, adr: 95,
+          headshotPct: 52, enemiesFlashed: 11, utilityDamage: 214,
+          entries: { played: 9, won: 6 }, clutches: { played: 4, won: 3 },
+        },
+        {
+          steamId64: "76561198000000042", name: "kori", team: "Astra",
+          kills: 19, deaths: 17, assists: 9, damage: 1702, adr: 74,
+          headshotPct: 31, enemiesFlashed: 24, utilityDamage: 388,
+          entries: { played: 3, won: 1 }, clutches: { played: 2, won: 0 },
+        },
+        {
+          steamId64: "76561199000000001", name: "brim", team: "Nova",
+          kills: 21, deaths: 20, assists: 3, damage: 1893, adr: 82,
+          headshotPct: 43, enemiesFlashed: 6, utilityDamage: 97,
+          entries: { played: 7, won: 3 }, clutches: { played: 3, won: 1 },
+        },
+        {
+          // No kills at all, so no headshot percentage exists to report —
+          // the one row that proves nulls render as a dash, not as 0%.
+          steamId64: "76561199000000002", name: "sova", team: "Nova",
+          kills: 0, deaths: 22, assists: 12, damage: 640, adr: 27,
+          headshotPct: null, enemiesFlashed: 31, utilityDamage: 502,
+          entries: { played: 0, won: 0 }, clutches: { played: 0, won: 0 },
+        },
+      ],
+    },
     {
       id: "m1",
       startedAt: new Date(Date.now() - 86400000).toISOString(),
