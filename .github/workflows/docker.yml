@@ -108,6 +108,67 @@ jobs:
             echo "cs2=false" >> "$GITHUB_OUTPUT"
           fi
 
+  # The compose files and setup script are the interface for anyone who is not
+  # us: a user's whole experience is `./scripts/setup.sh && docker compose up`.
+  # A YAML error or a shell typo there is a broken install for everyone, and
+  # `verify` cannot catch it — tsc and eslint never read these files.
+  #
+  # Fast (no image pulls), so it runs on every push regardless of what changed.
+  stack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Shell syntax
+        run: |
+          set -euo pipefail
+          for f in scripts/*.sh docker/cs2/*.sh; do
+            bash -n "$f" && echo "ok  $f"
+          done
+
+      # `docker compose config` resolves every variable, so an unquoted value or
+      # a bad interpolation fails here rather than on someone's server. The
+      # runner ships the compose plugin already.
+      - name: Compose files resolve
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          docker compose -f docker-compose.yml config -q
+          echo "ok  docker-compose.yml"
+          docker compose -f docker-compose.dev.yml config -q
+          echo "ok  docker-compose.dev.yml"
+
+      # The quick start people copy is three commands. This runs the awkward one
+      # end to end, non-interactively, and checks it produced something bootable
+      # — the failure it guards against is a setup script that writes a .env the
+      # compose file then rejects.
+      - name: setup.sh writes a usable .env
+        run: |
+          set -euo pipefail
+          rm -f .env
+          printf 'ci-server\n\n11\ny\n' | ./scripts/setup.sh
+
+          test -f .env
+          [ "$(stat -c '%a' .env)" = "600" ] || { echo ".env must be chmod 600"; exit 1; }
+
+          # Every secret present, and distinct: a shared default would mean every
+          # install that skipped setup has the same RCON password.
+          rcon=$(sed -n 's/^RCON_PASSWORD=//p' .env)
+          ingest=$(sed -n 's/^LOG_INGEST_SECRET=//p' .env)
+          token=$(sed -n 's/^PANEL_ADMIN_TOKEN=//p' .env)
+          for v in "$rcon" "$ingest" "$token"; do
+            [ ${#v} -ge 32 ] || { echo "a generated secret is too short"; exit 1; }
+          done
+          [ "$rcon" != "$ingest" ] || { echo "secrets must differ"; exit 1; }
+
+          [ "$(sed -n 's/^SERVER_NAME=//p' .env)" = "ci-server" ] || {
+            echo "answers were not written through"; exit 1; }
+
+          # The point of the whole thing: compose has to accept what it wrote.
+          docker compose config -q
+          echo "ok  setup.sh -> docker compose config"
+
   verify:
     runs-on: ubuntu-latest
     steps:

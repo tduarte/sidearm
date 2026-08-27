@@ -89,6 +89,10 @@ services:
       DOCKER_PORT: "2375"
       # Embedded in the logaddress_add_http URL the panel sets on CS2.
       LOG_INGEST_SECRET: ${LOG_INGEST_SECRET}
+      # Embedded in the matchzy_loadmatch_url the panel gives CS2. Falls back to
+      # LOG_INGEST_SECRET when empty, so leaving it blank is fine — but it has
+      # to be passed through, or setting it in .env would silently do nothing.
+      MATCHZY_CONFIG_SECRET: ${MATCHZY_CONFIG_SECRET:-}
       # Empty = panel is open on the LAN. Set it to require a bearer token
       # on /api/* and /ws.
       PANEL_ADMIN_TOKEN: ${PANEL_ADMIN_TOKEN:-}
