@@ -105,7 +105,13 @@ describe("a peer inside PANEL_TRUSTED_CIDRS", () => {
 
   it("is told no login is needed, so the UI never prompts", async () => {
     const res = await fetch(`${BASE}/api/auth`);
-    assert.deepEqual(await res.json(), { authRequired: false });
+    // Exempt because of the peer address, not because no token is set — a
+    // distinction Settings surfaces, since behind a proxy it exempts everyone.
+    assert.deepEqual(await res.json(), {
+      authRequired: false,
+      tokenConfigured: true,
+      trustedPeer: true,
+    });
   });
 
   it("may open the WebSocket without a token", async () => {
@@ -132,7 +138,11 @@ describe("a peer outside PANEL_TRUSTED_CIDRS", () => {
 
   it("is still told to log in", async () => {
     const res = await fetch(`${BASE}/api/auth`);
-    assert.deepEqual(await res.json(), { authRequired: true });
+    assert.deepEqual(await res.json(), {
+      authRequired: true,
+      tokenConfigured: true,
+      trustedPeer: false,
+    });
   });
 
   it("cannot forge the peer header to fake a trusted address", async () => {

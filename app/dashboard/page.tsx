@@ -21,6 +21,7 @@ import { Sparkline } from "@/components/sparkline";
 import { StatCard } from "@/components/stat-card";
 import { StatusPill } from "@/components/status-pill";
 import { LoadError } from "@/components/load-error";
+import { FirstRun, isFirstRun } from "@/components/first-run";
 import { Roster } from "@/components/players/roster";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useStatHistory } from "@/lib/hooks/use-stat-history";
@@ -62,6 +63,11 @@ export default function DashboardPage() {
 
   if (error && !status) {
     return <LoadError what="server status" error={error} onRetry={() => refetch()} />;
+  }
+
+  // A server that has never been reachable is downloading itself, not broken.
+  if (status && isFirstRun(status)) {
+    return <FirstRun status={status} />;
   }
 
   if (isPending || !status) {

@@ -73,7 +73,13 @@ describe("API auth", () => {
   it("advertises that a token is required", async () => {
     const res = await fetch(`${BASE}/api/auth`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { authRequired: true });
+    // `tokenConfigured` and `trustedPeer` are reported separately so Settings
+    // can distinguish "no token set" from "this caller is exempt".
+    assert.deepEqual(await res.json(), {
+      authRequired: true,
+      tokenConfigured: true,
+      trustedPeer: false,
+    });
   });
 
   it("rejects unauthenticated API calls", async () => {
