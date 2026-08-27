@@ -234,6 +234,16 @@ Or with the deploy script, which asks first and tells you how many people are on
 
 Verify from inside the container over RCON with `meta list` and `css_plugins list`.
 
+### Where match history comes from
+
+With MatchZy installed, the History page shows **MatchZy's own records** — real team names, real scores, and a scoreboard with damage, headshot rate, flashes, opening duels and clutches. None of that is derivable from the log stream, which is all the panel has otherwise.
+
+MatchZy writes them to its own SQLite database inside the game volume, which the panel reads through the same read-only mount it uses for demos. Nothing to configure.
+
+The panel's own log-derived history keeps running underneath, and where both describe the same match MatchZy's wins. That precedence is applied when the page is read, not when the data is stored — so matches played before the plugin was installed still appear, and removing the plugin leaves the panel's own records intact.
+
+Two things the reader has to get right, both covered by tests: MatchZy stores timestamps as UTC with no zone marker (parsing them as local time shifts every match), and Steam64 ids exceed 2^53, so they are read as BigInts — through a JS number `76561197960265728` becomes `...730` and the scoreboard names a different account.
+
 ---
 
 ## Architecture
