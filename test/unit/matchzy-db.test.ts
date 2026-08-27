@@ -222,6 +222,35 @@ describe("mergeHistory", () => {
     assert.deepEqual(out, []);
   });
 
+  it("stops an abandoned match suppressing the future forever", () => {
+    // MatchZy writes end_time on a clean finish and never revisits the row
+    // otherwise, so an abandoned pug or a container restart mid-match leaves it
+    // open permanently. Treated as unbounded, that ONE row hides every match
+    // played afterwards for the rest of time — which is exactly what happened
+    // on the live server after a test pug was abandoned.
+    const abandoned = mzMap({ endedAt: null });
+    const nextWeek = panelMatch({
+      id: "later",
+      startedAt: "2026-09-03T18:00:00.000Z",
+      endedAt: "2026-09-03T18:40:00.000Z",
+    });
+    assert.deepEqual(
+      mergeHistory([nextWeek], [abandoned]).map((m) => m.id),
+      ["later"],
+    );
+  });
+
+  it("still suppresses a genuine duplicate of a match in progress right now", () => {
+    // The bound must not be so tight that it stops doing its actual job.
+    const abandoned = mzMap({ endedAt: null });
+    const concurrent = panelMatch({
+      id: "same-game",
+      startedAt: "2026-08-27T20:12:00.000Z",
+      endedAt: "2026-08-27T20:50:00.000Z",
+    });
+    assert.deepEqual(mergeHistory([concurrent], [abandoned]), []);
+  });
+
   it("returns the panel's history untouched when there is no plugin", () => {
     const out = mergeHistory([panelMatch()], []);
     assert.equal(out.length, 1);
