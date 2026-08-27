@@ -1,4 +1,5 @@
 import { readdir, stat } from "node:fs/promises";
+import type { Dirent } from "node:fs";
 import { createReadStream } from "node:fs";
 import path from "node:path";
 
@@ -30,29 +31,31 @@ export interface DemoFile {
   modifiedAt: string;
 }
 
-/** Only `.dem`, and only files — never a path. */
+/** Only `.dem`, and only a single path segment — never a path. */
 function isDemoName(name: string): boolean {
   return name.endsWith(".dem") && !name.includes("/") && !name.includes("\\");
 }
 
-export async function listDemos(): Promise<DemoFile[]> {
+/** Collects the `.dem` files directly inside one directory. */
+async function collectDemos(
+  dir: string,
+  prefix: string,
+  out: DemoFile[],
+): Promise<void> {
   let entries: string[];
   try {
-    entries = await readdir(demoDir());
+    entries = await readdir(dir);
   } catch {
-    // No mount, or the directory does not exist yet because nothing has been
-    // recorded. Both mean the same thing to a caller.
-    return [];
+    return;
   }
 
-  const demos: DemoFile[] = [];
   for (const name of entries) {
     if (!isDemoName(name)) continue;
     try {
-      const info = await stat(path.join(demoDir(), name));
+      const info = await stat(path.join(dir, name));
       if (!info.isFile()) continue;
-      demos.push({
-        name,
+      out.push({
+        name: prefix ? `${prefix}/${name}` : name,
         sizeBytes: info.size,
         modifiedAt: info.mtime.toISOString(),
       });
@@ -60,6 +63,43 @@ export async function listDemos(): Promise<DemoFile[]> {
       // Raced with a delete, or unreadable; skip it rather than failing the list.
     }
   }
+}
+
+/**
+ * Every demo on the volume, newest first.
+ *
+ * Looks one level down as well as at the top, because the two things that
+ * record demos here do not agree on where they go: the panel's own `tv_record`
+ * writes into `game/csgo`, while MatchZy writes into `matchzy_demo_path`, which
+ * defaults to `MatchZy/`. Reading only the top level meant that installing the
+ * plugin made the Demos card silently stop showing new recordings — the worst
+ * shape of bug, since the demos are there and the panel looks fine.
+ *
+ * Subdirectories are discovered rather than hardcoded, so changing
+ * `matchzy_demo_path` does not break it again. One level only: the point is to
+ * find where a recorder put its files, not to walk 70 GB of game content.
+ */
+export async function listDemos(): Promise<DemoFile[]> {
+  const root = demoDir();
+  const demos: DemoFile[] = [];
+
+  await collectDemos(root, "", demos);
+
+  let entries: Dirent[];
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    // No mount, or the directory does not exist yet because nothing has been
+    // recorded. Both mean the same thing to a caller.
+    return demos;
+  }
+
+  await Promise.all(
+    entries
+      .filter((e) => e.isDirectory())
+      .map((e) => collectDemos(path.join(root, e.name), e.name, demos)),
+  );
+
   // Newest first: the demo you want is almost always the one just recorded.
   return demos.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
@@ -78,11 +118,15 @@ export async function openDemo(
   const match = demos.find((d) => d.name === name);
   if (!match) return null;
 
+  // Names can now carry a subdirectory (`MatchZy/foo.dem`), so the "it was in
+  // the listing" guarantee is restated here as a containment check rather than
+  // left implicit in the absence of separators.
+  const root = path.resolve(demoDir());
+  const full = path.resolve(root, match.name);
+  if (full !== root && !full.startsWith(root + path.sep)) return null;
+
   try {
-    return {
-      stream: createReadStream(path.join(demoDir(), match.name)),
-      sizeBytes: match.sizeBytes,
-    };
+    return { stream: createReadStream(full), sizeBytes: match.sizeBytes };
   } catch {
     return null;
   }

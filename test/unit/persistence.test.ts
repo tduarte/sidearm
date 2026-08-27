@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import type { ServerStatus } from "@/lib/api/types";
 
 /**
  * These exercise real SQLite rather than a stub: the bugs being fixed here are
@@ -99,5 +100,73 @@ describe("orphaned matches", () => {
     assert.ok(match, "a partially recorded match should still appear");
     assert.deepEqual(match.finalScore, { ct: 4, t: 3 });
     assert.equal(match.winner, "CT");
+  });
+});
+
+describe("plugin regression memory", () => {
+  /**
+   * The alarming transition is *was loaded, now is not* — and the panel
+   * restarts to apply CS2 updates, which is exactly when the plugins break. So
+   * the "was" has to outlive the process, or the alarm is erased at the one
+   * moment it should fire.
+   */
+  const statusWith = (matchzy: boolean | null): ServerStatus => ({
+    state: "running",
+    hostname: "sidearm",
+    map: "de_mirage",
+    gameMode: "competitive",
+    players: 0,
+    maxPlayers: 10,
+    uptimeSec: 3600,
+    cpuPct: 10,
+    memMb: 500,
+    memMaxMb: 6144,
+    fps: null,
+    tickrate: null,
+    vacSecure: true,
+    build: 14177,
+    gotv: null,
+    plugins: { matchzy, metamod: null, cssharp: null, regressed: false },
+    connectUrl: "connect 127.0.0.1:27015",
+    ip: "127.0.0.1",
+    port: 27015,
+    control: { docker: true, rcon: true },
+  });
+
+  it("does not cry regression on a server that never had plugins", async () => {
+    const { updateCache } = await import("@/lib/api/server/real");
+    const s = statusWith(false);
+    updateCache(s, null);
+    assert.equal(s.plugins!.regressed, false);
+  });
+
+  it("remembers MatchZy across a restart and then flags its absence", async () => {
+    const { updateCache } = await import("@/lib/api/server/real");
+
+    const loaded = statusWith(true);
+    updateCache(loaded, null);
+    assert.equal(loaded.plugins!.regressed, false);
+
+    // A CS2 update lands, gameinfo.gi is rewritten, the container restarts —
+    // and the panel restarts with it. The memory is on disk, so it survives.
+    const gone = statusWith(false);
+    updateCache(gone, null);
+    assert.equal(gone.plugins!.regressed, true);
+  });
+
+  it("treats an unreadable probe as unknown, not as a regression", async () => {
+    // RCON drops are routine. A dropped probe firing the banner would make it
+    // noise, and a banner people learn to ignore is worse than none.
+    const { updateCache } = await import("@/lib/api/server/real");
+    const unknown = statusWith(null);
+    updateCache(unknown, null);
+    assert.equal(unknown.plugins!.regressed, false);
+  });
+
+  it("clears once the plugins come back", async () => {
+    const { updateCache } = await import("@/lib/api/server/real");
+    const back = statusWith(true);
+    updateCache(back, null);
+    assert.equal(back.plugins!.regressed, false);
   });
 });

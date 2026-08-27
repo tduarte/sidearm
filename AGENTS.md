@@ -19,13 +19,41 @@ Iterate with `./scripts/deploy-lxc.sh [branch]`: it rebuilds only `panel` and le
 so nothing re-downloads and no match is interrupted (~90s).
 
 - **Never `docker compose pull` on the server.** `docker compose build panel` tags the local image
-  as `ghcr.io/tduarte/sidearm:latest`; a pull replaces your build with CI's.
+  as `ghcr.io/tduarte/sidearm:latest`; a pull replaces your build with CI's. The same rule is what
+  keeps `sidearm/cs2:latest` unpublished — see below.
+- **`docker compose build cs2` drops every connected player**, because rebuilding recreates the
+  container. It is never part of a routine deploy: `./scripts/deploy-lxc.sh --with-cs2` is opt-in,
+  and asks first with a live headcount from an A2S query. Only the plugin stack lives in that
+  image, so a panel change never needs it.
 - **Never run `docker-compose.dev.yml` there** — its stub uses `container_name: cs2` and collides
   with the real server.
 - **Editing `docker-compose.yml` changes the `cs2` service hash**, so even `docker compose up -d
   panel` recreates the CS2 container and drops players. Switching between branches that differ in
   that file causes surprise restarts.
 - On a **ZFS-backed** rootfs, verify `docker info` reports `overlayfs`/`overlay2` and not `vfs`.
+
+## The CS2 image: plugins
+
+`docker/cs2/` layers pinned Metamod / CounterStrikeSharp / MatchZy onto the upstream image. Three
+things about it are load-bearing and non-obvious:
+
+- **The install cannot be a Docker layer.** `cs2-data` is mounted over `/home/steam/cs2-dedicated`,
+  and Docker seeds a named volume from the image only when the volume is *empty* — this one holds
+  70 GB. So the image carries the artifacts at `/opt/sidearm/plugins` and `install-plugins.sh`
+  copies them in at boot, from the base image's `pre.sh` hook (after `steamcmd`, before the server
+  starts). Mounting the volume `rw` on the panel or bind-mounting it changes *access*, not this.
+- **Every CS2 update rewrites `gameinfo.gi`** and silently drops the Metamod search path. Since
+  applying a CS2 update *is* a container restart here, the failure would land unattended: a server
+  that comes back healthy, listening, and with no plugins. The installer re-applies the line every
+  boot for exactly that reason — do not "optimise" it to run once.
+- **`install-plugins.sh` is sourced, not executed**, so it must never call `exit` and must not set
+  `set -e`. A server without plugins is bad; a server that will not boot is worse.
+
+The image is **built locally and never published**: compose names it `sidearm/cs2:latest`, an
+unqualified tag with no registry behind it. CI builds the same context (on changes under
+`docker/cs2/`) to prove the pinned download URLs still resolve, and asserts the archives unpacked
+where the installer looks — but does not push, because a published copy is what a stray pull would
+substitute.
 
 ## The joedwards32/cs2 image
 

@@ -19,6 +19,7 @@ const status = (over: Partial<ServerStatus> = {}): ServerStatus => ({
   vacSecure: null,
   build: null,
   gotv: null,
+  plugins: null,
   connectUrl: "connect 127.0.0.1:27015",
   ip: "127.0.0.1",
   port: 27015,

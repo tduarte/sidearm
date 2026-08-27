@@ -17,6 +17,23 @@ export type GameMode =
 
 export type Team = "CT" | "T" | "SPEC";
 
+export interface PluginStatus {
+  /** MatchZy answered `get5_status`. */
+  matchzy: boolean | null;
+  /** Metamod answered `meta list`. Probed only when MatchZy is missing. */
+  metamod: boolean | null;
+  /** CounterStrikeSharp answered `css_plugins list`. Same condition. */
+  cssharp: boolean | null;
+  /**
+   * MatchZy has answered before on this install and is not answering now.
+   *
+   * The distinction the banner turns on: most people run this panel without
+   * plugins and never want to hear about it, but a server that *had* them and
+   * lost them has a real problem — almost always a CS2 update.
+   */
+  regressed: boolean;
+}
+
 /**
  * Only phases the log stream can actually report.
  *
@@ -101,6 +118,19 @@ export interface ServerStatus {
    * this the UI shows a healthy server and buttons that quietly do nothing.
    */
   control: { docker: boolean; rcon: boolean };
+  /**
+   * Which of the three plugin layers answered on the last probe, and whether
+   * MatchZy has gone missing since it was last seen.
+   *
+   * `null` on a field means "not probed, or RCON did not answer" — never
+   * "absent", the same rule `control` follows. `null` for the whole object
+   * means the panel has not managed a probe yet.
+   *
+   * This exists for a failure that is invisible everywhere else: a CS2 update
+   * rewrites `gameinfo.gi`, the container restarts to apply it, and the server
+   * comes back healthy, secure and silently without MatchZy.
+   */
+  plugins: PluginStatus | null;
   /**
    * What the panel is still waiting to see take effect, if anything. Cleared
    * by the status poll observing the result, never by the request returning.

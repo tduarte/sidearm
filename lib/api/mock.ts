@@ -70,6 +70,12 @@ const initialMockState = {
     vacSecure: true,
     build: 14177,
     gotv: { address: "0.0.0.0:27020", delaySec: 30 },
+    // A server without plugins, which is what most installs of this panel are
+    // — and it is the state with MORE interface to show, since the knife
+    // approximation is live rather than standing down for MatchZy. Stated
+    // explicitly rather than left undefined by the `as ServerStatus` below,
+    // which is how it would otherwise read.
+    plugins: { matchzy: false, metamod: false, cssharp: false, regressed: false },
     connectUrl: "steam://connect/192.168.1.20:27015/trusted",
     ip: "192.168.1.20",
     port: 27015,

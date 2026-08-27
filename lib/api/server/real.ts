@@ -301,12 +301,45 @@ export function pendingOpSettled(op: PendingOp, status: ServerStatus): boolean {
   }
 }
 
+/**
+ * Whether MatchZy has ever answered on this install.
+ *
+ * Kept on disk because the transition worth warning about is *was loaded, now
+ * is not*, and without the "was" a panel restart erases the alarm — which is
+ * precisely when it would be lost, since applying a CS2 update restarts things.
+ * A plain `true` once set: it records that plugins were installed here, not
+ * what state they were in a moment ago.
+ */
+const PLUGINS_SEEN_KEY = "plugins.matchzySeen";
+
+/**
+ * Fills in `plugins.regressed`, the one field `fetchStatus` cannot know.
+ *
+ * `lib/cs2` deliberately never touches SQLite, so the probe comes back as pure
+ * observation and the panel's memory is applied here.
+ */
+function notePluginState(status: ServerStatus): void {
+  if (!status.plugins) return;
+
+  const seen = getSavedConfig<boolean>(PLUGINS_SEEN_KEY) === true;
+
+  if (status.plugins.matchzy === true) {
+    if (!seen) setSavedConfig(PLUGINS_SEEN_KEY, true);
+    status.plugins.regressed = false;
+    return;
+  }
+
+  // `null` is "we could not tell", not "gone" — never a regression.
+  status.plugins.regressed = seen && status.plugins.matchzy === false;
+}
+
 export function updateCache(
   status: ServerStatus,
   players: Player[] | null,
   cvars?: { maxRounds: number | null },
 ) {
   resolveWorkshopMapName(status.map);
+  notePluginState(status);
 
   // Only overwrite when the server actually answered: a dropped RCON tick must
   // not wipe a known match length back to unknown.
