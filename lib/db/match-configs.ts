@@ -43,13 +43,34 @@ function toStored(row: Row): StoredMatchConfig | null {
   }
 }
 
+/**
+ * The next integer to hand MatchZy as `matchid`.
+ *
+ * Derived from what is stored rather than kept in a counter row, so deleting
+ * every setup does not start handing out numbers MatchZy has already recorded
+ * against a finished match in its own database.
+ */
+export function nextMatchNumber(): number {
+  const row = getDb()
+    .prepare(`SELECT COALESCE(MAX(match_number), 0) AS n FROM match_configs`)
+    .get() as { n: number };
+  return (row?.n ?? 0) + 1;
+}
+
 export function saveMatchConfig(def: MatchDefinition): void {
   getDb()
     .prepare(
-      `INSERT INTO match_configs (id, definition) VALUES (@id, @definition)
-       ON CONFLICT(id) DO UPDATE SET definition = excluded.definition`,
+      `INSERT INTO match_configs (id, match_number, definition)
+       VALUES (@id, @matchNumber, @definition)
+       ON CONFLICT(id) DO UPDATE SET
+         definition   = excluded.definition,
+         match_number = excluded.match_number`,
     )
-    .run({ id: def.id, definition: JSON.stringify(def) });
+    .run({
+      id: def.id,
+      matchNumber: def.matchNumber,
+      definition: JSON.stringify(def),
+    });
 }
 
 export function getMatchConfig(id: string): StoredMatchConfig | null {

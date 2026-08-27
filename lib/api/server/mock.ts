@@ -38,6 +38,7 @@ const mockMatchConfigs: StoredMatchConfig[] = [
     loadedAt: null,
     definition: {
       id: "friday-scrim",
+      matchNumber: 1,
       team1: {
         name: "Astra",
         players: [
@@ -345,6 +346,14 @@ export const mockAdapter = {
   },
 
   async saveMatch(def: MatchDefinition): Promise<{ warnings: string[] }> {
+    const prior = mockMatchConfigs.find((m) => m.id === def.id);
+    def = {
+      ...def,
+      matchNumber:
+        prior?.definition.matchNumber ??
+        def.matchNumber ??
+        Math.max(0, ...mockMatchConfigs.map((m) => m.definition.matchNumber)) + 1,
+    };
     // Validated in mock too: the form's error handling is a real code path and
     // a mock that accepts anything hides it.
     const { config, errors, warnings } = buildMatchConfig(def);

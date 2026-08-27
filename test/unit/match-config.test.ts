@@ -7,7 +7,8 @@ import {
 } from "@/lib/cs2/match-config";
 
 const def = (over: Partial<MatchDefinition> = {}): MatchDefinition => ({
-  id: "7",
+  id: "friday-scrim",
+  matchNumber: 7,
   team1: {
     name: "Astra",
     players: [
@@ -33,6 +34,23 @@ const def = (over: Partial<MatchDefinition> = {}): MatchDefinition => ({
 });
 
 describe("buildMatchConfig", () => {
+  it("sends matchid as an integer, which is what MatchZy validates", () => {
+    // The Get5 spec this schema follows says `matchid` is a string. MatchZy
+    // disagrees: it answers `matchid should be an integer!` in the server
+    // console and silently loads nothing. Documentation lost to the server.
+    const { config } = buildMatchConfig(def());
+    assert.equal(config!.matchid, 7);
+    assert.equal(typeof config!.matchid, "number");
+  });
+
+  it("refuses a match number MatchZy would reject", () => {
+    for (const bad of [0, -1, 1.5, NaN]) {
+      const r = buildMatchConfig(def({ matchNumber: bad }));
+      assert.equal(r.config, null, `expected refusal for ${bad}`);
+      assert.match(r.errors.join(" "), /whole number/);
+    }
+  });
+
   it("keys rosters by Steam64, which is all MatchZy accepts", () => {
     const { config } = buildMatchConfig(def());
     assert.deepEqual(config!.team1.players, {

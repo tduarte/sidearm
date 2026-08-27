@@ -80,10 +80,13 @@ function migrate(db: Database.Database): void {
     -- intent; the results live in MatchZy's own database and are never copied
     -- here. Stored whole as JSON because nothing ever queries it by its parts.
     CREATE TABLE IF NOT EXISTS match_configs (
-      id         TEXT PRIMARY KEY,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      loaded_at  TEXT,
-      definition TEXT NOT NULL
+      id           TEXT PRIMARY KEY,
+      -- MatchZy rejects a non-integer matchid, so the panel keeps a numeric
+      -- handle alongside the human-readable one it uses everywhere else.
+      match_number INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      loaded_at    TEXT,
+      definition   TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS saved_config (

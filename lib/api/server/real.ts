@@ -32,6 +32,7 @@ import {
   getMatchConfig,
   listMatchConfigs,
   markMatchConfigLoaded,
+  nextMatchNumber,
   saveMatchConfig,
   type StoredMatchConfig,
 } from "@/lib/db/match-configs";
@@ -1527,9 +1528,20 @@ export const realAdapter = {
    * the game thread and is no place to discover a roster full of bots.
    */
   async saveMatch(def: MatchDefinition): Promise<{ warnings: string[] }> {
-    const { config, errors, warnings } = buildMatchConfig(def);
+    // Assigned here rather than asked for: MatchZy needs an integer matchid and
+    // the operator has no reason to care what it is. An existing setup keeps
+    // the number it already has, so re-saving does not orphan the results
+    // MatchZy has already filed under it.
+    const existing = getMatchConfig(def.id);
+    const withNumber: MatchDefinition = {
+      ...def,
+      matchNumber:
+        existing?.definition.matchNumber ?? def.matchNumber ?? nextMatchNumber(),
+    };
+
+    const { config, errors, warnings } = buildMatchConfig(withNumber);
     if (!config) throw new Error(errors.join(" "));
-    saveMatchConfig(def);
+    saveMatchConfig(withNumber);
     return { warnings };
   },
 

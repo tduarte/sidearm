@@ -24,7 +24,20 @@ export interface MatchTeamInput {
 
 /** What the panel stores and the form collects. */
 export interface MatchDefinition {
+  /** The panel's own handle: human-readable, used in storage and the URL. */
   id: string;
+  /**
+   * The id MatchZy is given, which **must be an integer**.
+   *
+   * Not a stylistic choice: the plugin rejects a match config outright with
+   * `[LoadMatchDataCommand] matchid should be an integer!` and carries on as if
+   * nothing was asked. The Get5 spec this schema follows describes `matchid` as
+   * a string, so this is one place documentation and implementation disagree —
+   * found by watching the server console, not by reading.
+   *
+   * Assigned by the panel on save, so the operator never has to think about it.
+   */
+  matchNumber: number;
   team1: MatchTeamInput;
   team2: MatchTeamInput;
   maps: string[];
@@ -44,7 +57,8 @@ export interface MatchDefinition {
 
 /** The shape MatchZy actually consumes. */
 export interface MatchZyConfig {
-  matchid: string;
+  /** An integer. See `MatchDefinition.matchNumber`. */
+  matchid: number;
   num_maps: number;
   maplist: string[];
   skip_veto: boolean;
@@ -93,6 +107,12 @@ export function buildMatchConfig(def: MatchDefinition): BuildResult {
   const warnings: string[] = [];
 
   if (!def.id.trim()) errors.push("The match needs an id.");
+  if (!Number.isInteger(def.matchNumber) || def.matchNumber < 1) {
+    // MatchZy refuses a non-integer matchid and says so only in the server
+    // console, so catching it here is the difference between an error the
+    // operator sees and a match that simply never loads.
+    errors.push("The match number must be a positive whole number.");
+  }
   if (!def.team1.name.trim()) errors.push("Team 1 needs a name.");
   if (!def.team2.name.trim()) errors.push("Team 2 needs a name.");
 
@@ -155,7 +175,7 @@ export function buildMatchConfig(def: MatchDefinition): BuildResult {
 
   return {
     config: {
-      matchid: def.id,
+      matchid: def.matchNumber,
       num_maps: def.numMaps,
       maplist: maps,
       skip_veto: skipVeto,
