@@ -1,5 +1,6 @@
 import type {
   GameMode,
+  PluginStatus,
   Player,
   ServerStatus,
   Team,
@@ -9,6 +10,13 @@ import { rconExec } from "./rcon";
 import { containerLogs, containerStats, inspectContainer } from "./docker";
 import { parseServerVersion, parseUpdateProgress } from "./updates";
 import { asInt, parseCvarEcho } from "./cvars";
+import {
+  CSSHARP_PROBE,
+  METAMOD_PROBE,
+  MATCHZY_PROBE,
+  isUnknownCommand,
+  parseGet5Status,
+} from "./plugins";
 
 const PORT = parseInt(process.env.RCON_PORT ?? "27015", 10);
 
@@ -25,6 +33,73 @@ let cachedPublicIp: string | null = null;
 const PROGRESS_REFRESH_MS = 5000;
 let lastProgressFetch = 0;
 let lastProgress: UpdateProgress | null = null;
+
+/**
+ * How often to ask whether the plugin stack is loaded.
+ *
+ * Far slower than the 2s status poll, because the answer only changes when the
+ * server restarts — and when it does, the restart itself is what the panel is
+ * already watching. Thirty seconds is well inside the window that matters: the
+ * failure this catches sits unnoticed for weeks otherwise.
+ */
+const PLUGIN_PROBE_MS = 30_000;
+let lastPluginProbe = 0;
+let lastPluginResult: Omit<PluginStatus, "regressed"> | null = null;
+
+/**
+ * Probes the plugin stack, at most once per `PLUGIN_PROBE_MS`.
+ *
+ * `meta list` and `css_plugins list` are only sent when MatchZy did NOT answer.
+ * On a working server that is two RCON round-trips saved every probe; on a
+ * broken one they are what separates "CounterStrikeSharp did not load" from
+ * "CounterStrikeSharp loaded and MatchZy did not", which is the difference
+ * between two entirely different fixes.
+ */
+async function probePlugins(
+  rconAlive: boolean,
+): Promise<Omit<PluginStatus, "regressed"> | null> {
+  // RCON silent: keep the last answer rather than reporting absence. A dropped
+  // poll is not evidence that the plugins are gone.
+  if (!rconAlive) return lastPluginResult;
+
+  const now = Date.now();
+  if (now - lastPluginProbe < PLUGIN_PROBE_MS) return lastPluginResult;
+  lastPluginProbe = now;
+
+  let matchzy: boolean | null = null;
+  try {
+    matchzy = parseGet5Status(await rconExec(MATCHZY_PROBE))?.loaded ?? null;
+  } catch {
+    return lastPluginResult;
+  }
+
+  if (matchzy !== false) {
+    // Nothing to attribute. Both lower layers must be up for MatchZy to answer,
+    // so claiming them as `true` is a deduction, not a guess.
+    lastPluginResult = {
+      matchzy,
+      metamod: matchzy === true ? true : null,
+      cssharp: matchzy === true ? true : null,
+    };
+    return lastPluginResult;
+  }
+
+  let metamod: boolean | null = null;
+  let cssharp: boolean | null = null;
+  try {
+    const out = await rconExec(`${METAMOD_PROBE}; ${CSSHARP_PROBE}`);
+    if (out.trim() !== "") {
+      metamod = !isUnknownCommand(out, METAMOD_PROBE);
+      cssharp = !isUnknownCommand(out, CSSHARP_PROBE);
+    }
+  } catch {
+    // Leave both unknown; the banner then names MatchZy itself, which is the
+    // conservative answer.
+  }
+
+  lastPluginResult = { matchzy, metamod, cssharp };
+  return lastPluginResult;
+}
 
 async function getPublicIp(): Promise<string> {
   if (cachedPublicIp !== null) return cachedPublicIp;
@@ -287,6 +362,9 @@ export async function fetchStatus(): Promise<{
       : "competitive";
 
   const parsed = parseStatusText(statusText);
+  // After `status` has answered, so the probe knows whether RCON is alive at
+  // all — and serialised behind it on the shared socket rather than racing it.
+  const pluginProbe = await probePlugins(statusText !== "");
   // A `status` reply proves the game server is alive even if the Docker socket
   // is unreachable, so it disambiguates "proxy down" from "container stopped".
   let state = containerStateToServerState(containerState, statusText !== "");
@@ -360,6 +438,10 @@ export async function fetchStatus(): Promise<{
       docker: inspect.status === "fulfilled",
       rcon: statusText !== "",
     },
+    // `regressed` is not knowable here: it needs the panel's memory of what it
+    // has seen before, which lives in SQLite, and lib/cs2 deliberately does not
+    // reach into the database. `updateCache` fills it in.
+    plugins: pluginProbe ? { ...pluginProbe, regressed: false } : null,
     updateProgress,
   };
 

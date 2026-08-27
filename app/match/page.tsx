@@ -159,6 +159,10 @@ export default function MatchPage() {
   // Demo recording runs through GOTV; without it `tv_record` fails, so the
   // tile says why rather than offering a button that cannot work.
   const gotvUp = !!status?.gotv;
+  // MatchZy runs a real knife round and rewrites the same loadout cvars the
+  // panel's approximation does. Leaving both live means two things fighting
+  // over one setting, so when the plugin is there, ours stands down.
+  const matchzyUp = status?.plugins?.matchzy === true;
 
   return (
     <div className="space-y-6">
@@ -261,11 +265,28 @@ export default function MatchPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Round setup</CardTitle>
               <CardDescription>
-                CS2 has no native knife round, and vanilla halftime happens on
-                its own at <span className="font-mono">mp_maxrounds/2</span>.
-                These are cvar approximations: the panel sets the loadout and
-                swaps sides, but it cannot detect who won a knife round or run a
-                match flow for you. That needs a plugin such as Get5 or MatchZy.
+                {matchzyUp ? (
+                  <>
+                    MatchZy is loaded and runs the knife round properly —
+                    including detecting who won and letting them pick sides.
+                    Start it in-game with{" "}
+                    <span className="font-mono">.knife</span>, or from the
+                    console with{" "}
+                    <span className="font-mono">css_start</span>. The panel&apos;s
+                    own cvar approximation is switched off here so the two do not
+                    fight over the same loadout settings.
+                  </>
+                ) : (
+                  <>
+                    CS2 has no native knife round, and vanilla halftime happens
+                    on its own at{" "}
+                    <span className="font-mono">mp_maxrounds/2</span>. These are
+                    cvar approximations: the panel sets the loadout and swaps
+                    sides, but it cannot detect who won a knife round or run a
+                    match flow for you. That needs a plugin such as Get5 or
+                    MatchZy.
+                  </>
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -273,9 +294,13 @@ export default function MatchPage() {
                 <MatchActionTile
                   icon={Knife}
                   label="Set up knife"
-                  description="knives only, no buy, restart"
+                  description={
+                    matchzyUp
+                      ? "MatchZy handles this — say .knife in chat"
+                      : "knives only, no buy, restart"
+                  }
                   variant={match.knifeSetupApplied ? "default" : "outline"}
-                  disabled={knife.isPending || match.knifeSetupApplied}
+                  disabled={knife.isPending || match.knifeSetupApplied || matchzyUp}
                   pending={knife.isPending}
                   onClick={() => knife.mutate("setup")}
                 />
@@ -284,6 +309,12 @@ export default function MatchPage() {
                   label="Restore gameplay"
                   description="puts back the values from before"
                   variant="outline"
+                  // Deliberately NOT gated on MatchZy, unlike Set up knife. If
+                  // the panel applied a knife setup before the plugin arrived,
+                  // the baseline on disk is the only way back — disabling this
+                  // would strand the server with a knives-only loadout and no
+                  // undo. It is already inert unless the panel has something to
+                  // restore.
                   disabled={knife.isPending || !match.knifeSetupApplied}
                   pending={knife.isPending}
                   onClick={() => knife.mutate("restore")}

@@ -1,8 +1,9 @@
 "use client";
 
-import { PlugsConnected, Terminal } from "@phosphor-icons/react";
+import { Plugs, PlugsConnected, Terminal } from "@phosphor-icons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
+import { describePluginFailure } from "@/lib/cs2/plugins";
 
 /**
  * Says which half of the panel is broken, when half of it is.
@@ -15,6 +16,9 @@ import { useServerStatus } from "@/lib/hooks/use-server-status";
  *    memory tiles are dead; RCON, chat and the console are fine.
  *  - no RCON        → the roster, map changes and every match control are
  *    dead; the container can still be restarted.
+ *  - no MatchZy     → only on a server that HAD it: a CS2 update rewrote
+ *    `gameinfo.gi` and the plugins quietly stopped loading. Everything works;
+ *    match control is just back to the panel's cvar approximation.
  *
  * `AGENTS.md` calls the first one out by name as "a confusing half-broken
  * panel rather than an obvious one". This is the fix for that.
@@ -24,7 +28,14 @@ export function ControlPlaneBanner() {
   if (!status) return null;
 
   const { docker, rcon } = status.control;
-  if (docker && rcon) return null;
+
+  // Silent unless MatchZy was there and has since gone — most installs run
+  // without plugins on purpose and must never see this.
+  const pluginFailure = status.plugins
+    ? describePluginFailure(status.plugins, status.plugins.regressed)
+    : null;
+
+  if (docker && rcon && !pluginFailure) return null;
 
   // While the container is genuinely stopped or still pulling game files, RCON
   // is *expected* to be silent. Saying "RCON is not answering" there would be
@@ -36,7 +47,7 @@ export function ControlPlaneBanner() {
     status.state === "stopping";
 
   const showRcon = !rcon && !rconSilenceIsExpected;
-  if (docker && !showRcon) return null;
+  if (docker && !showRcon && !pluginFailure) return null;
 
   return (
     <div className="space-y-2 border-b bg-background px-4 py-2 md:px-6">
@@ -62,6 +73,18 @@ export function ControlPlaneBanner() {
             roster, map changes and every match control are unavailable. If the
             server was just restarted this clears on its own; if it persists,
             the console and container logs are the place to look.
+          </AlertDescription>
+        </Alert>
+      )}
+      {pluginFailure && (
+        <Alert>
+          <Plugs />
+          <AlertTitle>{pluginFailure.title}</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span>{pluginFailure.detail}</span>
+            <span className="text-muted-foreground">
+              {pluginFailure.likelyCause}
+            </span>
           </AlertDescription>
         </Alert>
       )}
