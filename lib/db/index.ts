@@ -110,6 +110,10 @@ function migrate(db: Database.Database): void {
   addColumn(db, "workshop_maps", "time_updated", "INTEGER");
   addColumn(db, "workshop_maps", "thumb_file", "TEXT");
   addColumn(db, "chat_messages", "team_only", "INTEGER");
+  // match_configs shipped one build before MatchZy turned out to require an
+  // integer matchid, so an install that saved a setup in between has the table
+  // without this column.
+  addColumn(db, "match_configs", "match_number", "INTEGER NOT NULL DEFAULT 1");
 }
 
 /** Adds a column when it is missing. SQLite has no `ADD COLUMN IF NOT EXISTS`. */
