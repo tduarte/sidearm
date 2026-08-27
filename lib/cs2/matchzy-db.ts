@@ -228,7 +228,22 @@ export function readMatchZyMaps(): MatchZyMap[] {
   }
 }
 
-/** Overlap test for two half-open time ranges; a null end means "still open". */
+/**
+ * How long an unfinished MatchZy match can go on suppressing the panel's own
+ * records before we stop believing in it.
+ *
+ * MatchZy writes `end_time` when a match finishes properly and simply never
+ * comes back to it otherwise — abandon a pug, restart the container mid-match,
+ * and the row stays open forever. Treating that as "runs until the end of time"
+ * means one abandoned row silently hides **every future match** from the
+ * history, which is far worse than briefly showing a duplicate.
+ *
+ * Six hours, matching `reapStaleMatches` in `lib/db/matches.ts`, which draws
+ * exactly the same line for the panel's own orphaned rows.
+ */
+const OPEN_MATCH_MAX_MS = 6 * 60 * 60 * 1000;
+
+/** Overlap test for two time ranges. */
 function overlaps(
   aStart: string,
   aEnd: string | null,
@@ -236,10 +251,11 @@ function overlaps(
   bEnd: string | null,
 ): boolean {
   const a0 = Date.parse(aStart);
-  const a1 = aEnd ? Date.parse(aEnd) : Infinity;
   const b0 = Date.parse(bStart);
-  const b1 = bEnd ? Date.parse(bEnd) : Infinity;
   if (Number.isNaN(a0) || Number.isNaN(b0)) return false;
+  // An absent end is bounded rather than infinite -- see OPEN_MATCH_MAX_MS.
+  const a1 = aEnd ? Date.parse(aEnd) : a0 + OPEN_MATCH_MAX_MS;
+  const b1 = bEnd ? Date.parse(bEnd) : b0 + OPEN_MATCH_MAX_MS;
   return a0 <= b1 && b0 <= a1;
 }
 
@@ -294,6 +310,9 @@ export function toHistoryEntry(m: MatchZyMap): MatchHistoryDetail {
  * than at ingest means nothing is thrown away: uninstall MatchZy and the
  * panel's own records are still there, and a match played before the plugin
  * was installed still shows up.
+ *
+ * An unfinished MatchZy match suppresses for a bounded window, not forever —
+ * see `OPEN_MATCH_MAX_MS`.
  */
 export function mergeHistory(
   panel: MatchHistoryDetail[],
