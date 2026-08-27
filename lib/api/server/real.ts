@@ -811,6 +811,23 @@ export const realAdapter = {
       `bot_difficulty ${safeInt(cfg.gameplay.botDifficulty, 0, 3, 1)}`,
     ];
 
+    // MatchZy rewrites `hostname` from matchzy_hostname_format whenever a match
+    // starts or ends — its default is `MatchZy | {TEAM1} vs {TEAM2}`, so the
+    // name set here silently becomes "MatchZy | COUNTER-TERRORISTS vs
+    // TERRORISTS" the first time anyone runs a knife round. Observed on a live
+    // server, not deduced.
+    //
+    // Pointing the format at the panel's own hostname makes the two agree
+    // instead of fight: MatchZy still owns the rewrite, but it rewrites to the
+    // name the operator chose. Setting the format EMPTY would be the other fix
+    // and does not work — CS2 treats a bare or `""` argument as a read, so the
+    // cvar cannot be cleared over RCON at all.
+    if (cache().status?.plugins?.matchzy === true) {
+      cvars.push(
+        `matchzy_hostname_format "${quoteArg(cfg.identity.hostname)}"`,
+      );
+    }
+
     for (const cvar of cvars) await rconExec(cvar);
 
     // Remembered so a container restart does not silently undo it. Every cvar

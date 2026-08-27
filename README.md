@@ -47,7 +47,7 @@ Copy `.env.example` to `.env` and fill in:
 | `LOG_INGEST_SECRET` | Yes | Shared secret for the CS2 log HTTP sink. `openssl rand -hex 24` |
 | `SERVER_PASSWORD` | No | Public join password. Empty = open server. |
 | `SERVER_NAME` | No | Server browser name (default: `sidearm`) |
-| `CS2_MAXPLAYERS` | No | Hard slot count, i.e. `-maxplayers` (default: `11`). GOTV takes one, so budget an extra slot — 11 fits a 5v5. |
+| `CS2_MAXPLAYERS` | No | Hard slot ceiling, i.e. `-maxplayers` (default: `11`). Set once to the largest roster you will ever host; the advertised count varies per game mode underneath it. GOTV takes one slot, so budget an extra — 11 fits a 5v5, 33 fits 32 players. |
 | `CS2_STARTMAP` | No | Starting map (default: `de_mirage`) |
 | `PANEL_ADMIN_TOKEN` | No | Bearer token for `/api/*` and `/ws`. Blank = open panel. When set, the UI prompts once and keeps an HttpOnly session cookie. |
 | `PANEL_HTTPS` | No | Set to `1` when serving over HTTPS so the session cookie is marked `Secure`. |
@@ -139,6 +139,24 @@ impossible — `tv_record` needs GOTV running.
 
 `TV_DELAY` defaults to **30 seconds** here rather than the image's `0`: with no
 delay, anyone connecting to GOTV watches the game live and can call positions.
+
+### Slots, and the two numbers people confuse
+
+`CS2_MAXPLAYERS` is the **ceiling**: `-maxplayers` on the launch line, allocated by the engine at boot. No cvar moves it, so the panel cannot change it — raising it needs `docker compose up -d --force-recreate cs2` on the host.
+
+`sv_visiblemaxplayers` is the **advertised count**: what the server browser shows and what "server full" is measured against. It is a cvar, so it changes live, and the panel's Config page sets it per game mode.
+
+A 32-player server is both: `CS2_MAXPLAYERS=33` once, then let the advertised count follow the mode. Picking a game mode on the Config page moves it for you:
+
+| Mode | Advertised |
+|---|---|
+| Competitive | 10 |
+| Wingman | 4 |
+| Deathmatch | 16 |
+| Casual | 20 |
+| Custom | left alone |
+
+Always clamped to the ceiling — advertising 20 slots on a 10-slot server just means players connect, get refused, and blame the server. Higher ceilings are not free either: the engine reserves memory per slot, so do not set 64 on a box that will only run 5v5.
 
 **GOTV occupies a player slot.** The server lists a `CSTV` client in slot 0, so
 `CS2_MAXPLAYERS=10` leaves nine slots for people and a 5v5 will not fit. Budget
