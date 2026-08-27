@@ -65,6 +65,20 @@ const GAME_OVER_RE = /^Game Over:/;
 const LOADING_MAP_RE = /^Loading map "([^"]+)"/;
 
 /**
+ * `rcon from "172.18.0.4:56058": command "status"` — the server echoing back a
+ * command the panel just sent it.
+ *
+ * Dropped, because the panel is the one talking: the 2s status poll issues two
+ * commands a tick, so these alone are ~40 lines a minute, for ever. They buried
+ * real game events in the console and, once the log started being persisted,
+ * would have filled the table with the panel's own chatter.
+ *
+ * Nothing is lost — a command an admin runs is already echoed with its output
+ * by `serverApi.rcon`, which is the copy worth keeping.
+ */
+const RCON_ECHO_RE = /^rcon from ".*?":\s*command\b/i;
+
+/**
  * World triggers that move the match phase. `Round_End` is deliberately absent:
  * it fires every round, and treating it as the end of the match would close a
  * history record ~24 times per game. The real match terminator is `Game Over:`.
@@ -161,6 +175,9 @@ export function parseLine(raw: string): ParseResult {
   };
 
   if (!line) return { events, consoleEvents, chatMessages };
+
+  // The panel's own commands, reflected back at it.
+  if (RCON_ECHO_RE.test(line)) return { events, consoleEvents, chatMessages };
 
   // Chat ------------------------------------------------------------------
   const chat = CHAT_RE.exec(line);
