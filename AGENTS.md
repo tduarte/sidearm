@@ -18,10 +18,9 @@ half-broken panel rather than an obvious one.
 Iterate with `./scripts/deploy-lxc.sh [branch]`: it rebuilds only `panel` and leaves `cs2` running,
 so nothing re-downloads and no match is interrupted (~90s).
 
-- **Never `docker compose pull` on the server.** `docker compose build panel` tags the local image
-  as `ghcr.io/tduarte/sidearm:latest`; a pull replaces your build with CI's. Since both images are
-  now published, a pull also recreates `cs2` and drops everyone connected — this rule is the only
-  thing preventing that, where the cs2 image used to be unpullable by construction.
+- **Never `docker compose pull` on the server.** Both images are published, so a pull replaces your
+  local `panel` build with CI's *and* recreates `cs2`, dropping everyone connected. Nothing in the
+  compose file prevents this; the rule is the only thing that does.
 - **`docker compose build cs2` drops every connected player**, because rebuilding recreates the
   container. It is never part of a routine deploy: `./scripts/deploy-lxc.sh --with-cs2` is opt-in,
   and asks first with a live headcount from an A2S query. Only the plugin stack lives in that
@@ -50,18 +49,14 @@ things about it are load-bearing and non-obvious:
 - **`install-plugins.sh` is sourced, not executed**, so it must never call `exit` and must not set
   `set -e`. A server without plugins is bad; a server that will not boot is worse.
 
-The image is **published as `ghcr.io/tduarte/sidearm-cs2`**, built by CI on changes under
-`docker/cs2/`. CI asserts the archives unpacked where the installer looks *before* pushing, because
-publishing an image with an empty plugin tree is worse than publishing nothing.
+Published as **`ghcr.io/tduarte/sidearm-cs2`**, so a first install pulls rather than building — the
+build fetches from `mms.alliedmods.net` and two GitHub release URLs, and nobody's install should
+fail because one of those is down.
 
-Publishing exists so a first install does not depend on `mms.alliedmods.net` and two GitHub release
-URLs being up. Compose sets both `image:` and `build:`, which means it **pulls when the tag exists
-and builds when it does not** — verified, not assumed — so `docker compose up` works during the
-window before a new tag is published and `docker compose build cs2` still overrides it locally.
-
-The trade this makes: the image used to be unpullable by construction (an unqualified
-`sidearm/cs2:latest` with no registry), which structurally prevented a stray pull from recreating
-the container. That protection is now a documented rule rather than a property of the tag.
+Compose sets both `image:` and `build:` on the service. That means it **pulls when the tag exists
+and builds locally when it does not** (verified in both directions), so `docker compose up` works
+before a new tag is published, and `docker compose build cs2` still wins when you are changing the
+plugin stack yourself.
 
 ## The joedwards32/cs2 image
 
@@ -101,6 +96,48 @@ the container. That protection is now a documented rule rather than a property o
 - While a match is loaded MatchZy owns the map cycle, ~100 gameplay cvars (`live.cfg`) and
   `tv_record`. `matchzyOwnsMatch()` in `real.ts` is the gate; rotation, config re-apply and demo
   control all check it.
+
+## CI, publishing and local checks
+
+`.github/workflows/docker.yml` runs four things. Know which one covers what you changed, because
+two of them do not look at TypeScript at all.
+
+- **`verify`** — `tsc`, `eslint`, `npm test`, `npm run test:integration`. Always runs.
+- **`stack`** — the files `verify` never reads and users depend on entirely: `bash -n` over every
+  script, `docker compose config` on both compose files, and `scripts/setup.sh` driven
+  non-interactively end to end, asserting it writes a `chmod 600` `.env` with distinct secrets that
+  compose then accepts. Always runs, takes seconds.
+- **`build`** — the panel image, `ghcr.io/tduarte/sidearm`. Gated by a **denylist**: anything not
+  explicitly ignored counts as image-relevant, so a forgotten path wastes CPU rather than silently
+  publishing a stale image.
+- **`build-cs2`** — the CS2 image, `ghcr.io/tduarte/sidearm-cs2`. Gated by an **allowlist**
+  (`docker/cs2/`, `.github/workflows/`), safe because nothing else can reach that build context.
+  The image contents are asserted *before* the push: publishing one with an empty plugin tree is
+  worse than publishing nothing.
+
+Both images publish on pushes to `main` and on version tags, never from a pull request. A skipped
+build still reports as a passing check.
+
+**Run a workflow job locally before pushing** rather than using CI as the test loop — extract its
+steps out of the YAML and run them against a clean copy of the tree:
+
+```bash
+tar -c --exclude=node_modules --exclude=.git -f - scripts docker docker-compose*.yml .env.example \
+  | tar -x -C /tmp/ci && cd /tmp/ci
+python3 -c "
+import yaml, subprocess
+w = yaml.safe_load(open('$OLDPWD/.github/workflows/docker.yml'))
+for s in w['jobs']['stack']['steps']:
+    if 'run' in s: subprocess.run(['bash','-e','-c',s['run']], check=True)
+"
+```
+
+A clean copy matters: `setup.sh` writes `.env`, and you do not want that landing on your own.
+
+**`.env.example` is the user-facing interface**, and `test/unit/compose-env.test.ts` holds it to
+three invariants: every `${VAR}` the production compose reads is documented, every documented
+variable actually reaches a container, and every one is mentioned in the README. The second catches
+the inert knob — a variable someone sets that silently does nothing.
 
 ## Verifying a running server
 
