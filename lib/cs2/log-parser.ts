@@ -1,4 +1,11 @@
-import type { ChatMessage, ConsoleEvent, MatchPhase, Team, WsEvent } from "@/lib/api/types";
+import type {
+  ChatMessage,
+  ConsoleEvent,
+  MatchPhase,
+  RoundEventKind,
+  Team,
+  WsEvent,
+} from "@/lib/api/types";
 
 /**
  * Parser for the CS2 HTTP log sink (`logaddress_add_http`).
@@ -43,6 +50,14 @@ const TEAM_SWITCH_RE = new RegExp(
 
 const WORLD_TRIGGER_RE = /^World triggered "([^"]+)"/;
 const TEAM_TRIGGER_RE = /^Team "([^"]+)" triggered "([^"]+)"/;
+/**
+ * Player-triggered lines: `"Neo<2><[U:1:1]><TERRORIST>" triggered "Bomb_Planted"`.
+ *
+ * These were invisible to the parser. `WORLD_TRIGGER_RE` and
+ * `TEAM_TRIGGER_RE` are anchored to `^World` and `^Team`, so every bomb event
+ * and every round MVP fell through to a plain console line.
+ */
+const PLAYER_TRIGGER_RE = new RegExp(`^${PLAYER}\\s+triggered\\s+"([^"]+)"`);
 const CT_SCORE_RE = /\(CT "(\d+)"\)/;
 const T_SCORE_RE = /\(T "(\d+)"\)/;
 /** `Game Over: competitive mg_active de_mirage score 16:14 after 45 min` */
@@ -59,6 +74,27 @@ const PHASE_TRIGGERS: Record<string, MatchPhase> = {
   Match_Start: "live",
   Round_Start: "live",
 };
+
+/** Player triggers worth recording. Everything else stays a console line. */
+const PLAYER_TRIGGER_EVENTS: Record<string, RoundEventKind> = {
+  Bomb_Planted: "bomb_planted",
+  Bomb_Defused: "bomb_defused",
+  Round_MVP: "mvp",
+};
+
+/**
+ * `SFUI_Notice_Bomb_Defused` → `bomb_defused`.
+ *
+ * CS2 sends the win condition as a UI string id. Anything unrecognised keeps
+ * its raw id rather than being flattened to "unknown", so a condition added in
+ * a future update is still readable in the history.
+ */
+export function winReason(sfui: string): string {
+  return sfui
+    .replace(/^SFUI_Notice_/, "")
+    .replace(/([a-z])([A-Z])/g, "$1_$2")
+    .toLowerCase();
+}
 
 function parseTeam(raw: string): Team {
   if (raw === "CT") return "CT";
@@ -110,8 +146,15 @@ export function parseLine(raw: string): ParseResult {
     line = body.trim();
   }
 
-  const console_ = (level: ConsoleEvent["level"], source: string, message: string) => {
-    const ev: ConsoleEvent = { id: crypto.randomUUID(), ts, level, source, message };
+  const console_ = (
+    level: ConsoleEvent["level"],
+    source: string,
+    message: string,
+    player?: ConsoleEvent["player"],
+  ) => {
+    // `ConsoleEvent.player` is declared in the contract and, until now, was
+    // only ever set by the mock emitter.
+    const ev: ConsoleEvent = { id: crypto.randomUUID(), ts, level, source, message, player };
     consoleEvents.push(ev);
     events.push({ type: "console.line", event: ev });
     return ev;
@@ -221,6 +264,29 @@ export function parseLine(raw: string): ParseResult {
     const phase = PHASE_TRIGGERS[world[1]];
     console_("info", "match", line);
     if (phase) events.push({ type: "match.phase", phase });
+    // Round boundaries, which are NOT phase changes — see PHASE_TRIGGERS.
+    if (world[1] === "Round_Start") events.push({ type: "round.start" });
+    return { events, consoleEvents, chatMessages };
+  }
+
+  // Player triggers → bomb events and MVP ---------------------------------
+  const playerTrigger = PLAYER_TRIGGER_RE.exec(line);
+  if (playerTrigger) {
+    const [, name, , steamId, teamRaw, trigger] = playerTrigger;
+    console_("info", "match", line, {
+      steamId: identity(steamId, name).id,
+      name,
+      team: parseTeam(teamRaw),
+    });
+    const kind = PLAYER_TRIGGER_EVENTS[trigger];
+    if (kind) {
+      events.push({
+        type: "round.event",
+        kind,
+        steamId: identity(steamId, name).id,
+        name,
+      });
+    }
     return { events, consoleEvents, chatMessages };
   }
 
@@ -232,7 +298,17 @@ export function parseLine(raw: string): ParseResult {
     const t = T_SCORE_RE.exec(line);
     if (ct && t) {
       const score = { ct: Number(ct[1]), t: Number(t[1]) };
-      events.push({ type: "match.score", score, round: score.ct + score.t });
+      const round = score.ct + score.t;
+      events.push({ type: "match.score", score, round });
+      // The win condition sits in group 2 and was read and discarded, so bomb
+      // defuse, elimination and time-expired were all indistinguishable.
+      events.push({
+        type: "round.end",
+        round,
+        winner: parseTeam(teamTrigger[1]),
+        reason: winReason(teamTrigger[2]),
+        score,
+      });
     }
     return { events, consoleEvents, chatMessages };
   }

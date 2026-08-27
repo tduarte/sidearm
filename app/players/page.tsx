@@ -36,6 +36,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { LoadError } from "@/components/load-error";
+import { BanDialog } from "@/components/players/ban-dialog";
+import { BanList } from "@/components/players/ban-list";
 import { api } from "@/lib/api/client";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
 import type { Player } from "@/lib/api/types";
@@ -61,6 +63,7 @@ export default function PlayersPage() {
   const { data: players, isLoading, error, refetch } = useLivePlayers();
   const [search, setSearch] = useState("");
   const [kickTarget, setKickTarget] = useState<Player | null>(null);
+  const [banTarget, setBanTarget] = useState<Player | null>(null);
   const qc = useQueryClient();
 
   const kick = useMutation({
@@ -69,6 +72,30 @@ export default function PlayersPage() {
     onSuccess: () => {
       toast.success("Player kicked");
       qc.invalidateQueries({ queryKey: ["players"] });
+      qc.invalidateQueries({ queryKey: ["status"] });
+    },
+  });
+
+  const ban = useMutation({
+    mutationFn: ({
+      steamId,
+      minutes,
+      reason,
+    }: {
+      steamId: string;
+      minutes: number | null;
+      reason: string;
+    }) => api.banPlayer(steamId, minutes, reason),
+    meta: { action: "Ban" },
+    onSuccess: (record) => {
+      toast.success(`${record.name} banned`, {
+        description: record.expiresAt
+          ? `Until ${new Date(record.expiresAt).toLocaleString()}`
+          : "No expiry — lift it from the ban list.",
+      });
+      setBanTarget(null);
+      qc.invalidateQueries({ queryKey: ["players"] });
+      qc.invalidateQueries({ queryKey: ["bans"] });
       qc.invalidateQueries({ queryKey: ["status"] });
     },
   });
@@ -202,9 +229,12 @@ export default function PlayersPage() {
                             <UserMinus className="h-4 w-4" />
                             Kick
                           </DropdownMenuItem>
-                          <DropdownMenuItem variant="destructive" disabled>
+                          <DropdownMenuItem
+                            onClick={() => setBanTarget(p)}
+                            variant="destructive"
+                          >
                             <Prohibit className="h-4 w-4" />
-                            Ban (coming soon)
+                            Ban
                           </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
@@ -216,6 +246,19 @@ export default function PlayersPage() {
           )}
         </CardContent>
       </Card>
+
+      <BanList />
+
+      <BanDialog
+        player={banTarget}
+        pending={ban.isPending}
+        onOpenChange={(open) => !open && setBanTarget(null)}
+        onConfirm={(minutes, reason) => {
+          if (banTarget) {
+            ban.mutate({ steamId: banTarget.steamId, minutes, reason });
+          }
+        }}
+      />
 
       <AlertDialog open={!!kickTarget} onOpenChange={(o) => !o && setKickTarget(null)}>
         <AlertDialogContent>

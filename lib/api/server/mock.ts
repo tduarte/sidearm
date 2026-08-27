@@ -15,6 +15,8 @@ import type {
 import { addConsole, state } from "../mock";
 import { bus } from "@/lib/ws/bus";
 import { PRACTICE_READ_NAMES } from "@/lib/cs2/practice";
+import type { RotationState } from "@/lib/cs2/rotation";
+import { expiryFrom, type BanRecord } from "@/lib/cs2/bans";
 
 /** Mock cvar values, so the Practice tab is exercisable without a server. */
 const mockCvars: Record<string, string> = { sv_cheats: "0" };
@@ -95,6 +97,33 @@ export const mockAdapter = {
     bus.emit({ type: "status.update", status: { ...state.status } });
   },
 
+  async banPlayer(
+    steamId: string,
+    minutes: number | null,
+    reason?: string,
+  ): Promise<BanRecord> {
+    const player = state.players.find((p) => p.steamId === steamId);
+    state.players = state.players.filter((p) => p.steamId !== steamId);
+    const ban: BanRecord = {
+      steamId,
+      name: player?.name ?? steamId,
+      reason: reason ?? null,
+      bannedAt: new Date().toISOString(),
+      expiresAt: expiryFrom(minutes),
+    };
+    state.bans = [ban, ...state.bans.filter((b) => b.steamId !== steamId)];
+    bus.emit({ type: "player.leave", steamId });
+    return ban;
+  },
+
+  async unbanPlayer(steamId: string): Promise<void> {
+    state.bans = state.bans.filter((b) => b.steamId !== steamId);
+  },
+
+  async getBans(): Promise<BanRecord[]> {
+    return [...state.bans];
+  },
+
   async getMaps(): Promise<{
     current: string;
     rotation: string[];
@@ -145,10 +174,23 @@ export const mockAdapter = {
     return entry;
   },
 
+  async unsubscribeWorkshop(workshopId: string): Promise<void> {
+    state.maps = state.maps.filter((m) => m.workshopId !== workshopId);
+    addConsole("info", "admin", `Workshop map ${workshopId} removed`);
+  },
+
   async setRotation(rotation: string[]): Promise<void> {
     state.rotation = rotation;
-    const ev = addConsole("info", "admin", "Map rotation updated");
-    bus.emit({ type: "console.line", event: ev });
+  },
+
+  async getRotation(): Promise<RotationState> {
+    return { enabled: state.rotationEnabled ?? false, maps: state.rotation };
+  },
+
+  async putRotation(next: Partial<RotationState>): Promise<RotationState> {
+    if (next.maps) state.rotation = next.maps;
+    if (next.enabled !== undefined) state.rotationEnabled = next.enabled;
+    return { enabled: state.rotationEnabled ?? false, maps: state.rotation };
   },
 
   async getMatch(): Promise<MatchState> {

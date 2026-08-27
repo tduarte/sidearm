@@ -1,3 +1,4 @@
+import type { BanRecord } from "@/lib/cs2/bans";
 import type {
   ChatMessage,
   ConsoleEvent,
@@ -105,6 +106,8 @@ const initialMockState = {
 
   maps: [...OFFICIAL_MAPS] as MapEntry[],
   rotation: ["de_mirage", "de_inferno", "de_nuke", "de_ancient", "de_anubis"] as string[],
+  rotationEnabled: false,
+  bans: [] as BanRecord[],
 
   match: {
     phase: "live",

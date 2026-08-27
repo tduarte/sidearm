@@ -1,5 +1,12 @@
 import { getDb } from "./index";
-import type { GameMode, MatchHistoryDetail, MatchHistoryEntry, Player, Team } from "@/lib/api/types";
+import type {
+  GameMode,
+  MatchHistoryDetail,
+  MatchHistoryEntry,
+  Player,
+  RoundRecord,
+  Team,
+} from "@/lib/api/types";
 
 export function beginMatch(map: string, gameMode: GameMode): string {
   const id = crypto.randomUUID();
@@ -79,6 +86,7 @@ export function getMatchDetail(id: string): MatchHistoryDetail | null {
     finalScore: { ct: row.ct_score, t: row.t_score },
     winner: row.winner as "CT" | "T" | "DRAW",
     playerCount: row.player_count,
+    rounds: getRounds(id),
     players: players.map((p) => ({
       steamId: p.steam_id,
       name: p.name,
@@ -88,4 +96,49 @@ export function getMatchDetail(id: string): MatchHistoryDetail | null {
       a: p.a,
     })),
   };
+}
+
+/**
+ * Records one completed round.
+ *
+ * `Round_End` is not a phase change (see PHASE_TRIGGERS in the log parser), so
+ * rounds are stored separately from the match lifecycle. `INSERT OR REPLACE`
+ * because a round number can legitimately repeat after `mp_restartgame`.
+ */
+export function insertRound(matchId: string, round: RoundRecord): void {
+  getDb()
+    .prepare(
+      `INSERT OR REPLACE INTO match_rounds
+         (match_id, round, winner, reason, ct_score, t_score)
+       VALUES (@matchId, @round, @winner, @reason, @ct, @t)`,
+    )
+    .run({
+      matchId,
+      round: round.round,
+      winner: round.winner,
+      reason: round.reason,
+      ct: round.score.ct,
+      t: round.score.t,
+    });
+}
+
+export function getRounds(matchId: string): RoundRecord[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT round, winner, reason, ct_score, t_score
+         FROM match_rounds WHERE match_id = ? ORDER BY round ASC`,
+    )
+    .all(matchId) as Array<{
+    round: number;
+    winner: string;
+    reason: string;
+    ct_score: number;
+    t_score: number;
+  }>;
+  return rows.map((r) => ({
+    round: r.round,
+    winner: r.winner as RoundRecord["winner"],
+    reason: r.reason,
+    score: { ct: r.ct_score, t: r.t_score },
+  }));
 }

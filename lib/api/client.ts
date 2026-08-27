@@ -1,3 +1,5 @@
+import type { RotationState } from "@/lib/cs2/rotation";
+import type { BanRecord } from "@/lib/cs2/bans";
 import type {
   ChatMessage,
   CvarGroup,
@@ -95,6 +97,16 @@ export const api = {
     );
   },
 
+  banPlayer: (steamId: string, minutes: number | null, reason?: string) =>
+    request<BanRecord>("/api/players/ban", json({ steamId, minutes, reason })),
+
+  unbanPlayer: (steamId: string) =>
+    request<void>(`/api/players/ban?steamId=${encodeURIComponent(steamId)}`, {
+      method: "DELETE",
+    }),
+
+  getBans: () => request<BanRecord[]>("/api/players/ban"),
+
   getMaps: () =>
     request<{ current: string; rotation: string[]; all: MapEntry[] }>(
       "/api/maps",
@@ -110,12 +122,18 @@ export const api = {
       json({ workshopId, displayName }),
     ),
 
-  setRotation: async (rotation: string[]) => {
-    await request<{ ok: true }>("/api/maps/rotation", {
+  unsubscribeWorkshop: (id: string) =>
+    request<void>(`/api/maps/workshop?id=${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
+
+  getRotation: () => request<RotationState>("/api/maps/rotation"),
+
+  putRotation: (next: { enabled?: boolean; maps?: string[] }) =>
+    request<RotationState>("/api/maps/rotation", {
       method: "PUT",
-      body: JSON.stringify({ rotation }),
-    });
-  },
+      body: JSON.stringify(next),
+    }),
 
   getMatch: () => request<MatchState>("/api/match"),
 

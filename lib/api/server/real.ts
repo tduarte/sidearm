@@ -21,10 +21,25 @@ import { containerAction } from "@/lib/cs2/docker";
 import { runUpdateCheck } from "@/lib/cs2/updates";
 import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
-import { OFFICIAL_MAPS } from "@/lib/api/mock";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
 import { getMatches, getMatchDetail } from "@/lib/db/matches";
-import { getWorkshopMaps, upsertWorkshopMap } from "@/lib/db/maps";
+import {
+  deleteWorkshopMap,
+  getWorkshopMaps,
+  setWorkshopMeta,
+  upsertWorkshopMap,
+} from "@/lib/db/maps";
+import { fetchWorkshopMeta } from "@/lib/cs2/workshop-meta";
+import {
+  banCommands,
+  expiredBans,
+  expiryFrom,
+  formatDuration as formatBanDuration,
+  unbanCommand,
+  type BanRecord,
+} from "@/lib/cs2/bans";
+import { deleteBan, insertBan, listBans } from "@/lib/db/bans";
+import { mirrorThumbnail } from "@/lib/maps/thumbnails";
 import {
   assertCommandAllowed,
   assertValidMapName,
@@ -36,6 +51,13 @@ import {
   safeToken,
 } from "@/lib/cs2/sanitize";
 import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import { mapDisplayName, parseMapList } from "@/lib/cs2/maps";
+import {
+  EMPTY_ROTATION,
+  nextMap,
+  sanitizeRotation,
+  type RotationState,
+} from "@/lib/cs2/rotation";
 import {
   PRACTICE_READ_NAMES,
   practiceSpec,
@@ -72,6 +94,10 @@ declare global {
     pendingWorkshopMap: { id: string; fromMap: string; at: number } | null;
     /** Command issued whose effect the status poll has not observed yet. */
     pendingOp: PendingOp | null;
+    /** Installed maps from `maps *`; null until asked, and only asked once. */
+    officialMaps: MapEntry[] | null;
+    /** Workshop ids already looked up on Steam this process. */
+    metaAttempted: Set<string>;
   };
 }
 global.__cs2Cache ??= {
@@ -92,6 +118,8 @@ global.__cs2Cache ??= {
   update: null,
   pendingWorkshopMap: null,
   pendingOp: null,
+  officialMaps: null,
+  metaAttempted: new Set<string>(),
 };
 
 const cache = () => global.__cs2Cache;
@@ -311,6 +339,174 @@ export function updateCache(
 /** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
 function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+/**
+ * Lifts bans whose clock has run out.
+ *
+ * The game server has no expiry of its own for a `banid 0`, so this is the
+ * only thing that ends a timed ban.
+ */
+export async function sweepExpiredBans(): Promise<void> {
+  let bans: BanRecord[];
+  try { bans = listBans(); } catch { return; }
+
+  for (const ban of expiredBans(bans)) {
+    try {
+      await rconExec(unbanCommand(safeToken(ban.steamId)));
+    } catch { /* the server may have forgotten it already */ }
+    try { deleteBan(ban.steamId); } catch { /* non-critical */ }
+    const ev = makeConsoleEvent("info", "admin", `Ban on ${ban.name} expired`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  }
+}
+
+/**
+ * Re-applies unexpired bans after the game server has forgotten them.
+ *
+ * `banid` lives in the server's memory, so a container restart drops every
+ * ban. Without this, "banned for an hour" quietly becomes "banned until the
+ * next CS2 update".
+ */
+export async function reapplyBans(): Promise<void> {
+  let bans: BanRecord[];
+  try { bans = listBans(); } catch { return; }
+
+  const active = bans.filter(
+    (b) => b.expiresAt === null || new Date(b.expiresAt).getTime() > Date.now(),
+  );
+  for (const ban of active) {
+    try { await rconExec(`banid 0 ${safeToken(ban.steamId)}`); } catch { /* best effort */ }
+  }
+  if (active.length > 0) {
+    const ev = makeConsoleEvent(
+      "info",
+      "admin",
+      `Re-applied ${active.length} ban(s) after the server restarted`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  }
+}
+
+const ROTATION_KEY = "map.rotation";
+
+/** Rotation as stored. Panel intent, not server state — see lib/db/config.ts. */
+export function loadRotation(): RotationState {
+  try {
+    return sanitizeRotation(getSavedConfig<RotationState>(ROTATION_KEY) ?? EMPTY_ROTATION);
+  } catch {
+    return EMPTY_ROTATION;
+  }
+}
+
+function saveRotation(state: RotationState): void {
+  try {
+    setSavedConfig(ROTATION_KEY, state);
+  } catch { /* non-critical */ }
+}
+
+/**
+ * Loads the next map when a match ends, if rotation is on.
+ *
+ * Called from the match-lifecycle subscriber in server.ts, so it runs wherever
+ * the `Game Over:` line is observed.
+ */
+export async function advanceRotation(): Promise<string | null> {
+  const rotation = loadRotation();
+  const current = cache().status?.map ?? "";
+  const next = nextMap(rotation, current);
+  if (!next) return null;
+
+  try {
+    await realAdapter.changeMap(next);
+    const ev = makeConsoleEvent("info", "rotation", `Rotating to ${next}`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return next;
+  } catch (err) {
+    const ev = makeConsoleEvent(
+      "error",
+      "rotation",
+      `Could not rotate to ${next}: ${(err as Error).message}`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return null;
+  }
+}
+
+/**
+ * Fills in title and thumbnail for workshop maps added before the panel knew
+ * how to ask Steam for them.
+ *
+ * Deliberately not awaited: the map list must render immediately, and a slow
+ * or absent internet connection must not hold it up. The result lands in the
+ * database and appears on the next refresh.
+ *
+ * Each id is attempted once per panel lifetime, so a map Steam has no record of
+ * — a mistyped id, or a delisted item — does not mean a request on every poll.
+ */
+function backfillWorkshopMeta(entries: MapEntry[]): void {
+  for (const entry of entries) {
+    const id = entry.workshopId;
+    if (!id || entry.thumbnailUrl) continue;
+    if (cache().metaAttempted.has(id)) continue;
+    cache().metaAttempted.add(id);
+
+    void (async () => {
+      const meta = await fetchWorkshopMeta(id);
+      if (!meta) return;
+      const thumbFile = meta.previewUrl
+        ? await mirrorThumbnail(id, meta.previewUrl)
+        : null;
+      try {
+        setWorkshopMeta(id, {
+          title: meta.title,
+          previewUrl: meta.previewUrl,
+          fileSize: meta.fileSize,
+          timeUpdated: meta.timeUpdated,
+          thumbFile,
+        });
+        // Drop the cached library so the next read picks the new columns up.
+        cache().workshopMaps = null;
+      } catch { /* non-critical */ }
+    })();
+  }
+}
+
+/**
+ * Maps the server actually has, asked for once and kept.
+ *
+ * The installed set only changes when the game updates, which means the
+ * container restarted — and that clears this process's cache anyway. Asking
+ * every time would spend an RCON round-trip on a large reply for an answer
+ * that cannot have changed.
+ */
+async function officialLibrary(): Promise<MapEntry[]> {
+  const cached = cache().officialMaps;
+  if (cached) return cached;
+
+  // No point asking a server that is not up; leaving the cache empty means the
+  // next call retries rather than pinning an empty list for the process.
+  if (cache().status?.state !== "running") return [];
+
+  let names: string[];
+  try {
+    names = parseMapList(await rconExec("maps *"));
+  } catch {
+    return [];
+  }
+  if (names.length === 0) return [];
+
+  const entries: MapEntry[] = names.map((name) => ({
+    name,
+    displayName: mapDisplayName(name),
+    type: "official" as const,
+  }));
+  cache().officialMaps = entries;
+  return entries;
 }
 
 /** Current match state from the cache. Exported for tests. */
@@ -550,11 +746,65 @@ export const realAdapter = {
     bus.emit({ type: "player.leave", steamId });
   },
 
+  /**
+   * Bans a player until the panel lifts it.
+   *
+   * `banid 0`, never the minutes form: a timed Source ban is deleted at the
+   * next map change, so it would look right and quietly stop working. The
+   * panel holds the clock instead (lib/cs2/bans.ts).
+   */
+  async banPlayer(
+    steamId: string,
+    minutes: number | null,
+    reason?: string,
+  ): Promise<BanRecord> {
+    const player = cache().players.find((p) => p.steamId === steamId);
+    // `banid`/`kickid` take the per-connection slot id; the SteamID is what we
+    // store, because the slot is not stable across reconnects.
+    const target = player?.userId ?? steamId;
+
+    for (const cmd of banCommands(safeToken(target))) await rconExec(cmd);
+
+    const ban: BanRecord = {
+      steamId,
+      name: player?.name ?? steamId,
+      reason: reason?.trim().slice(0, 200) || null,
+      bannedAt: new Date().toISOString(),
+      expiresAt: expiryFrom(minutes),
+    };
+    try { insertBan(ban); } catch { /* non-critical */ }
+
+    cache().players = cache().players.filter((p) => p.steamId !== steamId);
+    bus.emit({ type: "player.leave", steamId });
+    const ev = makeConsoleEvent(
+      "warn",
+      "admin",
+      `Banned ${ban.name} (${formatBanDuration(minutes)})`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+    return ban;
+  },
+
+  async unbanPlayer(steamId: string): Promise<void> {
+    try { await rconExec(unbanCommand(safeToken(steamId))); } catch {
+      // The server may not hold it any more (a restart clears the list); the
+      // panel's record still has to go, or it would be re-applied on reconnect.
+    }
+    try { deleteBan(steamId); } catch { /* non-critical */ }
+  },
+
+  async getBans(): Promise<BanRecord[]> {
+    try { return listBans(); } catch { return []; }
+  },
+
   async getMaps(): Promise<{ current: string; rotation: string[]; all: MapEntry[] }> {
+    const workshop = workshopLibrary();
+    backfillWorkshopMeta(workshop);
     return {
       current: cache().status?.map ?? "unknown",
-      rotation: [],
-      all: [...workshopLibrary(), ...OFFICIAL_MAPS],
+      rotation: loadRotation().maps,
+      all: [...workshop, ...(await officialLibrary())],
     };
   },
 
@@ -605,6 +855,12 @@ export const realAdapter = {
     // play, when `changeMap` issues `host_workshop_map`. Doing it now would
     // mean changing the level out from under whoever is playing, since that
     // command hosts the map as well as fetching it.
+    // Steam knows the item's real title, so the display-name field is an
+    // override rather than something the admin has to supply. No API key is
+    // needed for this call. It is best-effort: a panel with no internet still
+    // adds the map, just without a title or a thumbnail.
+    const meta = await fetchWorkshopMeta(workshopId);
+
     const entry: MapEntry = {
       // Keep a filename already learned from an earlier play (see
       // `resolveWorkshopMapName`) rather than dropping back to the bare id.
@@ -614,6 +870,7 @@ export const realAdapter = {
           : workshopMapPath(workshopId),
       displayName:
         displayName?.trim().slice(0, 64) ||
+        meta?.title?.slice(0, 64) ||
         existing?.displayName ||
         `Workshop ${workshopId}`,
       type: "workshop",
@@ -621,6 +878,22 @@ export const realAdapter = {
     };
 
     try { upsertWorkshopMap({ ...entry, workshopId }); } catch { /* non-critical */ }
+
+    if (meta) {
+      const thumbFile = meta.previewUrl
+        ? await mirrorThumbnail(workshopId, meta.previewUrl)
+        : null;
+      try {
+        setWorkshopMeta(workshopId, {
+          title: meta.title,
+          previewUrl: meta.previewUrl,
+          fileSize: meta.fileSize,
+          timeUpdated: meta.timeUpdated,
+          thumbFile,
+        });
+      } catch { /* non-critical */ }
+      if (thumbFile) entry.thumbnailUrl = `/api/maps/thumb/${workshopId}`;
+    }
     if (idx >= 0) list[idx] = entry; else list.push(entry);
 
     const ev = makeConsoleEvent(
@@ -633,8 +906,30 @@ export const realAdapter = {
     return entry;
   },
 
-  async setRotation(_rotation: string[]): Promise<void> {
-    // Phase F will write mapcycle.txt
+  async unsubscribeWorkshop(workshopId: string): Promise<void> {
+    const id = assertWorkshopId(workshopId);
+    deleteWorkshopMap(id);
+    cache().workshopMaps = null;
+    // Not an error if it was mid-resolution; just stop waiting for its name.
+    if (cache().pendingWorkshopMap?.id === id) cache().pendingWorkshopMap = null;
+    const ev = makeConsoleEvent("info", "admin", `Workshop map ${id} removed`);
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  async setRotation(rotation: string[]): Promise<void> {
+    const current = loadRotation();
+    saveRotation(sanitizeRotation({ enabled: current.enabled, maps: rotation }));
+  },
+
+  async getRotation(): Promise<RotationState> {
+    return loadRotation();
+  },
+
+  async putRotation(next: Partial<RotationState>): Promise<RotationState> {
+    const state = sanitizeRotation({ ...loadRotation(), ...next });
+    saveRotation(state);
+    return state;
   },
 
   async getMatch(): Promise<MatchState> {

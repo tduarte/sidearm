@@ -57,7 +57,10 @@ app.prepare().then(async () => {
   const { updateCache, realAdapter } = await import("./lib/api/server/real");
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
-  const { beginMatch, endMatch } = await import("./lib/db/matches");
+  const { beginMatch, endMatch, insertRound } = await import("./lib/db/matches");
+  const { advanceRotation, reapplyBans, sweepExpiredBans } = await import(
+    "./lib/api/server/real"
+  );
 
   // Ensure DB is open and migrated before anything else touches it
   getDb();
@@ -67,6 +70,21 @@ app.prepare().then(async () => {
   // which has its own module registry.
   let activeMatchId: string | null = null;
   bus.subscribe((ev) => {
+    // Rounds are recorded against the open match, not the match lifecycle:
+    // Round_End fires ~24 times a game and must not close the record.
+    if (ev.type === "round.end") {
+      if (activeMatchId) {
+        try {
+          insertRound(activeMatchId, {
+            round: ev.round,
+            winner: ev.winner,
+            reason: ev.reason,
+            score: ev.score,
+          });
+        } catch { /* non-critical */ }
+      }
+      return;
+    }
     if (ev.type !== "match.phase") return;
     const cache = globalThis.__cs2Cache;
     if (ev.phase === "live" && !activeMatchId) {
@@ -81,11 +99,22 @@ app.prepare().then(async () => {
         cache?.players ?? [],
       );
       activeMatchId = null;
+      // Panel-driven rotation: the map only advances while the panel is
+      // running, which is the trade for handling workshop maps at all.
+      if (ev.phase === "ended") void advanceRotation();
     }
   });
 
   const secret = process.env.LOG_INGEST_SECRET ?? "";
   const panelUrl = process.env.PANEL_URL ?? `http://panel:${port}`;
+
+  /**
+   * Bans live in the game server's memory, so every container restart drops
+   * them. Sweeping expiries and re-applying the rest is what makes the panel's
+   * clock mean anything.
+   */
+  const BAN_SWEEP_MS = 60_000;
+  setInterval(() => void sweepExpiredBans(), BAN_SWEEP_MS);
 
   rconConnect(async () => {
     try {
@@ -95,6 +124,13 @@ app.prepare().then(async () => {
       console.log("[rcon] log ingest configured");
     } catch (err) {
       console.error("[rcon] failed to configure log ingest:", err);
+    }
+    // The server has just come up with an empty ban list, whatever the panel
+    // still considers banned.
+    try {
+      await reapplyBans();
+    } catch (err) {
+      console.error("[rcon] failed to re-apply bans:", err);
     }
   });
 
