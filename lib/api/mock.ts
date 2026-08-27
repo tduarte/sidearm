@@ -111,8 +111,9 @@ const initialMockState = {
     score: { ct: 7, t: 5 },
     round: 13,
     maxRounds: 24,
-    paused: false,
-    demoRecording: true,
+    pause: "running",
+    demo: { state: "recording", name: "sidearm_de_mirage_mock" },
+    knifeSetupApplied: false,
   } as MatchState,
 
   console: [] as ConsoleEvent[],

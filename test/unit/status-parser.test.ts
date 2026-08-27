@@ -8,7 +8,12 @@ import {
   parseStatusText,
   uptimeFrom,
 } from "@/lib/cs2/status";
-import { mergeRoster, updateCache } from "@/lib/api/server/real";
+import {
+  getMatchState,
+  mergeRoster,
+  updateCache,
+  updateMatchState,
+} from "@/lib/api/server/real";
 import type { Player, ServerStatus } from "@/lib/api/types";
 
 /**
@@ -455,5 +460,89 @@ describe("updateCache roster handling", () => {
     globalThis.__cs2Cache.players = [player()];
     updateCache(status, []);
     assert.deepEqual(globalThis.__cs2Cache.players, []);
+  });
+});
+
+describe("updateCache — mp_maxrounds", () => {
+  const status: ServerStatus = {
+    state: "running",
+    hostname: "test",
+    map: "de_mirage",
+    gameMode: "competitive",
+    players: 0,
+    maxPlayers: 10,
+    uptimeSec: 0,
+    cpuPct: 0,
+    memMb: 0,
+    memMaxMb: 8192,
+    fps: null,
+    tickrate: null,
+    vacSecure: true,
+    build: 14177,
+    gotv: null,
+    connectUrl: "connect 127.0.0.1:27015",
+    ip: "127.0.0.1",
+    port: 27015,
+    control: { docker: true, rcon: true },
+  };
+
+  it("takes the match length from the server rather than a constant", () => {
+    updateCache(status, [], { maxRounds: 16 });
+    assert.equal(getMatchState().maxRounds, 16);
+  });
+
+  it("keeps the known length when a poll fails to read it", () => {
+    // An RCON tick that drops must not reset a known match length to unknown;
+    // the round counter would silently lose its denominator mid-match.
+    updateCache(status, [], { maxRounds: 16 });
+    updateCache(status, [], { maxRounds: null });
+    assert.equal(getMatchState().maxRounds, 16);
+  });
+});
+
+describe("updateCache — pause across a map change", () => {
+  const at = (map: string): ServerStatus => ({
+    state: "running",
+    hostname: "test",
+    map,
+    gameMode: "competitive",
+    players: 0,
+    maxPlayers: 10,
+    uptimeSec: 0,
+    cpuPct: 0,
+    memMb: 0,
+    memMaxMb: 8192,
+    fps: null,
+    tickrate: null,
+    vacSecure: true,
+    build: 14177,
+    gotv: null,
+    connectUrl: "connect 127.0.0.1:27015",
+    ip: "127.0.0.1",
+    port: 27015,
+    control: { docker: true, rcon: true },
+  });
+
+  it("clears a pause when the level changes", () => {
+    updateCache(at("de_mirage"), []);
+    updateMatchState({ pause: "paused" });
+    updateCache(at("de_dust2"), []);
+    assert.equal(getMatchState().pause, "running");
+  });
+
+  it("drops demo state to unknown rather than asserting it", () => {
+    // GOTV stops recording at a level change, but whether it restarted is not
+    // something the panel can see — so it says so instead of guessing.
+    updateCache(at("de_dust2"), []);
+    updateMatchState({ demo: { state: "recording", name: "x" } });
+    updateCache(at("de_nuke"), []);
+    assert.equal(getMatchState().demo.state, "unknown");
+  });
+
+  it("leaves state alone while the map is unchanged", () => {
+    updateCache(at("de_nuke"), []);
+    updateMatchState({ pause: "paused" });
+    updateCache(at("de_nuke"), []);
+    assert.equal(getMatchState().pause, "paused");
   });
 });

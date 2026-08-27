@@ -105,8 +105,8 @@ app.prepare().then(async () => {
 
   const poll = async () => {
     try {
-      const { status, players } = await fetchStatus();
-      updateCache(status, players);
+      const { status, players, cvars } = await fetchStatus();
+      updateCache(status, players, cvars);
       bus.emit({ type: "status.update", status });
     } catch {
       // transient — rcon reconnect handles it

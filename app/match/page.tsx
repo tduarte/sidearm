@@ -4,9 +4,9 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowCounterClockwise,
+  ArrowsLeftRight,
   ChartLine,
   Coffee,
-  Crosshair,
   FastForward,
   Fire,
   Flag,
@@ -14,7 +14,6 @@ import {
   Infinity as InfinityIcon,
   Knife,
   Package,
-  Path,
   Pause,
   PictureInPicture,
   Play,
@@ -44,9 +43,14 @@ import {
   MatchActionTile,
 } from "@/components/match/match-action-tile";
 import { LoadError } from "@/components/load-error";
+import { CvarTile } from "@/components/match/cvar-tile";
+import { useCvarGroup } from "@/lib/hooks/use-cvar-group";
+import { asBool } from "@/lib/cs2/cvars";
+import { practiceSpec } from "@/lib/cs2/practice";
 import { api } from "@/lib/api/client";
 import { useMatchState } from "@/lib/hooks/use-match-state";
-import type { MatchPhase } from "@/lib/api/types";
+import { useServerStatus } from "@/lib/hooks/use-server-status";
+import type { CvarSpec, MatchPhase } from "@/lib/api/types";
 
 const PHASES: {
   value: MatchPhase;
@@ -54,17 +58,22 @@ const PHASES: {
   icon: Icon;
   iconWeight?: "fill" | "regular";
 }[] = [
+  // Only phases the server can actually report. Knife and Halftime used to sit
+  // here and sent no RCON at all while reporting success; both are now explicit
+  // actions below, labelled for what they really do.
   { value: "warmup", label: "Warmup", icon: Timer },
-  { value: "knife", label: "Knife", icon: Knife },
   { value: "live", label: "Live", icon: Play, iconWeight: "fill" },
-  { value: "halftime", label: "Halftime", icon: Pause },
-  { value: "ended", label: "Ended", icon: Flag },
+  { value: "ended", label: "End match", icon: Flag },
 ];
 
 export default function MatchPage() {
   const { data: match, isLoading, error, refetch } = useMatchState();
+  const { data: status } = useServerStatus();
   const qc = useQueryClient();
-  const [svCheatsOn, setSvCheatsOn] = useState(false);
+  // Which tab is open gates the cvar polling: RCON is one serialised socket,
+  // so the practice values are only read while they are on screen.
+  const [tab, setTab] = useState("competitive");
+  const cvars = useCvarGroup("practice", tab === "practice");
 
   const setPhase = useMutation({
     mutationFn: (phase: MatchPhase) => api.setMatchPhase(phase),
@@ -76,23 +85,47 @@ export default function MatchPage() {
   });
 
   const pause = useMutation({
-    mutationFn: () => api.togglePause(),
+    mutationFn: (action: "pause" | "unpause") => api.setPause(action),
     meta: { action: "Pause" },
-    onSuccess: (r) => {
-      toast(r.paused ? "Match paused" : "Match resumed");
+    onSuccess: (_r, action) => {
+      toast(
+        action === "pause" ? "Pause requested" : "Match resumed",
+        action === "pause"
+          ? { description: "CS2 applies it at the end of the current round." }
+          : undefined,
+      );
       qc.invalidateQueries({ queryKey: ["match"] });
     },
   });
 
   const demo = useMutation({
-    mutationFn: () => api.toggleDemo(),
+    mutationFn: (action: "start" | "stop") => api.setDemo(action),
     meta: { action: "Demo recording" },
-    onSuccess: (r) => {
+    onSuccess: (r, action) => {
       toast(
-        r.demoRecording
-          ? "Demo recording started"
-          : "Demo recording stopped",
+        action === "start" ? "Recording started" : "Recording stopped",
+        r.demo.name ? { description: `${r.demo.name}.dem` } : undefined,
       );
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
+  const knife = useMutation({
+    mutationFn: (action: "setup" | "restore") => api.knife(action),
+    meta: { action: "Knife round" },
+    onSuccess: (_r, action) => {
+      toast.success(
+        action === "setup" ? "Knife round set up" : "Gameplay cvars restored",
+      );
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
+  const swap = useMutation({
+    mutationFn: () => api.swapTeams(),
+    meta: { action: "Swapping sides" },
+    onSuccess: () => {
+      toast.success("Sides swapped");
       qc.invalidateQueries({ queryKey: ["match"] });
     },
   });
@@ -111,18 +144,31 @@ export default function MatchPage() {
     return <Skeleton className="h-96" />;
   }
 
-  const cheatLocked = !svCheatsOn;
+  // Read back from the server, not remembered. The old local boolean reset to
+  // false on every reload and re-locked the dependent tiles even when the
+  // server still had cheats on.
+  const cheatsOn = asBool(cvars.byName.get("sv_cheats")?.value ?? undefined);
+  const specOf = (name: string): CvarSpec => {
+    const spec = practiceSpec(name);
+    if (!spec) throw new Error(`No practice spec for ${name}`);
+    return spec;
+  };
+  const paused = match.pause === "paused" || match.pause === "pause_requested";
+  const recording = match.demo.state === "recording";
+  // Demo recording runs through GOTV; without it `tv_record` fails, so the
+  // tile says why rather than offering a button that cannot work.
+  const gotvUp = !!status?.gotv;
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-heading text-2xl font-semibold">Match Control</h1>
         <p className="text-sm text-muted-foreground">
-          Drive the match flow: warmup → knife → live, pause, score.
+          Drive the match: warmup → live → end, pause, sides, demos.
         </p>
       </div>
 
-      <Tabs defaultValue="competitive">
+      <Tabs value={tab} onValueChange={setTab}>
         <TabsList>
           <TabsTrigger value="competitive">Competitive 5v5</TabsTrigger>
           <TabsTrigger value="casual">Casual / DM</TabsTrigger>
@@ -143,21 +189,25 @@ export default function MatchPage() {
                 </div>
                 <div className="max-w-xs flex-1 space-y-2 text-center">
                   <Badge
-                    variant={match.paused ? "destructive" : "outline"}
+                    variant={paused ? "destructive" : "outline"}
                     className="gap-1.5 capitalize"
                   >
-                    {match.paused ? (
+                    {paused ? (
                       <Pause className="h-3 w-3" />
                     ) : (
                       <Timer className="h-3 w-3" />
                     )}
                     {match.phase}
-                    {match.paused ? " · paused" : ""}
+                    {match.pause === "paused" ? " · paused" : ""}
+                    {match.pause === "pause_requested"
+                      ? " · pausing at round end"
+                      : ""}
                   </Badge>
                   <p className="text-sm text-muted-foreground">
-                    Round {match.round} / {match.maxRounds}
+                    Round {match.round}
+                    {match.maxRounds === null ? "" : ` / ${match.maxRounds}`}
                   </p>
-                  {match.demoRecording && (
+                  {match.demo.state === "recording" && (
                     <Badge
                       variant="outline"
                       className="gap-1.5 border-red-500/40 text-red-400"
@@ -208,18 +258,77 @@ export default function MatchPage() {
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">Live actions</CardTitle>
+              <CardTitle className="text-base">Round setup</CardTitle>
+              <CardDescription>
+                CS2 has no native knife round, and vanilla halftime happens on
+                its own at <span className="font-mono">mp_maxrounds/2</span>.
+                These are cvar approximations: the panel sets the loadout and
+                swaps sides, but it cannot detect who won a knife round or run a
+                match flow for you. That needs a plugin such as Get5 or MatchZy.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               <MatchActionGrid layout="actions">
                 <MatchActionTile
-                  icon={match.paused ? Play : Pause}
-                  iconWeight={match.paused ? "fill" : "regular"}
-                  label={match.paused ? "Resume" : "Pause"}
-                  variant={match.paused ? "default" : "outline"}
+                  icon={Knife}
+                  label="Set up knife"
+                  description="knives only, no buy, restart"
+                  variant={match.knifeSetupApplied ? "default" : "outline"}
+                  disabled={knife.isPending || match.knifeSetupApplied}
+                  pending={knife.isPending}
+                  onClick={() => knife.mutate("setup")}
+                />
+                <MatchActionTile
+                  icon={ArrowCounterClockwise}
+                  label="Restore gameplay"
+                  description="puts back the values from before"
+                  variant="outline"
+                  disabled={knife.isPending || !match.knifeSetupApplied}
+                  pending={knife.isPending}
+                  onClick={() => knife.mutate("restore")}
+                />
+                <MatchActionTile
+                  icon={ArrowsLeftRight}
+                  label="Swap sides"
+                  description="mp_swapteams"
+                  variant="outline"
+                  disabled={swap.isPending}
+                  pending={swap.isPending}
+                  onClick={() => swap.mutate()}
+                />
+              </MatchActionGrid>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-base">Live actions</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <MatchActionGrid layout="actions">
+                {/*
+                  Two tiles, not one toggle. CS2 exposes no pause state to read
+                  back, so a single button has to guess which way to go — and
+                  after a panel restart it guesses wrong.
+                */}
+                <MatchActionTile
+                  icon={Pause}
+                  label="Pause"
+                  description="mp_pause_match · at round end"
+                  variant={match.pause === "pause_requested" ? "default" : "outline"}
                   disabled={pause.isPending}
                   pending={pause.isPending}
-                  onClick={() => pause.mutate()}
+                  onClick={() => pause.mutate("pause")}
+                />
+                <MatchActionTile
+                  icon={Play}
+                  iconWeight="fill"
+                  label="Resume"
+                  description="mp_unpause_match"
+                  variant="outline"
+                  disabled={pause.isPending}
+                  pending={pause.isPending}
+                  onClick={() => pause.mutate("unpause")}
                 />
                 <MatchActionTile
                   icon={ArrowCounterClockwise}
@@ -230,15 +339,32 @@ export default function MatchPage() {
                   pending={rcon.isPending}
                   onClick={() => rcon.mutate("mp_restartgame 1")}
                 />
-                <MatchActionTile
-                  icon={match.demoRecording ? Stop : Record}
-                  iconWeight={match.demoRecording ? "fill" : "regular"}
-                  label={match.demoRecording ? "Stop demo" : "Record demo"}
-                  variant={match.demoRecording ? "destructive" : "outline"}
-                  disabled={demo.isPending}
-                  pending={demo.isPending}
-                  onClick={() => demo.mutate()}
-                />
+                {recording ? (
+                  <MatchActionTile
+                    icon={Stop}
+                    iconWeight="fill"
+                    label="Stop demo"
+                    description="tv_stoprecord"
+                    variant="destructive"
+                    disabled={demo.isPending || !gotvUp}
+                    pending={demo.isPending}
+                    onClick={() => demo.mutate("stop")}
+                  />
+                ) : (
+                  <MatchActionTile
+                    icon={Record}
+                    label="Record demo"
+                    description={
+                      gotvUp
+                        ? "tv_record"
+                        : "needs GOTV — set TV_ENABLE=1 and recreate the container"
+                    }
+                    variant="outline"
+                    disabled={demo.isPending || !gotvUp}
+                    pending={demo.isPending}
+                    onClick={() => demo.mutate("start")}
+                  />
+                )}
               </MatchActionGrid>
             </CardContent>
           </Card>
@@ -297,20 +423,23 @@ export default function MatchPage() {
                 <div>
                   <Label htmlFor="sv-cheats">sv_cheats</Label>
                   <p className="text-xs text-muted-foreground">
-                    Sends <span className="font-mono text-foreground">sv_cheats 1</span>{" "}
-                    or <span className="font-mono text-foreground">0</span> via
-                    RCON. While off, cheat-dependent utility below is disabled.
+                    Read from the server, not remembered here. While off, the
+                    cheat-dependent tiles below are locked and say so.
+                    {cheatsOn === null
+                      ? " The server has not reported a value yet."
+                      : ""}
                   </p>
                 </div>
                 <Switch
                   id="sv-cheats"
-                  checked={svCheatsOn}
-                  disabled={rcon.isPending}
-                  onCheckedChange={(on) => {
-                    rcon.mutate(on ? "sv_cheats 1" : "sv_cheats 0", {
-                      onSuccess: () => setSvCheatsOn(on),
-                    });
-                  }}
+                  checked={cheatsOn === true}
+                  disabled={cvars.setCvar.isPending || cheatsOn === null}
+                  onCheckedChange={(on) =>
+                    cvars.setCvar.mutate({
+                      name: "sv_cheats",
+                      value: on ? "1" : "0",
+                    })
+                  }
                   aria-label="Toggle sv_cheats"
                 />
               </div>
@@ -357,23 +486,25 @@ export default function MatchPage() {
                   pending={rcon.isPending}
                   onClick={() => rcon.mutate("bot_kick")}
                 />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("sv_infinite_ammo")}
+                  state={cvars.byName.get("sv_infinite_ammo")}
                   icon={InfinityIcon}
-                  label="Infinite ammo"
-                  description="sv_infinite_ammo 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("sv_infinite_ammo 1")}
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({ name: "sv_infinite_ammo", value })
+                  }
                 />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("mp_buy_anywhere")}
+                  state={cvars.byName.get("mp_buy_anywhere")}
                   icon={ShoppingCart}
-                  label="Buy anywhere"
-                  description="mp_buy_anywhere 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("mp_buy_anywhere 1")}
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({ name: "mp_buy_anywhere", value })
+                  }
                 />
               </MatchActionGrid>
             </CardContent>
@@ -383,65 +514,63 @@ export default function MatchPage() {
             <CardHeader className="pb-2">
               <CardTitle className="text-base">Grenade practice</CardTitle>
               <CardDescription>
-                CS2 utility helpers: picture-in-picture landing preview, aim
-                trajectory, and post-throw flight trails. Turn on{" "}
+                Server-side grenade helpers, which need{" "}
                 <span className="font-medium text-foreground">
                   Developer cheats
                 </span>{" "}
-                above first. Only works on servers where cheats / RCON are
-                allowed (not Valve matchmaking).
+                on. Each tile shows the value the server currently reports and
+                toggles it back off again.
+                <br />
+                <span className="mt-2 block">
+                  Grenade <em>preview</em> is a client setting — the server
+                  cannot turn it on for you. Paste{" "}
+                  <code className="font-mono text-foreground">
+                    cl_grenadepreview 1
+                  </code>{" "}
+                  into your own console.
+                </span>
               </CardDescription>
             </CardHeader>
             <CardContent>
               <MatchActionGrid layout="nades">
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("sv_grenade_trajectory_prac_pipreview")}
+                  state={cvars.byName.get("sv_grenade_trajectory_prac_pipreview")}
                   icon={PictureInPicture}
-                  label="Landing PIP"
-                  description="sv_grenade_trajectory_prac_pipreview 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() =>
-                    rcon.mutate("sv_grenade_trajectory_prac_pipreview 1")
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({
+                      name: "sv_grenade_trajectory_prac_pipreview",
+                      value,
+                    })
                   }
                 />
-                <MatchActionTile
-                  icon={Crosshair}
-                  label="Aim trajectory"
-                  description="cl_grenadepreview 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("cl_grenadepreview 1")}
-                />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("sv_grenade_trajectory_prac_trailtime")}
+                  state={cvars.byName.get("sv_grenade_trajectory_prac_trailtime")}
                   icon={ChartLine}
-                  label="Flight trail"
-                  description="sv_grenade_trajectory_prac_trailtime 8"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() =>
-                    rcon.mutate("sv_grenade_trajectory_prac_trailtime 8")
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({
+                      name: "sv_grenade_trajectory_prac_trailtime",
+                      value,
+                    })
                   }
                 />
-                <MatchActionTile
-                  icon={Path}
-                  label="Trajectory lines"
-                  description="sv_grenade_trajectory 1"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("sv_grenade_trajectory 1")}
-                />
-                <MatchActionTile
+                <CvarTile
+                  spec={specOf("ammo_grenade_limit_total")}
+                  state={cvars.byName.get("ammo_grenade_limit_total")}
                   icon={Package}
-                  label="5 grenades"
-                  description="ammo_grenade_limit_total 5"
-                  variant="outline"
-                  disabled={rcon.isPending || cheatLocked}
-                  pending={rcon.isPending}
-                  onClick={() => rcon.mutate("ammo_grenade_limit_total 5")}
+                  cheatsOn={cheatsOn}
+                  pending={cvars.setCvar.isPending}
+                  onSet={(value) =>
+                    cvars.setCvar.mutate({
+                      name: "ammo_grenade_limit_total",
+                      value,
+                    })
+                  }
                 />
               </MatchActionGrid>
             </CardContent>

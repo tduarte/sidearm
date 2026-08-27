@@ -17,6 +17,13 @@ const tileVariants = cva(
           "bg-card text-foreground ring-1 ring-foreground/10 hover:bg-muted/30",
         active:
           "pointer-events-none bg-primary/10 text-foreground ring-2 ring-primary",
+        // Like `active`, but clickable — `active` sets pointer-events-none,
+        // which is right for the current phase and fatal for a toggle you need
+        // to be able to turn back off.
+        toggle:
+          "bg-primary/10 text-foreground ring-2 ring-primary hover:bg-primary/20",
+        unknown:
+          "bg-card text-muted-foreground ring-1 ring-dashed ring-foreground/25 hover:bg-muted/30",
         destructive:
           "bg-card text-destructive ring-1 ring-destructive/45 hover:bg-destructive/10",
       },

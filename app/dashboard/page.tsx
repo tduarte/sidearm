@@ -61,7 +61,7 @@ export default function DashboardPage() {
   const { data: status, isPending, error, refetch } = useServerStatus();
   const { data: match } = useMatchState();
   const { data: livePlayers, isLoading: playersLoading } = useLivePlayers();
-  const { cpu, mem } = useStatHistory();
+  const { cpu } = useStatHistory();
 
   if (error && !status) {
     return <LoadError what="server status" error={error} onRetry={() => refetch()} />;
@@ -165,10 +165,13 @@ export default function DashboardPage() {
               <div className="flex max-w-sm flex-col items-center gap-2 text-center">
                 <Badge variant="outline" className="capitalize">
                   {match.phase}
-                  {match.paused ? " · paused" : ""}
+                  {match.pause === "paused" ? " · paused" : ""}
+                  {match.pause === "pause_requested" ? " · pausing" : ""}
                 </Badge>
                 <p className="text-xs text-muted-foreground">
-                  Round {match.round} of {match.maxRounds}
+                  {match.maxRounds === null
+                    ? `Round ${match.round}`
+                    : `Round ${match.round} of ${match.maxRounds}`}
                 </p>
               </div>
               <div className="min-w-[5rem] text-center">

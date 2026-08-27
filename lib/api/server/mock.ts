@@ -1,4 +1,7 @@
 import type {
+  CvarGroup,
+  CvarSnapshot,
+  CvarState,
   ChatMessage,
   ConsoleEvent,
   MapEntry,
@@ -11,6 +14,10 @@ import type {
 } from "../types";
 import { addConsole, state } from "../mock";
 import { bus } from "@/lib/ws/bus";
+import { PRACTICE_READ_NAMES } from "@/lib/cs2/practice";
+
+/** Mock cvar values, so the Practice tab is exercisable without a server. */
+const mockCvars: Record<string, string> = { sv_cheats: "0" };
 import { workshopIdFromMapName, workshopMapPath } from "@/lib/cs2/workshop";
 
 /**
@@ -160,27 +167,72 @@ export const mockAdapter = {
     return { ...state.match };
   },
 
-  async togglePause(): Promise<MatchState> {
-    state.match.paused = !state.match.paused;
-    const ev = addConsole(
+  async getCvars(group: CvarGroup): Promise<CvarSnapshot> {
+    const readAt = new Date().toISOString();
+    return {
+      group,
+      cvars: PRACTICE_READ_NAMES.map((name) => ({
+        name,
+        value: mockCvars[name] ?? "0",
+        supported: true,
+        baseline: null,
+        readAt,
+      })),
+      readAt,
+    };
+  },
+
+  async setCvar(name: string, value: string): Promise<CvarState> {
+    mockCvars[name] = value;
+    return {
+      name,
+      value,
+      supported: true,
+      baseline: null,
+      readAt: new Date().toISOString(),
+    };
+  },
+
+  async knife(action: "setup" | "restore"): Promise<MatchState> {
+    state.match.knifeSetupApplied = action === "setup";
+    addConsole(
       "info",
-      "match",
-      state.match.paused ? "Match paused" : "Match resumed",
+      "admin",
+      action === "setup" ? "Knife round cvars applied" : "Knife cvars restored",
     );
-    bus.emit({ type: "console.line", event: ev });
     return { ...state.match };
   },
 
-  async toggleDemo(): Promise<MatchState> {
-    state.match.demoRecording = !state.match.demoRecording;
-    const ev = addConsole(
+  async swapTeams(): Promise<MatchState> {
+    const { ct, t } = state.match.score;
+    state.match.score = { ct: t, t: ct };
+    addConsole("info", "admin", "Teams swapped (mp_swapteams)");
+    bus.emit({ type: "match.score", score: state.match.score, round: state.match.round });
+    return { ...state.match };
+  },
+
+  async setPause(action: "pause" | "unpause"): Promise<MatchState> {
+    state.match.pause = action === "pause" ? "pause_requested" : "running";
+    addConsole(
       "info",
-      "match",
-      state.match.demoRecording
-        ? "Demo recording started"
-        : "Demo recording stopped",
+      "admin",
+      action === "pause" ? "Match pause requested" : "Match resumed",
     );
-    bus.emit({ type: "console.line", event: ev });
+    bus.emit({ type: "match.phase", phase: state.match.phase });
+    return { ...state.match };
+  },
+
+  async setDemo(action: "start" | "stop"): Promise<MatchState> {
+    const name = action === "start" ? `sidearm_${state.status.map}_mock` : state.match.demo.name;
+    state.match.demo = {
+      state: action === "start" ? "recording" : "idle",
+      name: name ?? null,
+    };
+    addConsole(
+      "info",
+      "admin",
+      action === "start" ? `Recording ${name}` : "Recording stopped",
+    );
     return { ...state.match };
   },
 

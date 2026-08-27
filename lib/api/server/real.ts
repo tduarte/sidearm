@@ -3,6 +3,10 @@ import type {
   ConsoleEvent,
   MapEntry,
   MatchHistoryDetail,
+  CvarGroup,
+  CvarSnapshot,
+  CvarState,
+  MatchPhase,
   MatchState,
   PendingOp,
   PendingOpKind,
@@ -28,8 +32,24 @@ import {
   quoteArg,
   REDACTED,
   safeInt,
+  assertManagedCvarName,
   safeToken,
 } from "@/lib/cs2/sanitize";
+import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import {
+  PRACTICE_READ_NAMES,
+  practiceSpec,
+} from "@/lib/cs2/practice";
+import {
+  KNIFE_CVARS,
+  restoreCommands,
+  setupCommands,
+} from "@/lib/cs2/knife";
+import {
+  deleteSavedConfig,
+  getSavedConfig,
+  setSavedConfig,
+} from "@/lib/db/config";
 import {
   isSameMap,
   shortMapName,
@@ -61,9 +81,10 @@ global.__cs2Cache ??= {
     phase: "idle",
     score: { ct: 0, t: 0 },
     round: 0,
-    maxRounds: 24,
-    paused: false,
-    demoRecording: false,
+    maxRounds: null,
+    pause: "unknown",
+    demo: { state: "unknown", name: null },
+    knifeSetupApplied: false,
   },
   console: [],
   chat: [],
@@ -74,6 +95,12 @@ global.__cs2Cache ??= {
 };
 
 const cache = () => global.__cs2Cache;
+
+/** Where the pre-knife cvar values live, so a restart cannot strand a server. */
+const KNIFE_BASELINE_KEY = "knife.baseline";
+
+/** Pre-change values for managed cvars, so "off" restores what was there. */
+const CVAR_BASELINE_KEY = "cvar.baseline";
 
 /** Does this string look like a real Steam identity rather than a name fallback? */
 function looksLikeSteamId(s: string): boolean {
@@ -245,8 +272,28 @@ export function pendingOpSettled(op: PendingOp, status: ServerStatus): boolean {
   }
 }
 
-export function updateCache(status: ServerStatus, players: Player[] | null) {
+export function updateCache(
+  status: ServerStatus,
+  players: Player[] | null,
+  cvars?: { maxRounds: number | null },
+) {
   resolveWorkshopMapName(status.map);
+
+  // Only overwrite when the server actually answered: a dropped RCON tick must
+  // not wipe a known match length back to unknown.
+  if (cvars?.maxRounds != null) cache().match.maxRounds = cvars.maxRounds;
+
+  // A level change cannot carry a pause across, and GOTV stops recording at
+  // the same moment. The pause is knowable (it is gone); the recording is not,
+  // so it goes back to unknown rather than being asserted either way.
+  const previousMap = cache().status?.map;
+  if (previousMap && previousMap !== status.map) {
+    cache().match = {
+      ...cache().match,
+      pause: "running",
+      demo: { state: "unknown", name: cache().match.demo.name },
+    };
+  }
 
   const op = cache().pendingOp;
   if (op) {
@@ -259,6 +306,16 @@ export function updateCache(status: ServerStatus, players: Player[] | null) {
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
   if (players !== null) cache().players = mergeRoster(cache().players, players);
+}
+
+/** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
+function nowStamp(): string {
+  return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
+}
+
+/** Current match state from the cache. Exported for tests. */
+export function getMatchState(): MatchState {
+  return cache().match;
 }
 
 export function updateMatchState(match: Partial<MatchState>) {
@@ -584,34 +641,205 @@ export const realAdapter = {
     return { ...cache().match };
   },
 
-  async setMatchPhase(phase: MatchState["phase"]): Promise<MatchState> {
-    const cmds: Record<string, string[]> = {
+  async setMatchPhase(phase: MatchPhase): Promise<MatchState> {
+    /**
+     * Every member must map to real commands. `knife` and `halftime` were
+     * silently mapped to `[]` here: no RCON was sent, the cache was updated
+     * regardless, and the UI reported success. The `Record<MatchPhase, ...>`
+     * type is what now makes an empty entry impossible to add by accident, and
+     * the assertion below catches one added on purpose.
+     */
+    const cmds: Record<MatchPhase, string[]> = {
       warmup: ["mp_warmup_start"],
       live: ["mp_warmup_end", "mp_restartgame 3"],
-      halftime: [],
       ended: ["mp_restartgame 1"],
+      // Panel-side only: "no match in progress". Nothing to tell the server.
       idle: [],
-      knife: [],
     };
-    for (const cmd of cmds[phase] ?? []) await rconExec(cmd);
+
+    if (phase !== "idle" && cmds[phase].length === 0) {
+      throw new Error(`No commands defined for match phase "${phase}"`);
+    }
+
+    for (const cmd of cmds[phase]) await rconExec(cmd);
     cache().match = { ...cache().match, phase };
     bus.emit({ type: "match.phase", phase });
     return { ...cache().match };
   },
 
-  async togglePause(): Promise<MatchState> {
-    await rconExec(cache().match.paused ? "mp_unpause_match" : "mp_pause_match");
-    cache().match = { ...cache().match, paused: !cache().match.paused };
+  /**
+   * Reads the practice cvars in one batched round-trip.
+   *
+   * Called only while the Practice tab is mounted (the client query is
+   * `enabled` on that), because RCON is a single serialised socket and the 2s
+   * status poll already owns most of its budget.
+   */
+  async getCvars(group: CvarGroup): Promise<CvarSnapshot> {
+    if (group !== "practice") throw new Error(`Unknown cvar group "${group}"`);
+
+    // Reading while the container is down would just fill the RCON queue.
+    if (cache().status?.state !== "running") {
+      return { group, cvars: [], readAt: null };
+    }
+
+    const echo = await rconExec(cvarReadCommand(PRACTICE_READ_NAMES));
+    const read = parseCvarEcho(echo);
+    const readAt = new Date().toISOString();
+    const baselines = getSavedConfig<Record<string, string>>(CVAR_BASELINE_KEY) ?? {};
+
+    const cvars: CvarState[] = PRACTICE_READ_NAMES.map((name) => {
+      const value = read.values.get(name) ?? null;
+      const spec = practiceSpec(name);
+      // First sighting of a value that is not the "on" value is the truthful
+      // baseline for restoring later.
+      if (spec && value !== null && baselines[name] === undefined && value !== spec.on) {
+        baselines[name] = value;
+      }
+      return {
+        name,
+        value,
+        supported: !read.unknown.has(name),
+        baseline: baselines[name] ?? null,
+        readAt,
+      };
+    });
+
+    setSavedConfig(CVAR_BASELINE_KEY, baselines);
+    return { group, cvars, readAt };
+  },
+
+  /**
+   * Writes a managed cvar and reads it back in the same round-trip.
+   *
+   * The reply is what gets returned, never the requested value: that is what
+   * catches a refusal (a cheat-protected cvar while `sv_cheats 0` echoes back
+   * unchanged) instead of the tile flipping to a state the server rejected.
+   */
+  async setCvar(name: string, value: string): Promise<CvarState> {
+    const allowed = [...PRACTICE_READ_NAMES];
+    const safeName = assertManagedCvarName(name, allowed);
+    const spec = practiceSpec(safeName);
+
+    let safeValue: string;
+    if (spec?.kind === "stepper") {
+      safeValue = String(
+        safeInt(value, spec.min ?? 0, spec.max ?? 100, Number(spec.off)),
+      );
+    } else {
+      // Booleans and sv_cheats: only ever 0 or 1 reaches the server.
+      safeValue = value.trim() === "1" || value.trim() === "true" ? "1" : "0";
+    }
+
+    const echo = await rconExec(`${safeName} ${safeValue}; ${safeName}`);
+    const read = parseCvarEcho(echo);
+    const baselines = getSavedConfig<Record<string, string>>(CVAR_BASELINE_KEY) ?? {};
+
+    return {
+      name: safeName,
+      value: read.values.get(safeName) ?? null,
+      supported: !read.unknown.has(safeName),
+      baseline: baselines[safeName] ?? null,
+      readAt: new Date().toISOString(),
+    };
+  },
+
+  /**
+   * Applies or undoes the knife-round cvars.
+   *
+   * `setup` reads the current values first and persists them, so `restore`
+   * puts back what this server had rather than what a default cfg contains —
+   * and so a panel restart mid-knife can still undo it.
+   */
+  async knife(action: "setup" | "restore"): Promise<MatchState> {
+    if (action === "restore") {
+      const baseline = getSavedConfig<Record<string, string>>(KNIFE_BASELINE_KEY);
+      if (!baseline) {
+        throw new Error(
+          "No knife baseline was recorded, so the panel does not know what to restore. Set the gameplay cvars you want by hand, or run `exec gamemode_competitive.cfg`.",
+        );
+      }
+      for (const cmd of restoreCommands(baseline)) await rconExec(cmd);
+      await rconExec("mp_restartgame 1");
+      deleteSavedConfig(KNIFE_BASELINE_KEY);
+      cache().match = { ...cache().match, knifeSetupApplied: false };
+      return { ...cache().match };
+    }
+
+    // Read before writing. Anything the build does not have is left out of the
+    // baseline entirely rather than recorded as a guess.
+    const echo = await rconExec(cvarReadCommand(KNIFE_CVARS));
+    const read = parseCvarEcho(echo);
+    const baseline: Record<string, string> = {};
+    for (const name of KNIFE_CVARS) {
+      const value = read.values.get(name);
+      if (value !== undefined) baseline[name] = value;
+    }
+    setSavedConfig(KNIFE_BASELINE_KEY, baseline);
+
+    for (const cmd of setupCommands()) await rconExec(cmd);
+    cache().match = { ...cache().match, knifeSetupApplied: true };
     return { ...cache().match };
   },
 
-  async toggleDemo(): Promise<MatchState> {
-    if (cache().match.demoRecording) {
-      await rconExec("stop");
-    } else {
-      await rconExec(`record ${safeToken(`demo_${Date.now()}`)}`);
+  /** Swaps sides now. What people actually want when they say "halftime". */
+  async swapTeams(): Promise<MatchState> {
+    const out = await rconExec("mp_swapteams");
+    // Command support cannot be probed safely, so it is discovered here, from
+    // the reply to a real invocation.
+    if (/Unknown command/i.test(out)) {
+      throw new Error("This CS2 build has no `mp_swapteams` command.");
     }
-    cache().match = { ...cache().match, demoRecording: !cache().match.demoRecording };
+    return { ...cache().match };
+  },
+
+  /**
+   * Explicit verbs, deliberately not a toggle.
+   *
+   * The old `togglePause` chose its command from a panel-local boolean that
+   * reset on every panel restart, so after one it would send `mp_pause_match`
+   * to an already-paused server. There is nothing to read back — CS2 exposes no
+   * pause cvar — so the fix is to remove the guess: the caller says which way
+   * it wants to go, and a wrong-direction send becomes impossible.
+   */
+  async setPause(action: "pause" | "unpause"): Promise<MatchState> {
+    await rconExec(action === "pause" ? "mp_pause_match" : "mp_unpause_match");
+    // `mp_pause_match` lands at the end of the current round, so claiming
+    // "paused" now would be wrong for up to a couple of minutes.
+    cache().match = {
+      ...cache().match,
+      pause: action === "pause" ? "pause_requested" : "running",
+    };
+    return { ...cache().match };
+  },
+
+  /**
+   * Demo recording via GOTV.
+   *
+   * `record` / `stop` — what this used to send — are the *client* demo
+   * commands and do nothing useful over RCON. The server-side path is
+   * `tv_record` / `tv_stoprecord`, and it needs GOTV running, which is why
+   * TV_ENABLE is now on by default in docker-compose.yml.
+   */
+  async setDemo(action: "start" | "stop"): Promise<MatchState> {
+    if (!cache().status?.gotv) {
+      throw new Error(
+        "GOTV is not running, so the server cannot record a demo. Set TV_ENABLE=1 and run `docker compose up -d --force-recreate cs2`.",
+      );
+    }
+
+    if (action === "stop") {
+      await rconExec("tv_stoprecord");
+      cache().match = {
+        ...cache().match,
+        demo: { state: "idle", name: cache().match.demo.name },
+      };
+      return { ...cache().match };
+    }
+
+    const map = shortMapName(cache().status?.map ?? "demo");
+    const name = safeToken(`sidearm_${map}_${nowStamp()}`);
+    await rconExec(`tv_record ${name}`);
+    cache().match = { ...cache().match, demo: { state: "recording", name } };
     return { ...cache().match };
   },
 

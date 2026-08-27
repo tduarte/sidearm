@@ -6,11 +6,11 @@ export const dynamic = "force-dynamic";
 
 export const POST = route(async (req: Request) => {
   const body = (await req.json()) as { action?: unknown };
-  if (body.action !== "start" && body.action !== "stop") {
+  if (body.action !== "setup" && body.action !== "restore") {
     return NextResponse.json(
-      { error: 'action must be "start" or "stop"' },
+      { error: 'action must be "setup" or "restore"' },
       { status: 400 },
     );
   }
-  return NextResponse.json(await serverApi.setDemo(body.action));
+  return NextResponse.json(await serverApi.knife(body.action));
 });

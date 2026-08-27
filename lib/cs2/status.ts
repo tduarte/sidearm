@@ -8,6 +8,7 @@ import type {
 import { rconExec } from "./rcon";
 import { containerLogs, containerStats, inspectContainer } from "./docker";
 import { parseServerVersion, parseUpdateProgress } from "./updates";
+import { asInt, parseCvarEcho } from "./cvars";
 
 const PORT = parseInt(process.env.RCON_PORT ?? "27015", 10);
 
@@ -238,6 +239,8 @@ export function parseGameMode(text: string): GameMode {
 
 export async function fetchStatus(): Promise<{
   status: ServerStatus;
+  /** Cvars read alongside the status poll; see `lib/cs2/cvars.ts`. */
+  cvars: { maxRounds: number | null };
   /**
    * `null` when RCON did not answer, meaning the roster is simply unknown for
    * this tick. That is NOT the same as "nobody is connected": treating a failed
@@ -251,7 +254,10 @@ export async function fetchStatus(): Promise<{
   const [statusOut, gameModeOut, dockerStats, inspect, serverIp] =
     await Promise.allSettled([
       rconExec("status"),
-      rconExec("game_type; game_mode"),
+      // Batched into the round-trip the poll already spends on game mode, so
+      // reading mp_maxrounds costs nothing. It was previously the hardcoded
+      // constant 24 in the match cache.
+      rconExec("game_type; game_mode; mp_maxrounds"),
       containerStats("cs2"),
       inspectContainer("cs2"),
       getPublicIp(),
@@ -352,7 +358,14 @@ export async function fetchStatus(): Promise<{
     updateProgress,
   };
 
-  return { status, players: statusText === "" ? null : parsed.players };
+  const cvarText = gameModeOut.status === "fulfilled" ? gameModeOut.value : "";
+  const maxRounds = asInt(parseCvarEcho(cvarText).values.get("mp_maxrounds"));
+
+  return {
+    status,
+    cvars: { maxRounds },
+    players: statusText === "" ? null : parsed.players,
+  };
 }
 
 /**

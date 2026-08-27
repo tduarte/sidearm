@@ -1,5 +1,8 @@
 import type {
   ChatMessage,
+  CvarGroup,
+  CvarSnapshot,
+  CvarState,
   ConsoleEvent,
   MapEntry,
   MatchHistoryDetail,
@@ -119,11 +122,22 @@ export const api = {
   setMatchPhase: (phase: MatchState["phase"]) =>
     request<MatchState>("/api/match/phase", json({ phase })),
 
-  togglePause: () =>
-    request<MatchState>("/api/match/pause", { method: "POST" }),
+  getCvars: (group: CvarGroup) =>
+    request<CvarSnapshot>(`/api/match/cvars?group=${encodeURIComponent(group)}`),
 
-  toggleDemo: () =>
-    request<MatchState>("/api/match/demo", { method: "POST" }),
+  setCvar: (name: string, value: string) =>
+    request<CvarState>("/api/match/cvars", json({ name, value })),
+
+  knife: (action: "setup" | "restore") =>
+    request<MatchState>("/api/match/knife", json({ action })),
+
+  swapTeams: () => request<MatchState>("/api/match/swap", json({})),
+
+  setPause: (action: "pause" | "unpause") =>
+    request<MatchState>("/api/match/pause", json({ action })),
+
+  setDemo: (action: "start" | "stop") =>
+    request<MatchState>("/api/match/demo", json({ action })),
 
   getConsole: () => request<ConsoleEvent[]>("/api/console"),
 

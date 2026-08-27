@@ -17,13 +17,20 @@ export type GameMode =
 
 export type Team = "CT" | "T" | "SPEC";
 
-export type MatchPhase =
-  | "idle"
-  | "warmup"
-  | "knife"
-  | "live"
-  | "halftime"
-  | "ended";
+/**
+ * Only phases the log stream can actually report.
+ *
+ * `knife` and `halftime` used to be members and were the panel's clearest lie:
+ * `setMatchPhase` mapped both to an empty command list, so nothing was sent,
+ * the cache was updated anyway and success was toasted. Neither can ever come
+ * back from the server either — `PHASE_TRIGGERS` in lib/cs2/log-parser.ts can
+ * only emit warmup, live and ended — so a phase the server can never confirm
+ * could only ever be the panel talking to itself.
+ *
+ * Both survive as explicit actions instead; see `knife()` and `mp_swapteams`
+ * in lib/api/server/real.ts.
+ */
+export type MatchPhase = "idle" | "warmup" | "live" | "ended";
 
 export type ConsoleLevel = "info" | "warn" | "error" | "chat";
 
@@ -160,9 +167,87 @@ export interface MatchState {
   phase: MatchPhase;
   score: { ct: number; t: number };
   round: number;
-  maxRounds: number;
-  paused: boolean;
-  demoRecording: boolean;
+  /**
+   * From `mp_maxrounds`, read on the status poll. `null` until the server has
+   * answered — it used to be the hardcoded constant 24, which is simply wrong
+   * on any server not running the default competitive length.
+   */
+  maxRounds: number | null;
+  /**
+   * CS2 has no `mp_paused` cvar and `status` carries no pause column, so this
+   * cannot be read back. It is also not instantaneous: `mp_pause_match` takes
+   * effect at the END of the current round, so even an optimistic flip is
+   * wrong for up to a couple of minutes.
+   *
+   * Hence a state rather than a boolean, and two explicit actions rather than
+   * a toggle — a toggle driven by panel memory sends the wrong command after
+   * any reload.
+   */
+  pause: PauseState;
+  /**
+   * Demo recording goes through GOTV (`tv_record`). `state` is `unknown` when
+   * the panel has not issued anything this process; `name` is the file it
+   * asked for, which is the panel's own record, not the server's.
+   */
+  demo: { state: DemoState; name: string | null };
+  /**
+   * Whether the panel has applied the knife-round cvars and holds a baseline
+   * to undo them with. Persisted, so a panel restart mid-knife can still put
+   * the server back.
+   */
+  knifeSetupApplied: boolean;
+}
+
+export type PauseState =
+  /** Not paused, as far as the panel knows. */
+  | "running"
+  /** `mp_pause_match` sent; CS2 applies it at the end of the current round. */
+  | "pause_requested"
+  | "paused"
+  /** Fresh panel, or after a map change — nothing observed yet. */
+  | "unknown";
+
+export type DemoState = "idle" | "recording" | "unknown";
+
+/** A cvar the panel is allowed to write, and how to render it. */
+export interface CvarSpec {
+  name: string;
+  label: string;
+  kind: "toggle" | "stepper";
+  /** Value that turns it on / raises it. */
+  on: string;
+  /** Value that turns it off, used when no baseline was captured. */
+  off: string;
+  min?: number;
+  max?: number;
+  /** Requires `sv_cheats 1`; the server refuses it otherwise. */
+  cheatProtected: boolean;
+}
+
+/**
+ * What the server said about one cvar.
+ *
+ * `value: null` means the server has not answered — NOT that the cvar is off.
+ * Collapsing those two is how a panel ends up confidently showing a state it
+ * never observed, so the UI renders unknown distinctly.
+ */
+export interface CvarState {
+  name: string;
+  value: string | null;
+  /** False when the build answered `Unknown command`. */
+  supported: boolean;
+  /** Value seen before the panel first changed it, for a truthful "off". */
+  baseline: string | null;
+  readAt: string | null;
+}
+
+export type CvarGroup = "practice";
+
+export interface CvarSnapshot {
+  group: CvarGroup;
+  cvars: CvarState[];
+  /** Null when the read failed outright. */
+  readAt: string | null;
 }
 
 export interface ConsoleEvent {
