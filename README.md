@@ -52,6 +52,36 @@ The panel is up in seconds. The CS2 server is not, and that is normal:
 Watch it with `docker compose logs -f cs2`. The dashboard shows download
 progress while it runs, so you do not have to.
 
+### What lives where, and what an update costs
+
+The ~64 GB of game files are **not in the Docker image**. They live in a named
+volume, `cs2-data`, which the container mounts. That split is what keeps updates
+cheap:
+
+| | Size | Where |
+|---|---|---|
+| CS2 game files | ~64 GB | `cs2-data` volume |
+| `sidearm-cs2` image | 582 MB to download | Docker image |
+| `sidearm` panel image | ~230 MB | Docker image |
+
+So nothing re-downloads 64 GB after the first boot:
+
+- **A CS2 game update** is `steamcmd` patching the volume in place on restart —
+  it transfers only the changed game files. The panel does this for you.
+- **A plugin bump** (a new Metamod/CounterStrikeSharp/MatchZy) changes one image
+  layer, so `docker compose pull` fetches about **75 MB**. The game files are
+  untouched.
+- **A panel update** pulls only the panel image.
+- If the **upstream base image** changes, the pull is nearer the full 582 MB.
+  Still not the game.
+
+The volume outlives the container: recreating, rebuilding or updating the image
+never touches it.
+
+> **The one command that does throw away 64 GB** is `docker compose down -v`.
+> The `-v` deletes the volumes, so the next start re-downloads the entire game.
+> Plain `docker compose down` keeps them.
+
 ### Did it work?
 
 The panel's dashboard answers all of this, but from a shell:
