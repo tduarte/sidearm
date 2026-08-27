@@ -12,17 +12,23 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  # Decides whether the Docker image could possibly have changed, so a docs- or
+  # Decides whether either Docker image could possibly have changed, so a docs- or
   # compose-only PR does not spend two minutes rebuilding a byte-identical image.
   #
-  # Deliberately a DENYLIST: anything not matched below counts as image-relevant.
-  # A path nobody thought about therefore still triggers a build, which wastes
-  # CPU; an allowlist would silently skip it and publish a stale image. Wrong in
-  # the cheap direction on purpose.
+  # Two images, two answers: `image` is the panel (built from the repo root),
+  # `cs2` is the dedicated-server wrapper in docker/cs2. They move independently
+  # -- a plugin bump is nothing to the panel, and a React change is nothing to
+  # the game server.
+  #
+  # The panel filter is deliberately a DENYLIST: anything not matched below
+  # counts as image-relevant. A path nobody thought about therefore still
+  # triggers a build, which wastes CPU; an allowlist would silently skip it and
+  # publish a stale image. Wrong in the cheap direction on purpose.
   changes:
     runs-on: ubuntu-latest
     outputs:
       image: ${{ steps.filter.outputs.image }}
+      cs2: ${{ steps.filter.outputs.cs2 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -43,6 +49,7 @@ jobs:
           if [ "$REF_TYPE" = "tag" ]; then
             echo "tag push - building"
             echo "image=true" >> "$GITHUB_OUTPUT"
+            echo "cs2=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -59,28 +66,46 @@ jobs:
           if [ -z "$files" ]; then
             echo "could not determine changed files - building to be safe"
             echo "image=true" >> "$GITHUB_OUTPUT"
+            echo "cs2=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           echo "changed files:"
           echo "$files" | sed 's/^/  /'
 
-          # None of these end up in the runtime image. The Dockerfile copies only
-          # .next, public, app, components, hooks, lib, server.ts and the config
-          # and manifest files, so tests and scripts cannot alter it -- and a type
-          # error in a test is still caught by `verify`, which always runs.
+          # None of these end up in the panel runtime image. The Dockerfile
+          # copies only .next, public, app, components, hooks, lib, server.ts and
+          # the config and manifest files, so tests and scripts cannot alter it
+          # -- and a type error in a test is still caught by `verify`, which
+          # always runs. docker/ is the CS2 wrapper, handled separately below.
           # .github/ is absent on purpose: changing CI should revalidate the build.
-          IGNORED='(\.md$|^docker-compose[^/]*\.ya?ml$|^\.env\.example$|^scripts/|^test/|^\.gitignore$|^LICENSE$)'
+          IGNORED='(\.md$|^docker-compose[^/]*\.ya?ml$|^\.env\.example$|^scripts/|^test/|^docker/|^\.gitignore$|^LICENSE$)'
 
           relevant=$(echo "$files" | grep -vE "$IGNORED" || true)
 
           if [ -n "$relevant" ]; then
-            echo "image-relevant changes:"
+            echo "panel-image-relevant changes:"
             echo "$relevant" | sed 's/^/  /'
             echo "image=true" >> "$GITHUB_OUTPUT"
           else
-            echo "no image-relevant changes - skipping the Docker build"
+            echo "no panel-image-relevant changes - skipping that Docker build"
             echo "image=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          # The CS2 wrapper is a small, self-contained context, so an ALLOWLIST
+          # is safe here in a way it is not for the panel: build.yml aside,
+          # nothing outside docker/cs2 can reach that image. The pinned plugin
+          # versions live in its Dockerfile, so a version bump lands here and
+          # gets its download URLs proved before anyone recreates a live server.
+          cs2_relevant=$(echo "$files" | grep -E '^docker/cs2/' || true)
+
+          if [ -n "$cs2_relevant" ]; then
+            echo "cs2-image-relevant changes:"
+            echo "$cs2_relevant" | sed 's/^/  /'
+            echo "cs2=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "no cs2-image-relevant changes - skipping that Docker build"
+            echo "cs2=false" >> "$GITHUB_OUTPUT"
           fi
 
   verify:
@@ -155,3 +180,62 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # The CS2 wrapper: BUILT, never PUSHED.
+  #
+  # Deliberate. AGENTS.md forbids `docker compose pull` on the server because it
+  # would replace a locally built image with CI's, and the compose file names
+  # this one `sidearm/cs2:latest` -- an unqualified tag with no registry, so it
+  # can only ever come from a local build. Publishing it would create exactly the
+  # substitute that rule exists to prevent.
+  #
+  # What CI is for here is the failure this image can have that the panel cannot:
+  # the pinned Metamod / CounterStrikeSharp / MatchZy URLs are fetched at build
+  # time and upstream deletes old releases. A bump that 404s should fail in a PR,
+  # not at 9pm on a server that has just dropped ten players to recreate.
+  build-cs2:
+    needs: [changes]
+    if: needs.changes.outputs.cs2 == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build the CS2 wrapper image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker/cs2
+          push: false
+          # Loaded into the local daemon so the step below can actually look
+          # inside it; without this the build stays in buildx's cache and
+          # `docker run` would fail on an unknown image.
+          load: true
+          tags: sidearm/cs2:ci
+          cache-from: type=gha,scope=cs2
+          cache-to: type=gha,mode=max,scope=cs2
+
+      # Proves the three archives actually unpacked where the boot-time
+      # installer looks for them -- a `curl | tar` that silently produced an
+      # empty tree would otherwise build green and fail on the server.
+      - name: Check the image carries what the installer expects
+        run: |
+          docker run --rm --entrypoint sh sidearm/cs2:ci -c '
+            set -eu
+            cat /opt/sidearm/plugins/.version
+            test -d /opt/sidearm/plugins/addons/metamod
+            test -d /opt/sidearm/plugins/addons/counterstrikesharp
+            # The one file that makes Metamod load CounterStrikeSharp, and the
+            # one the stacking order could plausibly lose: it ships inside the
+            # CSSharp archive under addons/metamod/, the directory Metamod's own
+            # tarball creates.
+            test -f /opt/sidearm/plugins/addons/metamod/counterstrikesharp.vdf
+            test -f /opt/sidearm/plugins/addons/counterstrikesharp/plugins/MatchZy/MatchZy.dll
+            test -x /opt/sidearm/install-plugins.sh
+            test -x /opt/sidearm/entrypoint.sh
+          '

@@ -11,7 +11,16 @@
 
 services:
   cs2:
-    image: joedwards32/cs2:latest
+    # Built locally rather than pulled: it layers pinned Metamod /
+    # CounterStrikeSharp / MatchZy onto the upstream image. Tagged so
+    # `docker compose build cs2` names it, the way the panel is handled.
+    #
+    # Rebuilding this recreates the container and drops everyone connected, so
+    # `scripts/deploy-lxc.sh` does NOT do it as part of a routine panel deploy —
+    # pass --with-cs2 deliberately, on an empty server.
+    image: sidearm/cs2:latest
+    build:
+      context: ./docker/cs2
     container_name: cs2
     restart: unless-stopped
     environment:

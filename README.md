@@ -9,6 +9,7 @@ Self-hosted Counter-Strike 2 dedicated server with a web admin panel — shipped
 - **Player management** — kick players from the UI
 - **RCON console** — run raw commands from the browser
 - **Chat & history** — live in-game chat feed and per-match history
+- **Competitive plugins built in** — Metamod, CounterStrikeSharp and MatchZy, pinned and installed on boot
 - **One-command stack** — CS2 + panel + socket proxy in a single compose file
 
 ## Quick start
@@ -157,7 +158,9 @@ the mount, recording still works but the files stay out of reach.
 
 ## Docker images
 
-Images are published automatically to the GitHub Container Registry on every push to `main` and on version tags.
+Two images, treated differently on purpose.
+
+**The panel** is published to the GitHub Container Registry on every push to `main` and on version tags.
 
 ```bash
 # Latest stable (built from main)
@@ -175,6 +178,43 @@ panel:
 ```
 
 To pin to a release, replace `latest` with the version tag (e.g. `1.0.0`).
+
+**The CS2 server image is built locally and never published.** `docker-compose.yml` tags it `sidearm/cs2:latest` — an unqualified name with no registry behind it, so it can only come from `docker compose build cs2`. CI builds the same context on every change to `docker/cs2/` to prove the pinned plugin downloads still resolve, but deliberately does not push: a published copy is exactly what a stray `docker compose pull` would substitute for your build.
+
+---
+
+## Plugins
+
+The CS2 image layers three pinned components onto `joedwards32/cs2`:
+
+| | What it does |
+|---|---|
+| [Metamod:Source](https://www.sourcemm.net/) | The plugin loader CS2 itself has no notion of |
+| [CounterStrikeSharp](https://github.com/roflmuffin/CounterStrikeSharp) | Runs .NET plugins on top of Metamod (bundles its own runtime) |
+| [MatchZy](https://github.com/shobhit-pathak/MatchZy) | Competitive match flow: knife round, veto, pauses, backups, per-round stats |
+
+Versions are pinned as `ARG`s at the top of `docker/cs2/Dockerfile`, so a plugin upgrade is a one-line commit with a history rather than something someone once did on a server by hand.
+
+**Plugins are installed at boot, not baked into a layer.** The game files live in the `cs2-data` volume, which is mounted *over* the directory an image layer would write to, and Docker only seeds a named volume from the image when the volume is empty — so anything the image put there would be invisible. The image carries the artifacts at `/opt/sidearm/plugins`; `docker/cs2/install-plugins.sh` copies them into the volume from the base image's `pre.sh` hook, which runs after `steamcmd` and before the server starts.
+
+That timing is the point. **Every CS2 update rewrites `gameinfo.gi`**, silently removing the search path Metamod needs — and the panel's own update flow is a container restart, so this would otherwise happen unattended, weeks later, producing a server that comes back healthy, accepts players, and has no plugins. The installer re-applies that line on every boot and skips the ~165 MB copy when the version stamp already matches.
+
+Your edits to `cfg/MatchZy/*.cfg` survive an image upgrade (the config tree is copied with `cp -rn`, which never clobbers). The `addons/` tree is overwritten, because it belongs to the image.
+
+To rebuild after a version bump — this recreates the container and drops everyone connected:
+
+```bash
+docker compose build cs2 && docker compose up -d cs2
+docker compose logs --tail=50 cs2 | grep sidearm    # what the installer did
+```
+
+Or with the deploy script, which asks first and tells you how many people are on:
+
+```bash
+./scripts/deploy-lxc.sh --with-cs2
+```
+
+Verify from inside the container over RCON with `meta list` and `css_plugins list`.
 
 ---
 
@@ -278,12 +318,11 @@ docker compose -f docker-compose.dev.yml down -v
 
 ## Known limits
 
-- **Knife rounds** are faked with cvars which is brittle for real competitive flow. Match plugins (Get5 / MatchZy) are out of scope for now — flagged in the match page.
-- **GSLT rotation** requires a full container recreate, not just restart.
-- **Config write-back** (Phase F) is not yet implemented — cvars are applied via RCON exec but not persisted to disk. Tickrate and max players are launch arguments and cannot be hot-applied.
-- **`uptimeSec`, `fps` and `tickrate`** in the dashboard are still placeholders.
-- **Log line format** is parsed permissively (with or without the Source `L ` prefix, with or without milliseconds), but has not yet been confirmed against a live CS2 server.
-- **`version` output format** is likewise parsed permissively (four known layouts) and not yet confirmed against a live CS2 server. If no build number can be read, the update check reports *unknown* and auto-restart never fires — it does not guess.
+- **Knife rounds without MatchZy** are approximated with cvars, which is brittle for real competitive flow — the match page says so. With the plugin loaded, MatchZy runs the knife round properly and the panel's own tiles stand down rather than fight it over the same cvars.
+- **GSLT rotation** requires a full container recreate, not just a restart — it is a launch argument.
+- **Launch-argument settings** (max players, ports, GOTV) cannot be hot-applied. The panel shows them read-only with the command to run on the host, rather than as fields that pretend to work.
+- **`fps` and `tickrate` are reported as unknown, not guessed.** CS2 answers `stats` with an empty string, and there is no tickrate to read — `-tickrate` was a CS:GO launch argument and CS2 is 64-tick with sub-tick.
+- **Log and `status` parsing is deliberately tolerant** of the layouts CS2 has shipped. Where a value cannot be read the panel reports *unknown* and takes no action on it — notably, the update check never auto-restarts on a build number it could not determine.
 
 ---
 
