@@ -30,6 +30,7 @@ import { Switch } from "@/components/ui/switch";
 import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
+import { suggestedSlots } from "@/lib/cs2/slots";
 import type { ServerConfig } from "@/lib/api/types";
 
 const schema = z.object({
@@ -204,7 +205,25 @@ function ConfigForm({ initial }: { initial: FormValues }) {
               render={({ field }) => (
                 <FormItem>
                   <FormLabel>Game mode</FormLabel>
-                  <Select onValueChange={field.onChange} value={field.value}>
+                  <Select
+                    onValueChange={(next) => {
+                      field.onChange(next);
+                      // The advertised count is per-mode: a 32-slot server runs
+                      // deathmatch at 16 and comp at 10 out of the same ceiling.
+                      // Leaving the old number behind is how a server ends up
+                      // advertising 10 slots for a 20-player casual game.
+                      const slots = suggestedSlots(
+                        next as FormValues["gameplay"]["mode"],
+                        status?.maxPlayers ?? null,
+                      );
+                      if (slots !== null) {
+                        form.setValue("gameplay.visibleMaxPlayers", slots, {
+                          shouldDirty: true,
+                        });
+                      }
+                    }}
+                    value={field.value}
+                  >
                     <FormControl>
                       <SelectTrigger>
                         <SelectValue />
@@ -229,18 +248,31 @@ function ConfigForm({ initial }: { initial: FormValues }) {
                 <FormItem>
                   <FormLabel>Advertised slots</FormLabel>
                   <FormControl>
-                    <Input type="number" min={1} max={64} {...field} />
+                    <Input
+                      type="number"
+                      min={1}
+                      max={status?.maxPlayers ?? 64}
+                      {...field}
+                    />
                   </FormControl>
                   <FormDescription>
                     <span className="font-mono">sv_visiblemaxplayers</span> —
-                    what the server browser shows.{" "}
+                    what the server browser shows, and what &ldquo;server
+                    full&rdquo; is measured against. Changing the game mode
+                    above moves this to that mode&apos;s usual size.{" "}
                     {status?.maxPlayers != null && (
                       <>
-                        The real ceiling is{" "}
+                        The ceiling is{" "}
                         <span className="font-medium text-foreground">
                           {status.maxPlayers}
                         </span>
-                        , set at boot and not changeable here.
+                        , allocated at boot from{" "}
+                        <span className="font-mono">CS2_MAXPLAYERS</span>.
+                        Raising it needs{" "}
+                        <span className="font-mono">
+                          docker compose up -d --force-recreate cs2
+                        </span>{" "}
+                        on the host — the panel cannot do it.
                       </>
                     )}
                   </FormDescription>
