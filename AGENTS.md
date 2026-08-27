@@ -75,6 +75,25 @@ substitute.
   `Gameserver logged on to Steam, assigned identity steamid:...` and reports `secure public` in
   RCON `status`.
 
+## MatchZy: what it owns, and what it will not tell you
+
+- **`get5_status` is empty in pug mode.** It reports `gamestate: "none"` with every field null unless a
+  Get5-style match config has been *loaded*. A full `.start` pug — knife round, hostname takeover, a
+  row in MatchZy's own database — reports nothing. Verified on the live server. So it is a match-state
+  source only for panel-loaded matches, and a plugin-liveness probe otherwise.
+- **`matchid` must be an integer.** The Get5 spec says string; MatchZy answers
+  `[LoadMatchDataCommand] matchid should be an integer!` and loads nothing. The panel keeps a numeric
+  `match_number` beside its human-readable id for this.
+- **MatchZy rewrites `hostname`** from `matchzy_hostname_format` on every match start. Its default is
+  `MatchZy | {TEAM1} vs {TEAM2}`. The cvar **cannot be cleared over RCON** — CS2 treats a bare or `""`
+  argument as a read — so `putConfig` points the format at the panel's own hostname instead.
+- **Match stats live in MatchZy's SQLite**, not in the webhook (eight events, no retry, no ordering)
+  and not in `get5_status`. The panel reads it through the existing `/cs2:ro` mount. Steam64 columns
+  must be read with `safeIntegers`, and its `DATETIME` values are UTC with no zone marker.
+- While a match is loaded MatchZy owns the map cycle, ~100 gameplay cvars (`live.cfg`) and
+  `tv_record`. `matchzyOwnsMatch()` in `real.ts` is the gate; rotation, config re-apply and demo
+  control all check it.
+
 ## Verifying a running server
 
 Query it from outside with an **A2S_INFO** UDP packet (`\xFF\xFF\xFF\xFF\x54Source Engine

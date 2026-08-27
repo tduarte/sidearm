@@ -234,6 +234,21 @@ Or with the deploy script, which asks first and tells you how many people are on
 
 Verify from inside the container over RCON with `meta list` and `css_plugins list`.
 
+### Running a match
+
+With MatchZy loaded, **Match Control → Run a match** sets one up: team names, players picked off the live roster, a map pool and a series length. Saving stores the definition; loading it makes CS2 fetch the config over HTTP and start warmup.
+
+Loading a match changes the map and restarts the game for everyone, so it confirms first with a live headcount.
+
+Two things the panel handles for you because the server will not tell you about them:
+
+- **Bots are filtered out of the roster.** They have no Steam identity, so MatchZy never recognises them and the match sits in warmup forever with nothing on screen explaining why.
+- **A map pool exactly as long as the series has nothing to veto**, so MatchZy silently skips the veto whatever you asked for. The form says so while you are picking, not after.
+
+While a match is loaded, **MatchZy owns the map cycle, the gameplay cvars and demo recording**, and the panel stands down from all three: rotation does not fire on Game Over, the Config page holds back the settings `live.cfg` sets (identity and password still apply), and demo recording refuses with a reason. `get5_status` also becomes readable, which is the first time the panel can *read* pause state rather than infer it — CS2 exposes no `mp_paused` cvar and no pause column in `status`.
+
+Note the panel gives MatchZy an **integer** `matchid`, assigned on save. The Get5 spec this schema follows describes it as a string; MatchZy rejects that with `matchid should be an integer!` in the server console and loads nothing.
+
 ### Where match history comes from
 
 With MatchZy installed, the History page shows **MatchZy's own records** — real team names, real scores, and a scoreboard with damage, headshot rate, flashes, opening duels and clutches. None of that is derivable from the log stream, which is all the panel has otherwise.
