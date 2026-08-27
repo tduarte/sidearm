@@ -44,6 +44,7 @@ import {
 } from "@/components/match/match-action-tile";
 import { LoadError } from "@/components/load-error";
 import { CvarTile } from "@/components/match/cvar-tile";
+import { DemoList } from "@/components/match/demo-list";
 import { useCvarGroup } from "@/lib/hooks/use-cvar-group";
 import { asBool } from "@/lib/cs2/cvars";
 import { practiceSpec } from "@/lib/cs2/practice";
@@ -368,6 +369,8 @@ export default function MatchPage() {
               </MatchActionGrid>
             </CardContent>
           </Card>
+
+          <DemoList />
         </TabsContent>
 
         <TabsContent value="casual" className="mt-4">

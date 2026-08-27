@@ -1,7 +1,12 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { ConsolePane } from "@/components/console-pane";
 
 export default function ConsolePage() {
@@ -10,26 +15,26 @@ export default function ConsolePage() {
       <div>
         <h1 className="text-2xl font-semibold">Console</h1>
         <p className="text-sm text-muted-foreground">
-          Live server log and RCON command input.
+          Live server log and RCON input.
         </p>
       </div>
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-base">Live output</CardTitle>
+          {/*
+            The "Chat only" tab was removed: History already holds the full,
+            searchable chat log, and rendering the same messages on two pages
+            meant neither was obviously the place to look. The `chat` filter
+            below still isolates chat within the live stream, which is the part
+            that belongs here.
+          */}
+          <CardDescription>
+            Everything the server logs, as it happens. Chat history lives in
+            History.
+          </CardDescription>
         </CardHeader>
         <CardContent>
-          <Tabs defaultValue="all">
-            <TabsList>
-              <TabsTrigger value="all">All</TabsTrigger>
-              <TabsTrigger value="chat">Chat only</TabsTrigger>
-            </TabsList>
-            <TabsContent value="all" className="mt-4">
-              <ConsolePane />
-            </TabsContent>
-            <TabsContent value="chat" className="mt-4">
-              <ConsolePane chatOnly />
-            </TabsContent>
-          </Tabs>
+          <ConsolePane />
         </CardContent>
       </Card>
     </div>

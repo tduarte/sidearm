@@ -149,6 +149,10 @@ Every `TV_*` variable is a launch argument, so changing one needs
 `docker compose up -d --force-recreate cs2` — do it while nobody is playing.
 Turn GOTV off with `TV_ENABLE=0` in `.env` if you don't want it.
 
+Recorded demos land in the CS2 volume. The panel mounts that volume **read-only**
+at `/cs2` so it can list them and hand them to you from Match Control; without
+the mount, recording still works but the files stay out of reach.
+
 ---
 
 ## Docker images
