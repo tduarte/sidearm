@@ -1,13 +1,13 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useForm, type Resolver } from "react-hook-form";
+import { useForm, useWatch, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { FloppyDisk } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Form,
   FormControl,
@@ -27,36 +27,24 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadError } from "@/components/load-error";
 import { api } from "@/lib/api/client";
+import { useServerStatus } from "@/lib/hooks/use-server-status";
 import type { ServerConfig } from "@/lib/api/types";
 
 const schema = z.object({
   identity: z.object({
     hostname: z.string().min(1).max(128),
-    tagsInput: z.string(),
-    region: z.enum(["us-east", "us-west", "eu-west", "ap-southeast", "sa-east"]),
   }),
   access: z.object({
     serverPassword: z.string(),
-    // Loaded blank: the server never sends secrets back. Rotating these needs a
-    // container recreate, so the form does not attempt to apply them.
-    rconPassword: z.string(),
-    gsltToken: z.string(),
   }),
   gameplay: z.object({
-    mode: z.enum(["competitive", "wingman", "deathmatch", "casual", "practice", "custom"]),
-    tickrate: z.enum(["64", "128"]),
-    maxPlayers: z.coerce.number().min(2).max(64),
+    mode: z.enum(["competitive", "wingman", "deathmatch", "casual", "custom"]),
+    visibleMaxPlayers: z.coerce.number().min(1).max(64),
     botsEnabled: z.boolean(),
     botDifficulty: z.enum(["0", "1", "2", "3"]),
     botQuota: z.coerce.number().min(0).max(32),
-  }),
-  networking: z.object({
-    port: z.coerce.number().min(1024).max(65535),
-    tvPort: z.coerce.number().min(1024).max(65535),
-    workshopCollectionId: z.string(),
   }),
 });
 
@@ -64,41 +52,29 @@ type FormValues = z.infer<typeof schema>;
 
 function toForm(c: ServerConfig): FormValues {
   return {
-    identity: {
-      hostname: c.identity.hostname,
-      tagsInput: c.identity.tags.join(", "),
-      region: c.identity.region as FormValues["identity"]["region"],
-    },
-    access: { ...c.access },
+    identity: { hostname: c.identity.hostname },
+    access: { serverPassword: c.access.serverPassword },
     gameplay: {
-      mode: c.gameplay.mode,
-      tickrate: String(c.gameplay.tickrate) as "64" | "128",
-      maxPlayers: c.gameplay.maxPlayers,
+      mode: c.gameplay.mode as FormValues["gameplay"]["mode"],
+      visibleMaxPlayers: c.gameplay.visibleMaxPlayers,
       botsEnabled: c.gameplay.botsEnabled,
       botDifficulty: String(c.gameplay.botDifficulty) as "0" | "1" | "2" | "3",
       botQuota: c.gameplay.botQuota,
     },
-    networking: { ...c.networking },
   };
 }
 
 function fromForm(v: FormValues): ServerConfig {
   return {
-    identity: {
-      hostname: v.identity.hostname,
-      tags: v.identity.tagsInput.split(",").map((s) => s.trim()).filter(Boolean),
-      region: v.identity.region,
-    },
-    access: v.access,
+    identity: { hostname: v.identity.hostname },
+    access: { serverPassword: v.access.serverPassword },
     gameplay: {
       mode: v.gameplay.mode,
-      tickrate: Number(v.gameplay.tickrate) as 64 | 128,
-      maxPlayers: v.gameplay.maxPlayers,
+      visibleMaxPlayers: v.gameplay.visibleMaxPlayers,
       botsEnabled: v.gameplay.botsEnabled,
       botDifficulty: Number(v.gameplay.botDifficulty) as 0 | 1 | 2 | 3,
       botQuota: v.gameplay.botQuota,
     },
-    networking: v.networking,
   };
 }
 
@@ -121,6 +97,7 @@ export default function ConfigPage() {
 
 function ConfigForm({ initial }: { initial: FormValues }) {
   const qc = useQueryClient();
+  const { data: status } = useServerStatus();
   const form = useForm<FormValues>({
     resolver: zodResolver(schema) as unknown as Resolver<FormValues>,
     defaultValues: initial,
@@ -130,10 +107,19 @@ function ConfigForm({ initial }: { initial: FormValues }) {
     mutationFn: (v: FormValues) => api.putConfig(fromForm(v)),
     meta: { action: "Saving the config" },
     onSuccess: () => {
-      toast.success("Config saved");
+      toast.success("Applied to the running server", {
+        description: "Saved too, so a restart will not undo it.",
+      });
       qc.invalidateQueries({ queryKey: ["config"] });
       qc.invalidateQueries({ queryKey: ["status"] });
     },
+  });
+
+  // useWatch rather than form.watch: the latter returns a function the React
+  // Compiler cannot memoize, which makes it skip optimising the component.
+  const botsEnabled = useWatch({
+    control: form.control,
+    name: "gameplay.botsEnabled",
   });
 
   return (
@@ -145,293 +131,192 @@ function ConfigForm({ initial }: { initial: FormValues }) {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold">Config</h1>
+            {/*
+              The old subtitle said "Changes take effect on next server
+              restart", which was backwards in both directions: these apply
+              immediately, and they used to be LOST on restart.
+            */}
             <p className="text-sm text-muted-foreground">
-              Changes take effect on next server restart.
+              Applied immediately over RCON, and re-applied if the server
+              restarts.
             </p>
           </div>
-          <Button
-            type="submit"
-            disabled={save.isPending || !form.formState.isDirty}
-          >
+          <Button type="submit" disabled={!form.formState.isDirty || save.isPending}>
             <FloppyDisk className="h-4 w-4" />
             Save changes
           </Button>
         </div>
 
-        <Tabs defaultValue="identity">
-          <TabsList>
-            <TabsTrigger value="identity">Identity</TabsTrigger>
-            <TabsTrigger value="access">Access</TabsTrigger>
-            <TabsTrigger value="gameplay">Gameplay</TabsTrigger>
-            <TabsTrigger value="networking">Networking</TabsTrigger>
-          </TabsList>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Identity</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FormField
+              control={form.control}
+              name="identity.hostname"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Server name</FormLabel>
+                  <FormControl>
+                    <Input {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    Shown in the server browser. Sent as{" "}
+                    <span className="font-mono">hostname</span>.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="access.serverPassword"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Server password</FormLabel>
+                  <FormControl>
+                    <Input type="password" placeholder="(no password)" {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    Empty means anyone can join. Write-only — the panel never
+                    reads it back.
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </CardContent>
+        </Card>
 
-          <TabsContent value="identity" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Server identity</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="identity.hostname"
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Hostname</FormLabel>
-                      <FormControl><Input {...field} /></FormControl>
-                      <FormDescription>Displayed in the server browser.</FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="identity.tagsInput"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tags</FormLabel>
-                      <FormControl><Input placeholder="comma, separated" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="identity.region"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Region</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="us-east">US East</SelectItem>
-                          <SelectItem value="us-west">US West</SelectItem>
-                          <SelectItem value="eu-west">EU West</SelectItem>
-                          <SelectItem value="ap-southeast">AP Southeast</SelectItem>
-                          <SelectItem value="sa-east">SA East</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Gameplay</CardTitle>
+            <CardDescription>
+              A game-mode change only takes effect when the map reloads, so
+              switch modes from Match Control if you want it applied now.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid gap-4 md:grid-cols-2">
+            <FormField
+              control={form.control}
+              name="gameplay.mode"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Game mode</FormLabel>
+                  <Select onValueChange={field.onChange} value={field.value}>
+                    <FormControl>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      <SelectItem value="competitive">Competitive</SelectItem>
+                      <SelectItem value="wingman">Wingman</SelectItem>
+                      <SelectItem value="casual">Casual</SelectItem>
+                      <SelectItem value="deathmatch">Deathmatch</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="gameplay.visibleMaxPlayers"
+              render={({ field }) => (
+                <FormItem>
+                  <FormLabel>Advertised slots</FormLabel>
+                  <FormControl>
+                    <Input type="number" min={1} max={64} {...field} />
+                  </FormControl>
+                  <FormDescription>
+                    <span className="font-mono">sv_visiblemaxplayers</span> —
+                    what the server browser shows.{" "}
+                    {status?.maxPlayers != null && (
+                      <>
+                        The real ceiling is{" "}
+                        <span className="font-medium text-foreground">
+                          {status.maxPlayers}
+                        </span>
+                        , set at boot and not changeable here.
+                      </>
+                    )}
+                  </FormDescription>
+                  <FormMessage />
+                </FormItem>
+              )}
+            />
+          </CardContent>
+        </Card>
 
-          <TabsContent value="access" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Access</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="access.serverPassword"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Server password</FormLabel>
-                      <FormControl><Input type="password" placeholder="(empty = public)" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="access.rconPassword"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>RCON password</FormLabel>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Bots</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <FormField
+              control={form.control}
+              name="gameplay.botsEnabled"
+              render={({ field }) => (
+                <FormItem className="flex items-center justify-between rounded-none border p-3">
+                  <div>
+                    <FormLabel>Fill with bots</FormLabel>
+                    <FormDescription>
+                      Off sends <span className="font-mono">bot_quota 0</span>.
+                    </FormDescription>
+                  </div>
+                  <FormControl>
+                    <Switch checked={field.value} onCheckedChange={field.onChange} />
+                  </FormControl>
+                </FormItem>
+              )}
+            />
+            <div className="grid gap-4 md:grid-cols-2">
+              <FormField
+                control={form.control}
+                name="gameplay.botQuota"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Bot count</FormLabel>
+                    <FormControl>
+                      <Input type="number" min={0} max={32} disabled={!botsEnabled} {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+              <FormField
+                control={form.control}
+                name="gameplay.botDifficulty"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>Difficulty</FormLabel>
+                    <Select
+                      onValueChange={field.onChange}
+                      value={field.value}
+                      disabled={!botsEnabled}
+                    >
                       <FormControl>
-                        <Input type="password" placeholder="•••••••• (set in .env)" disabled {...field} />
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
                       </FormControl>
-                      <FormDescription>
-                        Set via <code>RCON_PASSWORD</code> in <code>.env</code>. Changing it needs{" "}
-                        <code>docker compose up -d --force-recreate cs2</code>.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="access.gsltToken"
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>GSLT token</FormLabel>
-                      <FormControl>
-                        <Input placeholder="(set in .env)" disabled {...field} />
-                      </FormControl>
-                      <FormDescription>
-                        Set via <code>GSLT</code> in <code>.env</code>. It is a launch argument, so
-                        changing it needs <code>docker compose up -d --force-recreate cs2</code>.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="gameplay" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Gameplay</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="gameplay.mode"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Game mode</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="competitive">Competitive</SelectItem>
-                          <SelectItem value="wingman">Wingman</SelectItem>
-                          <SelectItem value="deathmatch">Deathmatch</SelectItem>
-                          <SelectItem value="casual">Casual</SelectItem>
-                          <SelectItem value="practice">Practice</SelectItem>
-                          <SelectItem value="custom">Custom</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="gameplay.tickrate"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Tickrate</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="64">64 tick</SelectItem>
-                          <SelectItem value="128">128 tick</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="gameplay.maxPlayers"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Max players</FormLabel>
-                      <FormControl><Input type="number" min={2} max={64} {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="gameplay.botsEnabled"
-                  render={({ field }) => (
-                    <FormItem className="flex items-center justify-between rounded-md border p-3">
-                      <div>
-                        <FormLabel>Bots enabled</FormLabel>
-                        <FormDescription>Fill empty slots with AI bots.</FormDescription>
-                      </div>
-                      <FormControl>
-                        <Switch checked={field.value} onCheckedChange={field.onChange} />
-                      </FormControl>
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="gameplay.botDifficulty"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Bot difficulty</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                        </FormControl>
-                        <SelectContent>
-                          <SelectItem value="0">Easy</SelectItem>
-                          <SelectItem value="1">Normal</SelectItem>
-                          <SelectItem value="2">Hard</SelectItem>
-                          <SelectItem value="3">Expert</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="gameplay.botQuota"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Bot quota</FormLabel>
-                      <FormControl><Input type="number" min={0} max={32} {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="networking" className="mt-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-base">Networking</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 md:grid-cols-2">
-                <FormField
-                  control={form.control}
-                  name="networking.port"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Game port</FormLabel>
-                      <FormControl><Input type="number" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="networking.tvPort"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>GOTV port</FormLabel>
-                      <FormControl><Input type="number" {...field} /></FormControl>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-                <FormField
-                  control={form.control}
-                  name="networking.workshopCollectionId"
-                  render={({ field }) => (
-                    <FormItem className="md:col-span-2">
-                      <FormLabel>Workshop collection ID</FormLabel>
-                      <FormControl><Input placeholder="optional" {...field} /></FormControl>
-                      <FormDescription>
-                        All maps in this collection become available on the server.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                      <SelectContent>
+                        <SelectItem value="0">Easy</SelectItem>
+                        <SelectItem value="1">Normal</SelectItem>
+                        <SelectItem value="2">Hard</SelectItem>
+                        <SelectItem value="3">Expert</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+            </div>
+          </CardContent>
+        </Card>
       </form>
     </Form>
   );

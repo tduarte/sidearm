@@ -5,7 +5,6 @@ import { usePathname } from "next/navigation";
 import {
   Gauge,
   Terminal,
-  UsersThree,
   MapTrifold,
   Gear,
   ClockCounterClockwise,
@@ -28,9 +27,10 @@ import {
 import { usePanelInfo } from "@/components/panel-info";
 
 const NAV = [
+  // No Players entry: the roster lives on the Dashboard now, and a nav item
+  // that bounces you somewhere else is worse than no nav item.
   { href: "/dashboard", label: "Dashboard", icon: Gauge },
   { href: "/match", label: "Match Control", icon: Trophy },
-  { href: "/players", label: "Players", icon: UsersThree },
   { href: "/maps", label: "Maps", icon: MapTrifold },
   { href: "/console", label: "Console", icon: Terminal },
   { href: "/config", label: "Config", icon: Sliders },

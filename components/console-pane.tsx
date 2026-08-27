@@ -13,6 +13,7 @@ import {
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api/client";
 import { useConsoleStream } from "@/lib/hooks/use-console-stream";
+import { useConsolePrefs } from "@/lib/hooks/use-console-prefs";
 import type { ConsoleLevel } from "@/lib/api/types";
 
 const LEVEL_COLOR: Record<ConsoleLevel, string> = {
@@ -27,7 +28,14 @@ export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
   const [levels, setLevels] = useState<ConsoleLevel[]>(
     chatOnly ? ["chat"] : ["info", "warn", "error", "chat"],
   );
-  const [autoscroll, setAutoscroll] = useState(true);
+  // Derived rather than copied into state: the saved preference is the
+  // default, and a toggle in this session overrides it until unmount. The
+  // Settings switch that claimed to control this was never wired to anything.
+  const { autoscroll: autoscrollDefault } = useConsolePrefs();
+  const [autoscrollOverride, setAutoscrollOverride] = useState<boolean | null>(
+    null,
+  );
+  const autoscroll = autoscrollOverride ?? autoscrollDefault;
   const [input, setInput] = useState("");
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
@@ -106,7 +114,7 @@ export function ConsolePane({ chatOnly = false }: { chatOnly?: boolean }) {
             <Button
               size="sm"
               variant="ghost"
-              onClick={() => setAutoscroll((v) => !v)}
+              onClick={() => setAutoscrollOverride(!autoscroll)}
               title={autoscroll ? "Pause autoscroll" : "Resume autoscroll"}
             >
               {autoscroll ? (

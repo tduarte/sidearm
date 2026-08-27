@@ -51,7 +51,7 @@ import {
   assertManagedCvarName,
   safeToken,
 } from "@/lib/cs2/sanitize";
-import { cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
+import { asInt, cvarReadCommand, parseCvarEcho } from "@/lib/cs2/cvars";
 import { mapDisplayName, parseMapList } from "@/lib/cs2/maps";
 import {
   EMPTY_ROTATION,
@@ -712,31 +712,45 @@ export const realAdapter = {
   },
 
   async getConfig(): Promise<ServerConfig> {
+    // Read from the server rather than invented. botsEnabled, botDifficulty
+    // and botQuota used to be the constants false/1/0 regardless of what the
+    // server had, so the form opened showing settings nobody had chosen.
+    let bots = { quota: 0, difficulty: 1 };
+    let visible = 0;
+    try {
+      const read = parseCvarEcho(
+        await rconExec(
+          cvarReadCommand(["bot_quota", "bot_difficulty", "sv_visiblemaxplayers"]),
+        ),
+      );
+      bots = {
+        quota: asInt(read.values.get("bot_quota")) ?? 0,
+        difficulty: asInt(read.values.get("bot_difficulty")) ?? 1,
+      };
+      visible = asInt(read.values.get("sv_visiblemaxplayers")) ?? 0;
+    } catch {
+      // RCON silent: fall through with defaults rather than failing the page.
+    }
+
+    const difficulty = Math.min(3, Math.max(0, bots.difficulty)) as 0 | 1 | 2 | 3;
+
     return {
       identity: {
         hostname: cache().status?.hostname ?? "CS2 Server",
-        tags: [],
-        region: "local",
       },
       // Secrets are write-only. `GET /api/config` previously returned the live
       // RCON password and GSLT in plain JSON to any browser that asked.
       access: {
         serverPassword: REDACTED,
-        rconPassword: REDACTED,
-        gsltToken: REDACTED,
       },
       gameplay: {
         mode: cache().status?.gameMode ?? "competitive",
-        tickrate: 64,
-        maxPlayers: cache().status?.maxPlayers ?? 10,
-        botsEnabled: false,
-        botDifficulty: 1,
-        botQuota: 0,
-      },
-      networking: {
-        port: cache().status?.port ?? 27015,
-        tvPort: 27020,
-        workshopCollectionId: "",
+        // -1 is the default meaning "no override"; show the real ceiling then.
+        visibleMaxPlayers:
+          visible > 0 ? visible : (cache().status?.maxPlayers ?? 10),
+        botsEnabled: bots.quota > 0,
+        botDifficulty: difficulty,
+        botQuota: bots.quota,
       },
     };
   },
@@ -759,7 +773,7 @@ export const realAdapter = {
       `game_mode ${gm}`,
       // Was `mp_maxrounds ${maxPlayers}` — max *players* written to max
       // *rounds*, so changing the slot count silently rewrote match length.
-      `sv_visiblemaxplayers ${safeInt(cfg.gameplay.maxPlayers, 1, 64, 10)}`,
+      `sv_visiblemaxplayers ${safeInt(cfg.gameplay.visibleMaxPlayers, 1, 64, 10)}`,
       `bot_quota ${cfg.gameplay.botsEnabled ? safeInt(cfg.gameplay.botQuota, 0, 64, 0) : 0}`,
       `bot_difficulty ${safeInt(cfg.gameplay.botDifficulty, 0, 3, 1)}`,
     ];
@@ -776,12 +790,12 @@ export const realAdapter = {
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
 
-    // Fields that cannot be hot-applied are reported back rather than silently
-    // dropped: tickrate and maxplayers are launch arguments, and rotating the
-    // GSLT or RCON password needs the container recreated.
+    // Every field in ServerConfig is applied above; the ones that could not be
+    // are no longer part of the type. The password comes back redacted because
+    // it is write-only.
     return {
       ...cfg,
-      access: { serverPassword: REDACTED, rconPassword: REDACTED, gsltToken: REDACTED },
+      access: { serverPassword: REDACTED },
     };
   },
 
