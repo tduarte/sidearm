@@ -39,6 +39,7 @@ import {
   type BanRecord,
 } from "@/lib/cs2/bans";
 import { deleteBan, insertBan, listBans } from "@/lib/db/bans";
+import { getConsoleEvents, insertConsoleEvent } from "@/lib/db/console";
 import { mirrorThumbnail } from "@/lib/maps/thumbnails";
 import {
   assertCommandAllowed,
@@ -341,6 +342,51 @@ function nowStamp(): string {
   return new Date().toISOString().replace(/[-:]/g, "").replace("T", "-").slice(0, 15);
 }
 
+const APPLIED_CVARS_KEY = "config.applied";
+
+/** The exact commands last applied by `putConfig`, for replay after a restart. */
+function saveAppliedCvars(cvars: string[]): void {
+  try {
+    setSavedConfig(APPLIED_CVARS_KEY, cvars);
+  } catch { /* non-critical */ }
+}
+
+/**
+ * Re-applies the last saved config after the game server restarted.
+ *
+ * These are all in-memory cvars, so every restart drops them — including the
+ * panel's own auto-update restart, which meant applying a CS2 update quietly
+ * reset the hostname, password, game mode and bot settings.
+ *
+ * Deliberately not silent: the console line is how an admin finds out this
+ * happened at all.
+ */
+export async function reapplyConfig(): Promise<void> {
+  let cvars: string[] | null;
+  try {
+    cvars = getSavedConfig<string[]>(APPLIED_CVARS_KEY);
+  } catch {
+    return;
+  }
+  if (!cvars || cvars.length === 0) return;
+
+  let applied = 0;
+  for (const cvar of cvars) {
+    try {
+      await rconExec(cvar);
+      applied += 1;
+    } catch { /* keep going; one bad cvar must not block the rest */ }
+  }
+
+  const ev = makeConsoleEvent(
+    applied === cvars.length ? "info" : "warn",
+    "admin",
+    `Re-applied ${applied}/${cvars.length} saved config cvars after the server restarted`,
+  );
+  appendConsole(ev);
+  bus.emit({ type: "console.line", event: ev });
+}
+
 /**
  * Lifts bans whose clock has run out.
  *
@@ -521,6 +567,9 @@ export function updateMatchState(match: Partial<MatchState>) {
 export function appendConsole(event: ConsoleEvent) {
   cache().console.push(event);
   if (cache().console.length > 500) cache().console.shift();
+  // Also to disk, so a deploy or a panel crash does not throw away the log
+  // someone is reading to work out what went wrong.
+  try { insertConsoleEvent(event); } catch { /* non-critical */ }
 }
 
 export function appendChat(msg: ChatMessage) {
@@ -716,6 +765,12 @@ export const realAdapter = {
     ];
 
     for (const cvar of cvars) await rconExec(cvar);
+
+    // Remembered so a container restart does not silently undo it. Every cvar
+    // here lives in the game server's memory, and restarting IS how a CS2
+    // update is applied — so the panel's own auto-update was reverting the
+    // admin's settings and never mentioning it.
+    saveAppliedCvars(cvars);
 
     const ev = makeConsoleEvent("info", "admin", "Config applied via RCON");
     appendConsole(ev);
@@ -1139,6 +1194,13 @@ export const realAdapter = {
   },
 
   async getConsole(): Promise<ConsoleEvent[]> {
+    // Disk first: after a panel restart the in-memory ring is empty but the
+    // log is not, and an empty console is exactly the wrong thing to show
+    // someone who just restarted the panel to investigate something.
+    try {
+      const stored = getConsoleEvents(500);
+      if (stored.length > 0) return stored;
+    } catch { /* fall back to memory */ }
     return cache().console.slice(-500);
   },
 

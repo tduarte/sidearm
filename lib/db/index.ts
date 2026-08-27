@@ -59,6 +59,15 @@ function migrate(db: Database.Database): void {
       PRIMARY KEY (match_id, round)
     );
 
+    CREATE TABLE IF NOT EXISTS console_log (
+      id       TEXT PRIMARY KEY,
+      ts       TEXT NOT NULL,
+      level    TEXT NOT NULL,
+      source   TEXT NOT NULL,
+      message  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS console_log_ts ON console_log (ts);
+
     CREATE TABLE IF NOT EXISTS bans (
       steam_id   TEXT PRIMARY KEY,
       name       TEXT NOT NULL,

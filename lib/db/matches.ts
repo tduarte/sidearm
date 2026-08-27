@@ -17,6 +17,62 @@ export function beginMatch(map: string, gameMode: GameMode): string {
   return id;
 }
 
+/**
+ * The match left open by a previous panel process, if any.
+ *
+ * `activeMatchId` used to be a closure variable in server.ts, so a panel
+ * restart mid-match orphaned the row: `ended_at` stayed NULL forever, which
+ * `getMatches` filters out, so it was invisible and never reaped. Recovering it
+ * on boot means the match keeps recording instead of silently vanishing.
+ */
+export function findOpenMatch(): { id: string; startedAt: string } | null {
+  const row = getDb()
+    .prepare(
+      `SELECT id, started_at FROM matches
+        WHERE ended_at IS NULL ORDER BY started_at DESC LIMIT 1`,
+    )
+    .get() as { id: string; started_at: string } | undefined;
+  return row ? { id: row.id, startedAt: row.started_at } : null;
+}
+
+/**
+ * Closes matches left open longer than any real game could run.
+ *
+ * Without this an orphan is permanent: invisible to history and blocking
+ * nothing, but accumulating. The score is whatever the rounds recorded, so a
+ * partially-recorded match still shows up rather than being deleted.
+ */
+export function reapStaleMatches(maxAgeMs = 6 * 60 * 60 * 1000): number {
+  const cutoff = new Date(Date.now() - maxAgeMs).toISOString();
+  const db = getDb();
+  const stale = db
+    .prepare(`SELECT id FROM matches WHERE ended_at IS NULL AND started_at < ?`)
+    .all(cutoff) as Array<{ id: string }>;
+
+  for (const { id } of stale) {
+    const last = db
+      .prepare(
+        `SELECT ct_score, t_score FROM match_rounds
+          WHERE match_id = ? ORDER BY round DESC LIMIT 1`,
+      )
+      .get(id) as { ct_score: number; t_score: number } | undefined;
+    const ct = last?.ct_score ?? 0;
+    const t = last?.t_score ?? 0;
+    db.prepare(
+      `UPDATE matches
+          SET ended_at = ?, ct_score = ?, t_score = ?, winner = ?
+        WHERE id = ?`,
+    ).run(
+      new Date().toISOString(),
+      ct,
+      t,
+      ct > t ? "CT" : t > ct ? "T" : "DRAW",
+      id,
+    );
+  }
+  return stale.length;
+}
+
 export function endMatch(
   matchId: string,
   score: { ct: number; t: number },

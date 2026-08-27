@@ -57,10 +57,10 @@ app.prepare().then(async () => {
   const { updateCache, realAdapter } = await import("./lib/api/server/real");
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
-  const { beginMatch, endMatch, insertRound } = await import("./lib/db/matches");
-  const { advanceRotation, reapplyBans, sweepExpiredBans } = await import(
-    "./lib/api/server/real"
-  );
+  const { beginMatch, endMatch, findOpenMatch, insertRound, reapStaleMatches } =
+    await import("./lib/db/matches");
+  const { advanceRotation, reapplyBans, reapplyConfig, sweepExpiredBans } =
+    await import("./lib/api/server/real");
 
   // Ensure DB is open and migrated before anything else touches it
   getDb();
@@ -68,7 +68,13 @@ app.prepare().then(async () => {
   // Match lifecycle tracking. This only works because `bus` is pinned to
   // globalThis — the phase events originate in a Next-bundled route handler,
   // which has its own module registry.
-  let activeMatchId: string | null = null;
+  // Recovered from the database rather than starting null: a panel restart
+  // mid-match used to orphan the row, leaving ended_at NULL forever — invisible
+  // to history and never reaped.
+  const reaped = reapStaleMatches();
+  if (reaped > 0) console.log(`[db] closed ${reaped} stale match record(s)`);
+  let activeMatchId: string | null = findOpenMatch()?.id ?? null;
+  if (activeMatchId) console.log(`[db] resuming open match ${activeMatchId}`);
   bus.subscribe((ev) => {
     // Rounds are recorded against the open match, not the match lifecycle:
     // Round_End fires ~24 times a game and must not close the record.
@@ -125,8 +131,13 @@ app.prepare().then(async () => {
     } catch (err) {
       console.error("[rcon] failed to configure log ingest:", err);
     }
-    // The server has just come up with an empty ban list, whatever the panel
-    // still considers banned.
+    // The server has just come up with default cvars and an empty ban list,
+    // whatever the panel last applied and still considers banned.
+    try {
+      await reapplyConfig();
+    } catch (err) {
+      console.error("[rcon] failed to re-apply config:", err);
+    }
     try {
       await reapplyBans();
     } catch (err) {
