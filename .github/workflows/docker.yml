@@ -232,8 +232,11 @@ jobs:
             test -d /opt/sidearm/plugins/addons/counterstrikesharp
             # The one file that makes Metamod load CounterStrikeSharp, and the
             # one the stacking order could plausibly lose: it ships inside the
-            # CSSharp archive under addons/metamod/, the directory Metamod's own
-            # tarball creates.
+            # CSSharp archive under addons/metamod/, a directory the Metamod
+            # tarball also creates.
+            # (No apostrophes in here: this whole block is a single-quoted
+            # `sh -c` argument, and one would close the quote and mangle the
+            # rest of the script. That is exactly how this first went red.)
             test -f /opt/sidearm/plugins/addons/metamod/counterstrikesharp.vdf
             test -f /opt/sidearm/plugins/addons/counterstrikesharp/plugins/MatchZy/MatchZy.dll
             test -x /opt/sidearm/install-plugins.sh
