@@ -53,7 +53,7 @@ app.prepare().then(async () => {
   if (process.env.API_MODE !== "real") return;
 
   const { rconConnect, rconExec, rconDisconnect } = await import("./lib/cs2/rcon");
-  const { fetchStatus } = await import("./lib/cs2/status");
+  const { fetchStatus, isServerReboot } = await import("./lib/cs2/status");
   const { updateCache, realAdapter } = await import("./lib/api/server/real");
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
@@ -73,6 +73,8 @@ app.prepare().then(async () => {
   // to history and never reaped.
   const reaped = reapStaleMatches();
   if (reaped > 0) console.log(`[db] closed ${reaped} stale match record(s)`);
+  /** Last container start we reconciled against; see `onServerBoot`. */
+  let lastStartedAt: string | null = null;
   let activeMatchId: string | null = findOpenMatch()?.id ?? null;
   if (activeMatchId) console.log(`[db] resuming open match ${activeMatchId}`);
   bus.subscribe((ev) => {
@@ -122,17 +124,37 @@ app.prepare().then(async () => {
   const BAN_SWEEP_MS = 60_000;
   setInterval(() => void sweepExpiredBans(), BAN_SWEEP_MS);
 
-  rconConnect(async () => {
+  /**
+   * Everything that must be re-established on a game server that has just
+   * started, because all of it is state the panel set on a process that no
+   * longer exists.
+   *
+   * Runs on panel start AND on every detected server boot. It used to run only
+   * on the panel's FIRST RCON connection — `rconConnect`'s callback is gated by
+   * `didFirstConnect` — which meant a CS2 restart silently dropped the log sink
+   * and left it dropped until someone restarted the panel. Since restarting the
+   * container is exactly how a CS2 update is applied, applying an update
+   * stopped chat, kills, scores and round records from ever arriving again.
+   */
+  async function onServerBoot(reason: string) {
+    console.log(`[cs2] server boot detected (${reason}); reconciling`);
     try {
+      // Clear first: on a panel restart with the server still running, the
+      // sink may already be registered, and adding it twice would duplicate
+      // every log line.
+      await rconExec("logaddress_delall_http");
       await rconExec(`logaddress_add_http "${panelUrl}/api/ingest/logs/${secret}"`);
+      // Answers `Unknown command` on current CS2 builds; harmless, and kept in
+      // case an older or newer build wants it. `log on` is what matters.
       await rconExec("logaddress_enable_http 1");
       await rconExec("log on");
       console.log("[rcon] log ingest configured");
     } catch (err) {
       console.error("[rcon] failed to configure log ingest:", err);
     }
-    // The server has just come up with default cvars and an empty ban list,
-    // whatever the panel last applied and still considers banned.
+
+    // The server came up with default cvars and an empty ban list, whatever
+    // the panel last applied and still considers banned.
     try {
       await reapplyConfig();
     } catch (err) {
@@ -143,7 +165,9 @@ app.prepare().then(async () => {
     } catch (err) {
       console.error("[rcon] failed to re-apply bans:", err);
     }
-  });
+  }
+
+  rconConnect(() => void onServerBoot("panel start"));
 
   // Self-scheduling rather than setInterval: a tick that outlives the interval
   // would otherwise stack up behind the previous one.
@@ -152,8 +176,18 @@ app.prepare().then(async () => {
 
   const poll = async () => {
     try {
-      const { status, players, cvars } = await fetchStatus();
+      const { status, players, cvars, startedAt } = await fetchStatus();
       updateCache(status, players, cvars);
+
+      // A changed StartedAt means a different container process, so everything
+      // the panel configured on the old one is gone. Only acted on once RCON
+      // answers, since there is nothing to configure until it does.
+      if (isServerReboot(lastStartedAt, startedAt, status.control.rcon)) {
+        lastStartedAt = startedAt;
+        void onServerBoot("container restarted");
+      } else if (startedAt && !lastStartedAt) {
+        lastStartedAt = startedAt;
+      }
       bus.emit({ type: "status.update", status });
     } catch {
       // transient — rcon reconnect handles it

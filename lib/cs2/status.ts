@@ -242,6 +242,11 @@ export async function fetchStatus(): Promise<{
   /** Cvars read alongside the status poll; see `lib/cs2/cvars.ts`. */
   cvars: { maxRounds: number | null };
   /**
+   * The container's `StartedAt`. A change means the game server is a NEW
+   * process, which has lost every piece of state the panel set on it.
+   */
+  startedAt: string | null;
+  /**
    * `null` when RCON did not answer, meaning the roster is simply unknown for
    * this tick. That is NOT the same as "nobody is connected": treating a failed
    * poll as an empty roster wipes every player's accumulated k/d/a and team.
@@ -364,6 +369,7 @@ export async function fetchStatus(): Promise<{
   return {
     status,
     cvars: { maxRounds },
+    startedAt: containerState?.StartedAt ?? null,
     players: statusText === "" ? null : parsed.players,
   };
 }
@@ -397,6 +403,26 @@ export function envMaxPlayers(env: string[] | null): number | null {
 export function humanSlots(ceiling: number | null, gotvRunning: boolean): number | null {
   if (ceiling === null) return null;
   return gotvRunning ? Math.max(0, ceiling - 1) : ceiling;
+}
+
+/**
+ * Whether the game server is a new process that needs reconciling.
+ *
+ * A changed `StartedAt` means a different container, which has lost the log
+ * sink, the applied cvars and the ban list. Two things it deliberately does not
+ * do: fire on the very first observation (there is nothing to compare against,
+ * and panel start is handled by the RCON connect callback), and fire while RCON
+ * is silent (there is nothing to configure until the server answers, and the
+ * attempt would just fill the command queue).
+ */
+export function isServerReboot(
+  lastStartedAt: string | null,
+  startedAt: string | null,
+  rconAlive: boolean,
+): boolean {
+  if (!startedAt || !lastStartedAt) return false;
+  if (startedAt === lastStartedAt) return false;
+  return rconAlive;
 }
 
 /** Seconds since the container started; `null` when Docker is unreachable. */
