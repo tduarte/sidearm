@@ -12,27 +12,78 @@ Self-hosted Counter-Strike 2 dedicated server with a web admin panel — shipped
 - **Competitive plugins built in** — Metamod, CounterStrikeSharp and MatchZy, pinned and installed on boot
 - **One-command stack** — CS2 + panel + socket proxy in a single compose file
 
+## What you need
+
+| | |
+|---|---|
+| **An x86-64 Linux machine** | The CS2 dedicated server has no ARM build. A VPS, an old desktop or a Proxmox container all work. |
+| **Docker Engine + the `compose` plugin** | [Install guide](https://docs.docker.com/engine/install/). The old standalone `docker-compose` (v1) will not work. |
+| **~90 GB of free disk** | The game files are about 70 GB, and an update needs room to land beside them. |
+| **4 GB RAM** | Comfortable for 5v5. More slots want more. |
+| **A GSLT** | Free, from [steamcommunity.com/dev/managegameservers](https://steamcommunity.com/dev/managegameservers) (app id `730`). Only needed to appear on the internet and run VAC-secure — skip it for LAN. |
+
 ## Quick start
 
 ```bash
-# 1. Clone
 git clone https://github.com/tduarte/sidearm.git
 cd sidearm
-
-# 2. Configure
-cp .env.example .env
-# Edit .env — fill in GSLT, RCON_PASSWORD, LOG_INGEST_SECRET
-
-# 3. Run
+./scripts/setup.sh      # checks your machine, generates secrets, writes .env
 docker compose up -d
-
-# 4. Open the panel
-open http://localhost:3000
 ```
 
-> **First boot:** CS2 game files are ~40 GB. `docker compose logs -f cs2` will show download progress. The panel comes up immediately; the CS2 side shows "starting" until the download finishes.
+`setup.sh` asks four questions and generates the three secrets that must differ
+on every install. It refuses to continue if Docker is missing, the architecture
+is wrong or the disk is too small — each of which otherwise surfaces much later
+as a container that will not start.
 
-Connect players to the server at `steam://connect/<your-host>:27015`.
+Prefer to do it by hand? `cp .env.example .env`, then set `RCON_PASSWORD` and
+`LOG_INGEST_SECRET` to different random strings (`openssl rand -hex 24`).
+
+**Then open <http://localhost:3000>.**
+
+### What the first boot looks like
+
+The panel is up in seconds. The CS2 server is not, and that is normal:
+
+1. Docker builds the CS2 image — a couple of minutes, mostly downloading the plugins.
+2. `steamcmd` pulls **~70 GB** of game files. This takes anywhere from twenty minutes to several hours.
+3. The server starts, registers with Steam, and the panel's tile turns green.
+
+Watch it with `docker compose logs -f cs2`. The dashboard shows download
+progress while it runs, so you do not have to.
+
+### Did it work?
+
+The panel's dashboard answers all of this, but from a shell:
+
+```bash
+docker compose ps                 # cs2 should be "healthy" once the download finishes
+curl -s localhost:3000/api/status # state, map, players, VAC, plugin health
+```
+
+A healthy server logs `Gameserver logged on to Steam` and reports `secure` in
+RCON `status`. If it says `VAC: off` and repeats
+`Cert request for invalid failed with reason code 5005`, the GSLT is dead —
+Steam reclaims unused tokens, so reissue it and run
+`docker compose up -d --force-recreate cs2`.
+
+### Playing over the internet
+
+Forward these from your router to the machine:
+
+| Port | Protocol | Why |
+|---|---|---|
+| `27015` | **UDP** | Game traffic. Without it nobody can connect. |
+| `27020` | **UDP** | GOTV — spectators and demo recording. |
+
+Leave RCON (`27015/**tcp**`) closed. It is deliberately not published outside
+the compose network, and exposing it hands out full server control.
+
+The panel on `3000/tcp` should stay on your LAN, or behind a reverse proxy with
+`PANEL_ADMIN_TOKEN` set and `PANEL_HTTPS=1`.
+
+Then connect with `steam://connect/<your-public-ip>:27015`, or copy the connect
+string straight off the dashboard.
 
 ---
 
@@ -55,6 +106,18 @@ Copy `.env.example` to `.env` and fill in:
 | `BIND_HOST` | No | Interface to bind (default `0.0.0.0`). Deliberately not `HOSTNAME`, which shells and Docker both set. |
 | `CS2_AUTO_UPDATE` | No | `1` lets the panel restart the CS2 container by itself when a game update is pending **and** nobody is connected. Unset = surface the badge only. |
 | `CS2_UPDATE_CHECK_MS` | No | How often to check for a CS2 update (default `900000`, 15 min). `0` disables the check. |
+| `CS2_GAMETYPE` / `CS2_GAMEMODE` | No | Starting game mode as Valve's two numbers (default `0` / `1` — competitive). The panel's Config page changes this at runtime; these only set what the server boots into. |
+| `CS2_MAPGROUP` | No | Map group for the boot map cycle (default `mg_active`). |
+| `PANEL_TRUSTED_CIDRS` | No | Comma-separated CIDRs whose clients skip `PANEL_ADMIN_TOKEN` — e.g. `192.168.1.0/24`. Matched against the **real TCP peer**, never `X-Forwarded-For`, so it does nothing behind a reverse proxy — and listing the proxy's own address would exempt the entire internet. |
+| `MATCHZY_CONFIG_SECRET` | No | Secret CS2 presents when fetching a match config. Falls back to `LOG_INGEST_SECRET`, so leaving it blank is fine. |
+| `TV_ENABLE` | No | GOTV on/off (default `1`). Required for demo recording — `tv_record` needs it. |
+| `TV_DELAY` | No | GOTV broadcast delay in seconds (default `30`). `0` lets spectators watch live and call positions. |
+| `TV_AUTORECORD` | No | Record every match automatically (default `0`). |
+| `TV_PW` / `TV_RELAY_PW` | No | Passwords for GOTV spectators and relay proxies. Empty = open. |
+| `TV_MAXRATE` | No | GOTV bandwidth cap; `0` = unlimited. |
+
+All the `TV_*` and `CS2_*` values above are **launch arguments**, so changing one
+needs `docker compose up -d --force-recreate cs2` rather than a restart.
 
 ---
 
