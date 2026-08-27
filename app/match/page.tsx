@@ -45,6 +45,7 @@ import {
 import { LoadError } from "@/components/load-error";
 import { CvarTile } from "@/components/match/cvar-tile";
 import { DemoList } from "@/components/match/demo-list";
+import { MatchSetup } from "@/components/match/match-setup";
 import { useCvarGroup } from "@/lib/hooks/use-cvar-group";
 import { asBool } from "@/lib/cs2/cvars";
 import { practiceSpec } from "@/lib/cs2/practice";
@@ -181,6 +182,12 @@ export default function MatchPage() {
         </TabsList>
 
         <TabsContent value="competitive" className="mt-4 space-y-4">
+          {/*
+            First, because with MatchZy installed this is how a match actually
+            starts — the cards below are the manual approximations it replaces.
+          */}
+          <MatchSetup />
+
           <Card>
             <CardContent className="p-6">
               <div className="flex items-center justify-center gap-8">

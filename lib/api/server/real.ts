@@ -386,11 +386,21 @@ function phaseFromGamestate(g: string): MatchPhase | null {
  */
 function applyMatchZyState(get5: Get5Status | null): void {
   const gamestate = get5?.gamestate ?? null;
+  const wasOwned = matchzyOwnsMatch();
   cache().match = { ...cache().match, matchzyState: gamestate };
 
   // No config loaded — including every pug started in-game with `.start`, which
   // get5_status does not report on. Leave the log-derived state alone.
-  if (!gamestate || gamestate === "none") return;
+  if (!gamestate || gamestate === "none") {
+    // ...except the pause, if MatchZy is the one that set it. Ending a match
+    // while it is paused otherwise leaves the panel saying "paused" forever:
+    // the only thing that could tell us otherwise has stopped answering. The
+    // phase is left to the log parser, which owns it again from here.
+    if (wasOwned) {
+      cache().match = { ...cache().match, pause: "unknown" };
+    }
+    return;
+  }
 
   const phase = phaseFromGamestate(gamestate);
   if (phase) cache().match = { ...cache().match, phase };

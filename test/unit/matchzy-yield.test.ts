@@ -122,11 +122,43 @@ describe("applyMatchZyState via updateCache", () => {
     );
     const status = await import("./helpers/status-fixture").then((m) => m.default);
 
-    updateMatchState({ phase: "warmup", pause: "pause_requested" });
+    // Explicit precondition: nothing has ever been loaded. Without this the
+    // cache carries whatever the previous test left, and "no match loaded" and
+    // "a match just ended" are deliberately different cases now.
+    updateMatchState({ matchzyState: null, phase: "warmup", pause: "pause_requested" });
     updateCache(status(), null, undefined, { gamestate: "none", paused: false, raw: {} });
     assert.equal(getMatchState().phase, "warmup");
     assert.equal(getMatchState().pause, "pause_requested");
     assert.equal(getMatchState().matchzyState, "none");
+  });
+
+  it("stops claiming 'paused' once MatchZy stops answering", async () => {
+    // Ending a paused match left the panel saying "paused" forever: the only
+    // thing that could have said otherwise had stopped reporting. Observed on
+    // the live server after css_endmatch. Unknown is the honest answer.
+    const { updateCache, getMatchState } = await import("@/lib/api/server/real");
+    const status = await import("./helpers/status-fixture").then((m) => m.default);
+
+    updateCache(status(), null, undefined, { gamestate: "live", paused: true, raw: {} });
+    assert.equal(getMatchState().pause, "paused");
+
+    updateCache(status(), null, undefined, { gamestate: "none", paused: false, raw: {} });
+    assert.equal(getMatchState().pause, "unknown");
+    assert.equal(getMatchState().matchzyState, "none");
+  });
+
+  it("does not touch the pause on a server that never had a match loaded", async () => {
+    // A pug's pause state is the log parser's business, and blanking it every
+    // poll would undo `pause_requested` two seconds after it was set.
+    const { updateCache, getMatchState, updateMatchState } = await import(
+      "@/lib/api/server/real"
+    );
+    const status = await import("./helpers/status-fixture").then((m) => m.default);
+
+    updateMatchState({ matchzyState: "none" });
+    updateMatchState({ pause: "pause_requested" });
+    updateCache(status(), null, undefined, { gamestate: "none", paused: false, raw: {} });
+    assert.equal(getMatchState().pause, "pause_requested");
   });
 
   it("maps the knife round to live, not warmup", async () => {
