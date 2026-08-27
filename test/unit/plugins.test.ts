@@ -16,6 +16,19 @@ const LIVE_UNKNOWN_GET5 = "Unknown command 'get5_status'!\n";
 const LIVE_UNKNOWN_META = "Unknown command 'meta'!\n";
 const LIVE_UNKNOWN_CSS = "Unknown command 'css_plugins'!\n";
 
+// And from the same server once the plugins were installed — verbatim, because
+// documentation drifts and the server does not.
+const LIVE_GET5_STATUS =
+  '{"plugin_version":"0.15.0","gamestate":"none","paused":false,' +
+  '"loaded_config_file":null,"matchid":null,"map_number":null,' +
+  '"round_number":-1,"round_time":null,"team1":null,"team2":null,"maps":null}\n';
+const LIVE_META_LIST =
+  "Listing 1 plugin:\n  [01] CounterStrikeSharp (v1.0.373 @ 3a59f2d) by Roflmuffin\n";
+const LIVE_CSS_PLUGINS =
+  "  List of all plugins currently loaded by CounterStrikeSharp: 1 plugins loaded.\n" +
+  '  [#1:LOADED]: "MatchZy" (0.8.15) by WD- (https://github.com/shobhit-pathak/)\n' +
+  "    A plugin for running and managing CS2 practice/pugs/scrims/matches!\n";
+
 describe("isUnknownCommand", () => {
   it("matches the single-token commands verbatim", () => {
     assert.equal(isUnknownCommand(LIVE_UNKNOWN_GET5, MATCHZY_PROBE), true);
@@ -34,6 +47,11 @@ describe("isUnknownCommand", () => {
     assert.equal(isUnknownCommand(LIVE_UNKNOWN_GET5, CSSHARP_PROBE), false);
   });
 
+  it("reads a real listing as 'the command exists'", () => {
+    assert.equal(isUnknownCommand(LIVE_META_LIST, METAMOD_PROBE), false);
+    assert.equal(isUnknownCommand(LIVE_CSS_PLUGINS, CSSHARP_PROBE), false);
+  });
+
   it("reads an empty reply as 'no answer', not as absence", () => {
     // RCON dropping a poll must never be reported as the plugins being gone.
     assert.equal(isUnknownCommand("", MATCHZY_PROBE), false);
@@ -44,6 +62,18 @@ describe("parseGet5Status", () => {
   it("reports absence from the live server's refusal", () => {
     const r = parseGet5Status(LIVE_UNKNOWN_GET5);
     assert.deepEqual(r, { loaded: false, status: null });
+  });
+
+  it("reads the live server's payload", () => {
+    const r = parseGet5Status(LIVE_GET5_STATUS);
+    assert.equal(r?.loaded, true);
+    assert.equal(r?.status?.gamestate, "none");
+    assert.equal(r?.status?.paused, false);
+    // Nulls in the payload are real JSON nulls, not missing keys — the parser
+    // must not mistake `"team1": null` for a malformed reply.
+    assert.equal(r?.status?.raw.team1, null);
+    // Hardcoded by MatchZy to the Get5 string. Never report it as a version.
+    assert.equal(r?.status?.raw.plugin_version, "0.15.0");
   });
 
   it("returns null when RCON said nothing at all", () => {
