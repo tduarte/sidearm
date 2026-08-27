@@ -76,6 +76,19 @@ function migrate(db: Database.Database): void {
       expires_at TEXT
     );
 
+    -- Match definitions the panel has set up, for MatchZy to fetch. The panel's
+    -- intent; the results live in MatchZy's own database and are never copied
+    -- here. Stored whole as JSON because nothing ever queries it by its parts.
+    CREATE TABLE IF NOT EXISTS match_configs (
+      id           TEXT PRIMARY KEY,
+      -- MatchZy rejects a non-integer matchid, so the panel keeps a numeric
+      -- handle alongside the human-readable one it uses everywhere else.
+      match_number INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      loaded_at    TEXT,
+      definition   TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS saved_config (
       key   TEXT PRIMARY KEY,
       value TEXT NOT NULL
@@ -97,6 +110,10 @@ function migrate(db: Database.Database): void {
   addColumn(db, "workshop_maps", "time_updated", "INTEGER");
   addColumn(db, "workshop_maps", "thumb_file", "TEXT");
   addColumn(db, "chat_messages", "team_only", "INTEGER");
+  // match_configs shipped one build before MatchZy turned out to require an
+  // integer matchid, so an install that saved a setup in between has the table
+  // without this column.
+  addColumn(db, "match_configs", "match_number", "INTEGER NOT NULL DEFAULT 1");
 }
 
 /** Adds a column when it is missing. SQLite has no `ADD COLUMN IF NOT EXISTS`. */

@@ -16,6 +16,7 @@ import {
   MATCHZY_PROBE,
   isUnknownCommand,
   parseGet5Status,
+  type Get5Status,
 } from "./plugins";
 
 const PORT = parseInt(process.env.RCON_PORT ?? "27015", 10);
@@ -43,8 +44,19 @@ let lastProgress: UpdateProgress | null = null;
  * failure this catches sits unnoticed for weeks otherwise.
  */
 const PLUGIN_PROBE_MS = 30_000;
+
+/**
+ * How often to re-read `get5_status` once a match config IS loaded.
+ *
+ * At that point the same command stops being a health check and becomes the
+ * only honest source of pause state and gamestate — CS2 exposes neither — so it
+ * is worth a round trip every few seconds rather than every thirty.
+ */
+const MATCH_POLL_MS = 5_000;
+
 let lastPluginProbe = 0;
 let lastPluginResult: Omit<PluginStatus, "regressed"> | null = null;
+let lastGet5: Get5Status | null = null;
 
 /**
  * Probes the plugin stack, at most once per `PLUGIN_PROBE_MS`.
@@ -62,13 +74,23 @@ async function probePlugins(
   // poll is not evidence that the plugins are gone.
   if (!rconAlive) return lastPluginResult;
 
+  // Two cadences off one command. While a match is loaded this is the panel's
+  // only window onto pause and gamestate, so it runs often; the rest of the
+  // time it is just a liveness check and thirty seconds is plenty.
+  const loaded = lastGet5 !== null && lastGet5.gamestate !== "none";
+  const interval = loaded ? MATCH_POLL_MS : PLUGIN_PROBE_MS;
+
   const now = Date.now();
-  if (now - lastPluginProbe < PLUGIN_PROBE_MS) return lastPluginResult;
+  if (now - lastPluginProbe < interval) return lastPluginResult;
   lastPluginProbe = now;
 
   let matchzy: boolean | null = null;
   try {
-    matchzy = parseGet5Status(await rconExec(MATCHZY_PROBE))?.loaded ?? null;
+    const probe = parseGet5Status(await rconExec(MATCHZY_PROBE));
+    matchzy = probe?.loaded ?? null;
+    // Only overwrite on a definite answer; an unreadable reply leaves the last
+    // known match state alone rather than blanking a live match.
+    if (probe) lastGet5 = probe.status;
   } catch {
     return lastPluginResult;
   }
@@ -328,6 +350,11 @@ export async function fetchStatus(): Promise<{
    * RCON drops are routine, so this distinction matters.
    */
   players: Player[] | null;
+  /**
+   * MatchZy's own view of the match, when a config is loaded. `null` when it is
+   * absent, nothing is loaded, or the probe has not run yet.
+   */
+  get5: Get5Status | null;
 }> {
   // RCON commands are serialised by lib/cs2/rcon.ts, so these run one at a time
   // on the shared socket rather than racing each other's response packets.
@@ -453,6 +480,7 @@ export async function fetchStatus(): Promise<{
     cvars: { maxRounds },
     startedAt: containerState?.StartedAt ?? null,
     players: statusText === "" ? null : parsed.players,
+    get5: pluginProbe?.matchzy === true ? lastGet5 : null,
   };
 }
 

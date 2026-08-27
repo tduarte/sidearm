@@ -176,8 +176,8 @@ app.prepare().then(async () => {
 
   const poll = async () => {
     try {
-      const { status, players, cvars, startedAt } = await fetchStatus();
-      updateCache(status, players, cvars);
+      const { status, players, cvars, startedAt, get5 } = await fetchStatus();
+      updateCache(status, players, cvars, get5);
 
       // A changed StartedAt means a different container process, so everything
       // the panel configured on the old one is gone. Only acted on once RCON

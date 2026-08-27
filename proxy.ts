@@ -10,9 +10,13 @@ import { AUTH_COOKIE, PEER_HEADER, isTrustedPeer, safeEqual } from "@/lib/auth";
  * Opt-in by design: with no token configured the panel stays open, which is what
  * the README documents for first-run setup on a trusted network.
  *
- * Three exemptions:
+ * Four exemptions:
  *  - `/api/ingest/logs/<secret>` — CS2 cannot send headers; it authenticates via
  *    the shared secret embedded in the URL it was given over RCON.
+ *  - `/api/matchzy/config/<secret>/<id>` — same boundary, opposite direction:
+ *    CS2 fetches this one, having been given the URL over RCON. It carries no
+ *    session cookie either, and its own handler does a constant-time compare on
+ *    the secret and 404s otherwise.
  *  - `/api/auth` — the endpoint used to exchange a token for a session cookie,
  *    which by definition has to be reachable unauthenticated.
  *  - peers inside `PANEL_TRUSTED_CIDRS` — a LAN convenience, off by default.
@@ -23,6 +27,7 @@ export function proxy(req: NextRequest) {
 
   const { pathname } = req.nextUrl;
   if (pathname.startsWith("/api/ingest/logs/")) return NextResponse.next();
+  if (pathname.startsWith("/api/matchzy/config/")) return NextResponse.next();
   if (pathname === "/api/auth") return NextResponse.next();
 
   if (isTrustedPeer(req.headers.get(PEER_HEADER))) return NextResponse.next();

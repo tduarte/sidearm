@@ -1,6 +1,8 @@
 import type { RotationState } from "@/lib/cs2/rotation";
 import type { BanRecord } from "@/lib/cs2/bans";
 import type { DemoFile } from "@/lib/cs2/demos";
+import type { MatchDefinition } from "@/lib/cs2/match-config";
+import type { StoredMatchConfig } from "@/lib/db/match-configs";
 import type {
   ChatMessage,
   CvarGroup,
@@ -180,6 +182,27 @@ export const api = {
   getChat: () => request<ChatMessage[]>("/api/chat"),
 
   getHistory: () => request<MatchHistoryDetail[]>("/api/history"),
+
+  getMatchConfigs: () => request<StoredMatchConfig[]>("/api/matches"),
+
+  saveMatch: (def: MatchDefinition) =>
+    request<{ warnings: string[] }>("/api/matches", json(def)),
+
+  loadMatch: async (id: string) => {
+    await request<{ ok: true }>(`/api/matches/${encodeURIComponent(id)}/load`, {
+      method: "POST",
+    });
+  },
+
+  endMatch: async () => {
+    await request<{ ok: true }>("/api/matches/end", { method: "POST" });
+  },
+
+  deleteMatch: async (id: string) => {
+    await request<{ ok: true }>(`/api/matches/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    });
+  },
 
   getUpdateStatus: () => request<UpdateStatus>("/api/updates"),
 
