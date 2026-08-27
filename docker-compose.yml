@@ -11,14 +11,18 @@
 
 services:
   cs2:
-    # Built locally rather than pulled: it layers pinned Metamod /
-    # CounterStrikeSharp / MatchZy onto the upstream image. Tagged so
-    # `docker compose build cs2` names it, the way the panel is handled.
+    # The upstream CS2 image plus pinned Metamod / CounterStrikeSharp / MatchZy.
     #
-    # Rebuilding this recreates the container and drops everyone connected, so
-    # `scripts/deploy-lxc.sh` does NOT do it as part of a routine panel deploy —
-    # pass --with-cs2 deliberately, on an empty server.
-    image: sidearm/cs2:latest
+    # Published, so a first install pulls rather than building — the build
+    # fetches from mms.alliedmods.net and two GitHub release URLs, and a new
+    # user's install should not fail because one of those is down. With both
+    # `image` and `build` set, compose pulls when the tag exists and falls back
+    # to building when it does not, so `docker compose up` works either way.
+    #
+    # Rebuilding or re-pulling this recreates the container and drops everyone
+    # connected, so `scripts/deploy-lxc.sh` does NOT touch it during a routine
+    # panel deploy — pass --with-cs2 deliberately, on an empty server.
+    image: ghcr.io/tduarte/sidearm-cs2:latest
     build:
       context: ./docker/cs2
     container_name: cs2

@@ -93,11 +93,17 @@ jobs:
           fi
 
           # The CS2 wrapper is a small, self-contained context, so an ALLOWLIST
-          # is safe here in a way it is not for the panel: build.yml aside,
-          # nothing outside docker/cs2 can reach that image. The pinned plugin
-          # versions live in its Dockerfile, so a version bump lands here and
-          # gets its download URLs proved before anyone recreates a live server.
-          cs2_relevant=$(echo "$files" | grep -E '^docker/cs2/' || true)
+          # is safe here in a way it is not for the panel: nothing outside
+          # docker/cs2 can reach that image. The pinned plugin versions live in
+          # its Dockerfile, so a version bump lands here and gets its download
+          # URLs proved before anyone recreates a live server.
+          #
+          # The workflow itself is included for the same reason `.github/` is
+          # NOT in the panel's ignore list: a change to how this image is built,
+          # checked or published has to actually exercise that path. It is also
+          # what lets the very first publish happen, since a workflow-only
+          # change would otherwise skip the job that does the publishing.
+          cs2_relevant=$(echo "$files" | grep -E '^(docker/cs2/|\.github/workflows/)' || true)
 
           if [ -n "$cs2_relevant" ]; then
             echo "cs2-image-relevant changes:"
@@ -242,24 +248,25 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # The CS2 wrapper: BUILT, never PUSHED.
+  # The CS2 wrapper image: the upstream server plus pinned plugins.
   #
-  # Deliberate. AGENTS.md forbids `docker compose pull` on the server because it
-  # would replace a locally built image with CI's, and the compose file names
-  # this one `sidearm/cs2:latest` -- an unqualified tag with no registry, so it
-  # can only ever come from a local build. Publishing it would create exactly the
-  # substitute that rule exists to prevent.
+  # Published for the same reason it is built here at all. The Dockerfile pulls
+  # from mms.alliedmods.net and two GitHub release URLs, and upstream deletes
+  # old releases -- so a bump that 404s must fail in a PR rather than at 9pm on
+  # somebody's server. Shipping the resulting artifact means a new install never
+  # depends on those hosts being up at all.
   #
-  # What CI is for here is the failure this image can have that the panel cannot:
-  # the pinned Metamod / CounterStrikeSharp / MatchZy URLs are fetched at build
-  # time and upstream deletes old releases. A bump that 404s should fail in a PR,
-  # not at 9pm on a server that has just dropped ten players to recreate.
+  # Note this makes the image pullable, which it deliberately was not before:
+  # `docker compose pull` can now recreate the cs2 container and drop everyone
+  # connected. AGENTS.md carries that rule; it is no longer prevented by the
+  # image simply having nowhere to come from.
   build-cs2:
-    needs: [changes]
+    needs: [verify, changes]
     if: needs.changes.outputs.cs2 == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: write
 
     steps:
       - name: Checkout
@@ -268,6 +275,28 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta-cs2
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}-cs2
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      # Built and loaded first so the contents can be checked before anything is
+      # pushed -- publishing an image whose plugin tree is empty would be worse
+      # than not publishing at all. On a PR this is the whole job.
       - name: Build the CS2 wrapper image
         uses: docker/build-push-action@v5
         with:
@@ -303,3 +332,16 @@ jobs:
             test -x /opt/sidearm/install-plugins.sh
             test -x /opt/sidearm/entrypoint.sh
           '
+
+      # Only now, and never from a pull request. Rebuilt rather than retagged
+      # because buildx caches the layers, so this costs seconds.
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v5
+        with:
+          context: ./docker/cs2
+          push: true
+          tags: ${{ steps.meta-cs2.outputs.tags }}
+          labels: ${{ steps.meta-cs2.outputs.labels }}
+          cache-from: type=gha,scope=cs2
+          cache-to: type=gha,mode=max,scope=cs2

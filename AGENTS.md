@@ -19,8 +19,9 @@ Iterate with `./scripts/deploy-lxc.sh [branch]`: it rebuilds only `panel` and le
 so nothing re-downloads and no match is interrupted (~90s).
 
 - **Never `docker compose pull` on the server.** `docker compose build panel` tags the local image
-  as `ghcr.io/tduarte/sidearm:latest`; a pull replaces your build with CI's. The same rule is what
-  keeps `sidearm/cs2:latest` unpublished — see below.
+  as `ghcr.io/tduarte/sidearm:latest`; a pull replaces your build with CI's. Since both images are
+  now published, a pull also recreates `cs2` and drops everyone connected — this rule is the only
+  thing preventing that, where the cs2 image used to be unpullable by construction.
 - **`docker compose build cs2` drops every connected player**, because rebuilding recreates the
   container. It is never part of a routine deploy: `./scripts/deploy-lxc.sh --with-cs2` is opt-in,
   and asks first with a live headcount from an A2S query. Only the plugin stack lives in that
@@ -49,11 +50,18 @@ things about it are load-bearing and non-obvious:
 - **`install-plugins.sh` is sourced, not executed**, so it must never call `exit` and must not set
   `set -e`. A server without plugins is bad; a server that will not boot is worse.
 
-The image is **built locally and never published**: compose names it `sidearm/cs2:latest`, an
-unqualified tag with no registry behind it. CI builds the same context (on changes under
-`docker/cs2/`) to prove the pinned download URLs still resolve, and asserts the archives unpacked
-where the installer looks — but does not push, because a published copy is what a stray pull would
-substitute.
+The image is **published as `ghcr.io/tduarte/sidearm-cs2`**, built by CI on changes under
+`docker/cs2/`. CI asserts the archives unpacked where the installer looks *before* pushing, because
+publishing an image with an empty plugin tree is worse than publishing nothing.
+
+Publishing exists so a first install does not depend on `mms.alliedmods.net` and two GitHub release
+URLs being up. Compose sets both `image:` and `build:`, which means it **pulls when the tag exists
+and builds when it does not** — verified, not assumed — so `docker compose up` works during the
+window before a new tag is published and `docker compose build cs2` still overrides it locally.
+
+The trade this makes: the image used to be unpullable by construction (an unqualified
+`sidearm/cs2:latest` with no registry), which structurally prevented a stray pull from recreating
+the container. That protection is now a documented rule rather than a property of the tag.
 
 ## The joedwards32/cs2 image
 
