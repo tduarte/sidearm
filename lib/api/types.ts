@@ -305,6 +305,32 @@ export interface ChatMessage {
   teamOnly?: boolean;
 }
 
+/**
+ * Per-player stats as MatchZy recorded them.
+ *
+ * Only present on matches MatchZy ran: the panel's own log parser can count
+ * kills and assists but has no access to damage, flashes, entry duels or
+ * clutches, so these have no plugin-less equivalent.
+ */
+export interface MatchZyPlayerStats {
+  /** Steam64, as a string — an identifier, never a number to do maths on. */
+  steamId64: string;
+  name: string;
+  team: string;
+  kills: number;
+  deaths: number;
+  assists: number;
+  damage: number;
+  /** Average damage per round. `null` when the round count is unknown. */
+  adr: number | null;
+  /** Percent of kills that were headshots. `null` when the player got none. */
+  headshotPct: number | null;
+  enemiesFlashed: number;
+  utilityDamage: number;
+  entries: { played: number; won: number };
+  clutches: { played: number; won: number };
+}
+
 export interface MatchHistoryEntry {
   id: string;
   startedAt: string;
@@ -314,6 +340,20 @@ export interface MatchHistoryEntry {
   finalScore: { ct: number; t: number };
   winner: "CT" | "T" | "DRAW";
   playerCount: number;
+  /**
+   * Who recorded this match. `matchzy` records are authoritative where both
+   * exist — see `getHistory`.
+   */
+  source?: "panel" | "matchzy";
+  /**
+   * MatchZy tracks **teams**, which swap sides at half-time; the panel's log
+   * parser tracks **sides**. When this is present it is the real pair and is
+   * what should be rendered — `finalScore` cannot express a named team that
+   * played both sides.
+   */
+  teams?: [{ name: string; score: number }, { name: string; score: number }];
+  /** Team name that won, when `teams` is present. Empty means a draw. */
+  winnerLabel?: string;
 }
 
 export interface MatchHistoryDetail extends MatchHistoryEntry {
@@ -327,6 +367,8 @@ export interface MatchHistoryDetail extends MatchHistoryEntry {
     d: number;
     a: number;
   }>;
+  /** Full scoreboard, on matches MatchZy recorded. */
+  matchzyPlayers?: MatchZyPlayerStats[];
 }
 
 /**

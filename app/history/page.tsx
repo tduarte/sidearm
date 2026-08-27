@@ -18,6 +18,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadError } from "@/components/load-error";
 import { RoundTimeline } from "@/components/history/round-timeline";
+import { MatchZyScoreboard } from "@/components/history/matchzy-scoreboard";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -54,7 +55,8 @@ export default function HistoryPage() {
       <div>
         <h1 className="text-2xl font-semibold">History</h1>
         <p className="text-sm text-muted-foreground">
-          Chat and completed matches, stored in the panel&apos;s database.
+          Chat and completed matches. Where MatchZy ran the match, its own
+          record is shown — real teams, real scores and a full scoreboard.
         </p>
       </div>
 
@@ -113,25 +115,48 @@ export default function HistoryPage() {
                         <TableCell className="text-muted-foreground">
                           {new Date(m.startedAt).toLocaleString()}
                         </TableCell>
-                        <TableCell className="font-mono">{m.map}</TableCell>
+                        <TableCell className="font-mono">
+                          <span>{m.map}</span>
+                          {m.teams && (
+                            <span className="ml-2 font-sans text-xs text-muted-foreground">
+                              {m.teams[0].name} vs {m.teams[1].name}
+                            </span>
+                          )}
+                        </TableCell>
                         <TableCell className="capitalize">{m.gameMode}</TableCell>
                         <TableCell className="text-right tabular-nums">
-                          <span className="text-blue-400">{m.finalScore.ct}</span>
-                          <span className="text-muted-foreground"> : </span>
-                          <span className="text-amber-400">{m.finalScore.t}</span>
+                          {/*
+                            MatchZy tracks teams, which swap sides at half, so
+                            its scores are per-team and cannot be coloured
+                            CT/blue and T/amber the way the log parser's are.
+                          */}
+                          {m.teams ? (
+                            <span className="whitespace-nowrap">
+                              {m.teams[0].score}
+                              <span className="text-muted-foreground"> : </span>
+                              {m.teams[1].score}
+                            </span>
+                          ) : (
+                            <>
+                              <span className="text-blue-400">{m.finalScore.ct}</span>
+                              <span className="text-muted-foreground"> : </span>
+                              <span className="text-amber-400">{m.finalScore.t}</span>
+                            </>
+                          )}
                         </TableCell>
                         <TableCell>
                           <Badge
                             variant="outline"
                             className={cn(
                               "gap-1.5",
-                              m.winner === "CT" && "text-blue-400 border-blue-500/40",
-                              m.winner === "T" && "text-amber-400 border-amber-500/40",
-                              m.winner === "DRAW" && "text-muted-foreground",
+                              !m.teams && m.winner === "CT" && "text-blue-400 border-blue-500/40",
+                              !m.teams && m.winner === "T" && "text-amber-400 border-amber-500/40",
+                              (m.winner === "DRAW" || m.winnerLabel === "") &&
+                                "text-muted-foreground",
                             )}
                           >
                             <Trophy className="h-3 w-3" />
-                            {m.winner}
+                            {m.teams ? m.winnerLabel || "DRAW" : m.winner}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-right">
@@ -143,6 +168,13 @@ export default function HistoryPage() {
                         <TableRow className="hover:bg-transparent">
                           <TableCell colSpan={7} className="pt-0">
                             <RoundTimeline rounds={m.rounds} />
+                          </TableCell>
+                        </TableRow>
+                      )}
+                      {m.matchzyPlayers && m.matchzyPlayers.length > 0 && (
+                        <TableRow className="hover:bg-transparent">
+                          <TableCell colSpan={7} className="pt-0">
+                            <MatchZyScoreboard players={m.matchzyPlayers} />
                           </TableCell>
                         </TableRow>
                       )}

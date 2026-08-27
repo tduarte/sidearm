@@ -23,6 +23,7 @@ import { fetchStatus } from "@/lib/cs2/status";
 import { bus } from "@/lib/ws/bus";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
 import { getMatches, getMatchDetail } from "@/lib/db/matches";
+import { mergeHistory, readMatchZyMaps } from "@/lib/cs2/matchzy-db";
 import {
   deleteWorkshopMap,
   getWorkshopMaps,
@@ -1323,13 +1324,24 @@ export const realAdapter = {
   },
 
   async getHistory(): Promise<MatchHistoryDetail[]> {
+    let panel: MatchHistoryDetail[] = [];
     try {
       // Hydrate each entry with its per-player scoreboard; returning an empty
       // `players` array left the match detail view permanently blank.
-      return getMatches().map(
+      panel = getMatches().map(
         (m) => getMatchDetail(m.id) ?? { ...m, players: [] },
       );
-    } catch { return []; }
+    } catch { /* the panel's own history is unreadable; MatchZy may still be */ }
+
+    // MatchZy keeps its own record of every match it runs, with real team
+    // names, real scores and a full scoreboard. Where both describe the same
+    // game its version wins and ours is dropped — see `mergeHistory`. Wrapped
+    // because the plugin is optional and most installs will not have it.
+    try {
+      return mergeHistory(panel, readMatchZyMaps());
+    } catch {
+      return panel;
+    }
   },
 };
 
