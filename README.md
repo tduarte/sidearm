@@ -239,9 +239,9 @@ the mount, recording still works but the files stay out of reach.
 
 ## Docker images
 
-Two images, treated differently on purpose.
+Two images, both published to the GitHub Container Registry on every push to `main` and on version tags.
 
-**The panel** is published to the GitHub Container Registry on every push to `main` and on version tags.
+**The panel**:
 
 ```bash
 # Latest stable (built from main)
@@ -260,7 +260,17 @@ panel:
 
 To pin to a release, replace `latest` with the version tag (e.g. `1.0.0`).
 
-**The CS2 server image is built locally and never published.** `docker-compose.yml` tags it `sidearm/cs2:latest` — an unqualified name with no registry behind it, so it can only come from `docker compose build cs2`. CI builds the same context on every change to `docker/cs2/` to prove the pinned plugin downloads still resolve, but deliberately does not push: a published copy is exactly what a stray `docker compose pull` would substitute for your build.
+**The CS2 server image** — the upstream server plus the pinned plugins:
+
+```bash
+docker pull ghcr.io/tduarte/sidearm-cs2:latest
+```
+
+You do not need to pull it by hand; `docker compose up -d` does. It exists so a first install does not depend on `mms.alliedmods.net` and two GitHub release URLs being reachable — the build fetches the plugins from those, and a new user's install should not fail because one of them is down.
+
+`docker-compose.yml` sets both `image:` and `build:`, so compose **pulls when the tag exists and builds locally when it does not**. That means `docker compose up` works even before a new tag is published, and `docker compose build cs2` still overrides it when you are changing the plugin stack yourself.
+
+CI checks the built image actually contains Metamod, CounterStrikeSharp and MatchZy *before* pushing — publishing one with an empty plugin tree would be worse than publishing nothing.
 
 ---
 

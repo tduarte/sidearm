@@ -40,9 +40,10 @@ git push -u origin "$BRANCH"
 # dropped and the map reloads. That is never something a routine panel deploy
 # should do by surprise, so it is opt-in and asks first with a live headcount.
 #
-# `build`, not `pull`: the compose file tags this `sidearm/cs2:latest`, an
-# unqualified name with no registry behind it. CI builds the same context to
-# prove the plugin URLs still resolve, but deliberately never publishes it.
+# `build`, not `pull`, even though the image IS published now: this deploys the
+# branch you are testing, so the plugin stack has to come from the checkout on
+# the server rather than from whatever CI last pushed to
+# ghcr.io/tduarte/sidearm-cs2. Same reason the panel is built here.
 if [[ "$WITH_CS2" == "1" ]]; then
   # A2S_INFO to the public game port, the same packet a client sends — it
   # traverses the network exactly like a real join and needs no RCON (which is
