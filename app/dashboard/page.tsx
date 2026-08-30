@@ -22,6 +22,7 @@ import { StatCard } from "@/components/stat-card";
 import { StatusPill } from "@/components/status-pill";
 import { LoadError } from "@/components/load-error";
 import { FirstRun, isFirstRun } from "@/components/first-run";
+import { UpdateProgressCard } from "@/components/update-progress-card";
 import { Roster } from "@/components/players/roster";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useStatHistory } from "@/lib/hooks/use-stat-history";
@@ -86,6 +87,16 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/*
+        An update reaches here rather than `FirstRun` whenever the client has
+        ever seen the server up: `status-live-sync` keeps the last known map so
+        the header does not flash "unknown", which also means `isFirstRun`'s
+        map test can never match again in that tab.
+      */}
+      {status.state === "updating" && (
+        <UpdateProgressCard progress={status.updateProgress ?? null} />
+      )}
+
       {/* Hero */}
       <Card>
         <CardContent className="p-6 max-sm:pr-8">

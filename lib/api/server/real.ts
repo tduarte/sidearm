@@ -18,7 +18,7 @@ import type {
 } from "../types";
 import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
-import { runUpdateCheck } from "@/lib/cs2/updates";
+import { parseServerVersion, runUpdateCheck } from "@/lib/cs2/updates";
 import { fetchStatus } from "@/lib/cs2/status";
 import type { Get5Status } from "@/lib/cs2/plugins";
 import { bus } from "@/lib/ws/bus";
@@ -1490,6 +1490,7 @@ export const realAdapter = {
   async checkForUpdate(): Promise<UpdateStatus> {
     const result = await runUpdateCheck({
       rconExec,
+      installedBuild: installedBuildFromGameFiles,
       restartContainer: () => containerAction("cs2", "restart"),
       // `status.players` is the humans count. A null status means we have not
       // polled yet, and `runUpdateCheck` treats that as "do not restart".
@@ -1504,6 +1505,11 @@ export const realAdapter = {
       setServerStatusState("starting");
     } else if (result.deferredReason) {
       console.log(`[update] update pending, deferred: ${result.deferredReason}`);
+    } else if (result.update.upToDate === null) {
+      // A check that cannot reach a verdict used to return in silence, which is
+      // indistinguishable from "nothing to do" in the log. That is how auto
+      // update came to do nothing for three days without anyone noticing.
+      console.warn(`[update] check inconclusive: ${result.update.message}`);
     }
     return result.update;
   },
@@ -1624,6 +1630,29 @@ export const realAdapter = {
 /** `CS2_AUTO_UPDATE=1` lets the panel restart the container by itself. */
 export function autoRestartEnabled(): boolean {
   return process.env.CS2_AUTO_UPDATE === "1";
+}
+
+/**
+ * Where steamcmd records the installed build, under the game volume the panel
+ * already mounts read-only for MatchZy's database.
+ */
+const STEAM_INF_PATH = "/cs2/game/csgo/steam.inf";
+
+/**
+ * The installed CS2 build according to the game files.
+ *
+ * `steam.inf` is `KEY=value`, including `ServerVersion=14178`, which
+ * `parseServerVersion` already reads. Returns null rather than throwing for
+ * every ordinary reason the file is missing — the volume is not mounted, or
+ * steamcmd is still downloading it — so the caller falls back to RCON.
+ */
+async function installedBuildFromGameFiles(): Promise<number | null> {
+  try {
+    const { readFile } = await import("node:fs/promises");
+    return parseServerVersion(await readFile(STEAM_INF_PATH, "utf8"));
+  } catch {
+    return null;
+  }
 }
 
 /** Stores the latest check and pushes it to connected clients. */

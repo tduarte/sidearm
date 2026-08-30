@@ -409,13 +409,19 @@ export const mockAdapter = {
   async applyUpdate(): Promise<void> {
     let pct = 0;
     state.status.state = "updating";
+    // About what the real thing sustains, so the demo's ETA is plausible
+    // rather than a number that counts down in step with the fake progress.
+    const BYTES_PER_SEC = 14 * 1024 ** 2;
     const tick = setInterval(() => {
       pct = Math.min(100, pct + 7);
+      const bytesDone = Math.round((pct / 100) * 71_089_555_502);
       state.status.updateProgress = {
         phase: "downloading",
         pct,
-        bytesDone: Math.round((pct / 100) * 71_089_555_502),
+        bytesDone,
         bytesTotal: 71_089_555_502,
+        bytesPerSec: BYTES_PER_SEC,
+        etaSec: Math.round((71_089_555_502 - bytesDone) / BYTES_PER_SEC),
       };
       bus.emit({ type: "status.update", status: { ...state.status } });
       if (pct < 100) return;

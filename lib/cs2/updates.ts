@@ -104,6 +104,19 @@ export async function checkSteamVersion(
 export interface UpdateCheckDeps {
   /** Runs an RCON command; the watcher only ever issues `status`. */
   rconExec: (command: string) => Promise<string>;
+  /**
+   * The installed build, read from `steam.inf` in the game files, tried before
+   * RCON.
+   *
+   * RCON was the only source, and reading it means matching a version line
+   * whose layout CS2 has changed more than once. When that match failed the
+   * check returned "unknown" and — because an unknown build never triggers a
+   * restart — auto-update quietly stopped happening, with nothing in the log to
+   * say so. `steam.inf` is a `KEY=value` file steamcmd writes itself, so it does
+   * not depend on that regex, and unlike RCON it can still be read while the
+   * server is down. Optional: falls back to RCON when absent.
+   */
+  installedBuild?: () => Promise<number | null>;
   /** Restarts the CS2 container, which re-runs steamcmd on boot. */
   restartContainer: () => Promise<void>;
   /**
@@ -147,25 +160,39 @@ export async function runUpdateCheck(
     message: "",
   };
 
-  // `status`, not `version`: CS2 has no `version` command, and asking for one
-  // returns `Unknown command 'version'!`, which parses to null and pins
-  // `upToDate` at "unknown" forever — the update check silently never fires.
-  let versionOut: string;
-  try {
-    versionOut = await deps.rconExec("status");
-  } catch {
-    return {
-      update: { ...base, message: "RCON did not answer; cannot read server build" },
-      restarted: false,
-    };
+  // The game files first, because they answer even when the server does not.
+  let installedVersion: number | null = null;
+  if (deps.installedBuild) {
+    try {
+      installedVersion = await deps.installedBuild();
+    } catch {
+      // Not mounted, mid-download, unreadable — fall through to RCON.
+    }
   }
 
-  const installedVersion = parseServerVersion(versionOut);
+  if (installedVersion === null) {
+    // `status`, not `version`: CS2 has no `version` command, and asking for one
+    // returns `Unknown command 'version'!`, which parses to null and pins
+    // `upToDate` at "unknown" forever — the update check silently never fires.
+    let versionOut: string;
+    try {
+      versionOut = await deps.rconExec("status");
+    } catch {
+      return {
+        update: { ...base, message: "RCON did not answer; cannot read server build" },
+        restarted: false,
+      };
+    }
+
+    installedVersion = parseServerVersion(versionOut);
+  }
+
   if (installedVersion === null) {
     return {
       update: {
         ...base,
-        message: "Could not read a build number from the `status` version line",
+        message:
+          "Could not read a build number from steam.inf or the `status` version line",
       },
       restarted: false,
     };
@@ -263,5 +290,88 @@ export function parseUpdateProgress(logText: string): UpdateProgress | null {
     pct: Number.parseFloat(last[2]),
     bytesDone: Number.parseInt(last[3], 10),
     bytesTotal,
+  };
+}
+
+/** A transfer rate and what it implies for time remaining. */
+export interface RateEstimate {
+  bytesPerSec: number | null;
+  etaSec: number | null;
+}
+
+const NO_ESTIMATE: RateEstimate = { bytesPerSec: null, etaSec: null };
+
+/**
+ * Weight given to the newest sample in the rate EWMA.
+ *
+ * Measured on the live server, steamcmd swings between roughly 60 and 120
+ * Mbit/s minute to minute. An unsmoothed rate makes the remaining time jump by
+ * an hour between ticks, which reads as broken rather than as precise.
+ */
+const RATE_SMOOTHING = 0.3;
+
+/**
+ * Shortest gap worth differentiating over. The caller samples every few
+ * seconds; anything much tighter divides a small byte delta by a small
+ * interval and produces noise.
+ */
+const MIN_SAMPLE_MS = 1_000;
+
+/**
+ * Derives a download rate, and from it an ETA, out of successive progress
+ * readings.
+ *
+ * Stateful because steamcmd reports no rate — only a running byte count — so
+ * the only way to a "time remaining" is to remember the last reading.
+ *
+ * The case this is built around is a download that *restarts*. steamcmd counts
+ * each phase from zero, and a failed `app_update` drops the appmanifest and
+ * begins the whole 70 GB again (see AGENTS.md). Both show up here as a byte
+ * count that went backwards, which would otherwise yield a negative rate and a
+ * nonsense ETA. Either one resets the baseline instead.
+ */
+export function createRateTracker() {
+  let last: { bytesDone: number; phase: string; atMs: number } | null = null;
+  let rate: number | null = null;
+
+  function estimate(bytesTotal: number, bytesDone: number): RateEstimate {
+    if (rate === null || rate <= 0) return { bytesPerSec: rate, etaSec: null };
+    const remaining = Math.max(0, bytesTotal - bytesDone);
+    return {
+      bytesPerSec: Math.round(rate),
+      etaSec: Math.round(remaining / rate),
+    };
+  }
+
+  return {
+    /** Feeds in one reading and returns the estimate it supports. */
+    observe(p: UpdateProgress, atMs: number): RateEstimate {
+      const prev = last;
+      const restarted =
+        prev !== null && (p.phase !== prev.phase || p.bytesDone < prev.bytesDone);
+
+      if (prev === null || restarted) {
+        last = { bytesDone: p.bytesDone, phase: p.phase, atMs };
+        rate = null;
+        return NO_ESTIMATE;
+      }
+
+      const elapsedMs = atMs - prev.atMs;
+      // Too soon to re-measure: keep the previous reading as the baseline so
+      // the next real interval is measured from it, and answer with what the
+      // existing rate implies for the byte count we were just handed.
+      if (elapsedMs < MIN_SAMPLE_MS) return estimate(p.bytesTotal, p.bytesDone);
+
+      const sample = (p.bytesDone - prev.bytesDone) / (elapsedMs / 1000);
+      rate = rate === null ? sample : rate + RATE_SMOOTHING * (sample - rate);
+      last = { bytesDone: p.bytesDone, phase: p.phase, atMs };
+      return estimate(p.bytesTotal, p.bytesDone);
+    },
+
+    /** Forgets everything; for when the download ends or the container dies. */
+    reset() {
+      last = null;
+      rate = null;
+    },
   };
 }

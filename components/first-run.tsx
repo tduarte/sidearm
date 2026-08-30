@@ -3,13 +3,8 @@
 import { CloudArrowDown, Info } from "@phosphor-icons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Progress } from "@/components/ui/progress";
+import { UpdateProgressDetail } from "@/components/update-progress-card";
 import type { ServerStatus } from "@/lib/api/types";
-
-/** Bytes → GB with one decimal. steamcmd totals are in the tens of GB. */
-function gb(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-}
 
 /**
  * The screen for a server that is downloading itself.
@@ -42,21 +37,7 @@ export function FirstRun({ status }: { status: ServerStatus }) {
             wrong; the server simply is not listening yet.
           </p>
 
-          {progress ? (
-            <div className="space-y-2">
-              <Progress value={progress.pct} className="h-2" />
-              <p className="text-sm tabular-nums text-muted-foreground">
-                {progress.phase} · {gb(progress.bytesDone)} of{" "}
-                {gb(progress.bytesTotal)} · {Math.floor(progress.pct)}%
-              </p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">
-              Waiting for steamcmd to report progress. If nothing appears for
-              several minutes, <code className="font-mono">docker compose logs -f cs2</code>{" "}
-              shows what it is doing.
-            </p>
-          )}
+          <UpdateProgressDetail progress={progress} />
         </CardContent>
       </Card>
 
