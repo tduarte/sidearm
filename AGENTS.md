@@ -48,6 +48,13 @@ things about it are load-bearing and non-obvious:
   boot for exactly that reason — do not "optimise" it to run once.
 - **`install-plugins.sh` is sourced, not executed**, so it must never call `exit` and must not set
   `set -e`. A server without plugins is bad; a server that will not boot is worse.
+- **`patch-entry-retry.sh` rewrites the base image's steamcmd retry at build time.** Upstream
+  deletes the appmanifest before every retry, and `STEAMAPPVALIDATE` defaults to 0, so a failed
+  `app_update` leaves steamcmd with no record of the install *and* no way to check the 70 GB on
+  disk — it re-downloads all of it. That cost three hours on 2026-08-30. The patch retries with
+  `validate` first and keeps the wipe only for the last attempt, which is upstream's escape hatch
+  for HTTP 401s on stale manifests. It asserts the block it expects before editing, so a base image
+  that reworks the retry **fails the build** rather than silently shipping unpatched.
 
 Published as **`ghcr.io/tduarte/sidearm-cs2`**, so a first install pulls rather than building — the
 build fetches from `mms.alliedmods.net` and two GitHub release URLs, and nobody's install should
@@ -77,6 +84,25 @@ plugin stack yourself.
   tokens; reissue at steamcommunity.com/dev/managegameservers. A healthy server logs
   `Gameserver logged on to Steam, assigned identity steamid:...` and reports `secure public` in
   RCON `status`.
+
+## Deciding whether a CS2 update is pending
+
+Restarting *is* the update on this image, so the only question the panel answers is whether one is
+waiting. It compares the installed build against Steam's
+`ISteamApps/UpToDateCheck` (public, no key), every `CS2_UPDATE_CHECK_MS`, and with
+`CS2_AUTO_UPDATE=1` restarts as soon as no humans are connected.
+
+- **Read the build from `steam.inf`, not from RCON `status`.** It was RCON-only, matched with a
+  regex against a version line CS2 has changed more than once. When that match failed the check
+  returned "unknown" — and an unknown build never triggers a restart, while the early return logged
+  nothing at all. On the live server that was ~290 checks over three days sitting on a six-day-old
+  update, in complete silence. `steam.inf` is `KEY=value` (`ServerVersion=14178`) written by
+  steamcmd itself, at `/cs2/game/csgo/steam.inf` through the panel's existing read-only mount, and
+  it is readable even while the server is down. RCON stays as the fallback.
+- **Every outcome of the check must log.** Four of its paths used to return silently, three of them
+  failures, which is indistinguishable from "nothing to do". An inconclusive check now warns.
+- **`playerCount()` returning null means "not polled yet", never "empty".** Guessing wrong here
+  drops whoever is connected, so a null defers the restart.
 
 ## MatchZy: what it owns, and what it will not tell you
 
