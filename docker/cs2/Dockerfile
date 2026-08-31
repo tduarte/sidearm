@@ -57,6 +57,20 @@ RUN cp /etc/pre.sh /opt/sidearm/pre.sh.stock
 COPY install-plugins.sh /opt/sidearm/install-plugins.sh
 COPY entrypoint.sh      /opt/sidearm/entrypoint.sh
 
+# A failed `app_update` must not cost 70 GB.
+#
+# Upstream's retry deletes the appmanifest every time, and STEAMAPPVALIDATE
+# defaults to 0 — so steamcmd loses its record of the install *and* has no way
+# to check what is already on disk, and re-downloads all of it. That turned a
+# routine patch into a three-hour outage on 2026-08-30. The patch retries with
+# `validate` first and keeps the wipe as the last attempt; see the script.
+#
+# It asserts the block it expects before editing, so a future base image that
+# reworks the retry fails this build instead of silently shipping unpatched.
+COPY patch-entry-retry.sh /tmp/patch-entry-retry.sh
+RUN bash /tmp/patch-entry-retry.sh /home/steam/entry.sh \
+    && rm -f /tmp/patch-entry-retry.sh
+
 # Ownership set per-path, never `chown -R`: on this project's ZFS-backed LXC an
 # ownership change forces an overlayfs copy-up, and recursing a large tree
 # measured 607s (see the panel Dockerfile).

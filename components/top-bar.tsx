@@ -15,6 +15,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusPill } from "@/components/status-pill";
+import { formatEta, gb } from "@/components/update-progress-card";
 import { DangerConfirm } from "@/components/danger-confirm";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useUpdateStatus } from "@/lib/hooks/use-update-status";
@@ -25,11 +26,6 @@ import {
   formatElapsed,
   usePendingOp,
 } from "@/lib/hooks/use-pending-op";
-
-/** Bytes → GB with one decimal. steamcmd totals are always in the tens of GB. */
-function gb(bytes: number): string {
-  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
-}
 
 export function TopBar() {
   const { data: status, isPending } = useServerStatus();
@@ -115,7 +111,12 @@ export function TopBar() {
               />
               <span className="hidden truncate text-xs text-muted-foreground tabular-nums sm:inline">
                 {progress
-                  ? `${progress.phase} · ${gb(progress.bytesDone)} / ${gb(progress.bytesTotal)}`
+                  ? [
+                      `${progress.phase} · ${gb(progress.bytesDone)} / ${gb(progress.bytesTotal)}`,
+                      formatEta(progress.etaSec),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
                   : "starting up"}
               </span>
             </div>
@@ -174,7 +175,14 @@ export function TopBar() {
               <>
                 <DangerConfirm
                   title="Restart the server?"
-                  consequence="Everyone connected is dropped while the container comes back. It usually takes under a minute unless a game update is pending."
+                  // Restarting *is* the update on this image, so when one is
+                  // pending the honest cost is tens of GB and an hour or more,
+                  // not "under a minute". The panel already knows which it is.
+                  consequence={
+                    updateAvailable
+                      ? "A CS2 update is pending, so this restart will also apply it: the container re-downloads game files on boot, which can take an hour or more. Everyone connected is dropped and the server stays unjoinable until it finishes."
+                      : "Everyone connected is dropped while the container comes back. It usually takes under a minute unless a game update is pending."
+                  }
                   operation="docker restart cs2"
                   confirmLabel="Restart"
                   onConfirm={() => restart.mutate()}

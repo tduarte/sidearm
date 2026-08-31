@@ -1504,6 +1504,11 @@ export const realAdapter = {
       setServerStatusState("starting");
     } else if (result.deferredReason) {
       console.log(`[update] update pending, deferred: ${result.deferredReason}`);
+    } else if (result.update.upToDate === null) {
+      // A check that cannot reach a verdict used to return in silence, which is
+      // indistinguishable from "nothing to do" in the log. That is how auto
+      // update came to do nothing for three days without anyone noticing.
+      console.warn(`[update] check inconclusive: ${result.update.message}`);
     }
     return result.update;
   },
@@ -1625,6 +1630,7 @@ export const realAdapter = {
 export function autoRestartEnabled(): boolean {
   return process.env.CS2_AUTO_UPDATE === "1";
 }
+
 
 /** Stores the latest check and pushes it to connected clients. */
 export function setUpdateStatus(update: UpdateStatus): void {

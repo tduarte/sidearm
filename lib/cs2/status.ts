@@ -8,7 +8,11 @@ import type {
 } from "@/lib/api/types";
 import { rconExec } from "./rcon";
 import { containerLogs, containerStats, inspectContainer } from "./docker";
-import { parseServerVersion, parseUpdateProgress } from "./updates";
+import {
+  createRateTracker,
+  parseServerVersion,
+  parseUpdateProgress,
+} from "./updates";
 import { asInt, parseCvarEcho } from "./cvars";
 import {
   CSSHARP_PROBE,
@@ -34,6 +38,12 @@ let cachedPublicIp: string | null = null;
 const PROGRESS_REFRESH_MS = 5000;
 let lastProgressFetch = 0;
 let lastProgress: UpdateProgress | null = null;
+
+/**
+ * Turns successive byte counts into a rate and an ETA. Fed only on real log
+ * reads, so its sample interval is `PROGRESS_REFRESH_MS`, not the status poll.
+ */
+const rateTracker = createRateTracker();
 
 /**
  * How often to ask whether the plugin stack is loaded.
@@ -417,9 +427,20 @@ export async function fetchStatus(): Promise<{
         const since = startedAt
           ? Math.floor(new Date(startedAt).getTime() / 1000)
           : undefined;
-        lastProgress = parseUpdateProgress(
+        const parsedProgress = parseUpdateProgress(
           await containerLogs("cs2", 50, since),
         );
+        if (parsedProgress) {
+          lastProgress = {
+            ...parsedProgress,
+            ...rateTracker.observe(parsedProgress, now),
+          };
+        } else {
+          // Between phases, or the download is over. Either way the next rate
+          // has to be measured afresh rather than across the gap.
+          lastProgress = null;
+          rateTracker.reset();
+        }
         updateProgress = lastProgress;
       } catch {
         // Logs unavailable (proxy denies it, container gone) — stay on "starting".
@@ -428,7 +449,10 @@ export async function fetchStatus(): Promise<{
     if (updateProgress) state = "updating";
   }
 
-  if (state === "running") lastProgress = null;
+  if (state === "running") {
+    lastProgress = null;
+    rateTracker.reset();
+  }
 
   const status: ServerStatus = {
     state,

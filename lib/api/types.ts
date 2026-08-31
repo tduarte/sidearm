@@ -427,6 +427,18 @@ export interface UpdateProgress {
   pct: number;
   bytesDone: number;
   bytesTotal: number;
+  /**
+   * Smoothed transfer rate, or `null` until two samples of the same phase have
+   * been seen. steamcmd reports no rate of its own, and the panel throttles its
+   * log reads, so this is derived from successive `bytesDone` readings.
+   */
+  bytesPerSec?: number | null;
+  /**
+   * Seconds left at the current rate, or `null` when that cannot be computed —
+   * no rate yet, or a stalled download. Never a guess: a 70 GB re-download is
+   * the difference between waiting and giving up on the evening.
+   */
+  etaSec?: number | null;
 }
 
 /**

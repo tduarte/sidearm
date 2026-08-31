@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import { describe, it } from "node:test";
 import {
   checkSteamVersion,
+  createRateTracker,
   parseServerVersion,
   parseUpdateProgress,
   runUpdateCheck,
@@ -52,11 +53,28 @@ describe("parseServerVersion", () => {
     assert.equal(parseServerVersion("Protocol version 14177"), 14177);
   });
 
-  it("reads ServerVersion from steam.inf", () => {
+  it("reads a ServerVersion= line", () => {
     assert.equal(
       parseServerVersion("PatchVersion=1.41.7.7\nServerVersion=14177\n"),
       14177,
     );
+  });
+
+  it("does not treat a real steam.inf as a source of the build", () => {
+    // Reading this file looks like the obvious way to avoid parsing `status`,
+    // and it is a trap. A live CS2 install writes ServerVersion=2000899 while
+    // `status` reports 1.41.7.8/14178, and 14178 is what UpToDateCheck compares
+    // against — numerically. Feed it 2000899 and Steam answers "up to date"
+    // forever. The parser reads the number, so the guard has to be that nothing
+    // wires steam.inf into the update check.
+    const REAL_STEAM_INF = [
+      "ClientVersion=2000899",
+      "ServerVersion=2000899",
+      "PatchVersion=1.41.7.8",
+      "ProductName=cs2",
+    ].join("\n");
+    assert.equal(parseServerVersion(REAL_STEAM_INF), 2_000_899);
+    assert.notEqual(parseServerVersion(REAL_STEAM_INF), 14_178);
   });
 
   it("reads the build out of real CS2 `status` output", () => {
@@ -115,6 +133,83 @@ describe("parseUpdateProgress", () => {
 
   it("ignores unrelated log output", () => {
     assert.equal(parseUpdateProgress("Starting server...\nLoading map"), null);
+  });
+});
+
+describe("createRateTracker", () => {
+  const TOTAL = 71_089_554_542;
+  const at = (phase: string, bytesDone: number) => ({
+    phase,
+    pct: (bytesDone / TOTAL) * 100,
+    bytesDone,
+    bytesTotal: TOTAL,
+  });
+
+  it("has no answer from a single sample", () => {
+    const t = createRateTracker();
+    assert.deepEqual(t.observe(at("downloading", 1_000_000), 0), {
+      bytesPerSec: null,
+      etaSec: null,
+    });
+  });
+
+  it("derives a rate and an ETA from two samples", () => {
+    const t = createRateTracker();
+    t.observe(at("downloading", 0), 0);
+    // 10 MB in 10s = 1 MB/s, with 20 MB still to go.
+    const r = t.observe(
+      { ...at("downloading", 10 * 1024 ** 2), bytesTotal: 30 * 1024 ** 2 },
+      10_000,
+    );
+    assert.equal(r.bytesPerSec, 1024 ** 2);
+    assert.equal(r.etaSec, 20);
+  });
+
+  it("starts over when the download restarts from zero", () => {
+    // The failure mode this exists for: steamcmd drops the appmanifest and
+    // re-fetches all 70 GB, so the byte count falls off a cliff. A rate carried
+    // across that boundary would be negative and the ETA meaningless.
+    const t = createRateTracker();
+    t.observe(at("downloading", 50_000_000_000), 0);
+    t.observe(at("downloading", 50_100_000_000), 10_000);
+    const r = t.observe(at("downloading", 18), 20_000);
+    assert.deepEqual(r, { bytesPerSec: null, etaSec: null });
+  });
+
+  it("starts over when steamcmd changes phase", () => {
+    // Each phase counts from zero, so verifying → downloading is not a stall.
+    const t = createRateTracker();
+    t.observe(at("verifying install", 60_000_000_000), 0);
+    const r = t.observe(at("downloading", 500_000_000), 10_000);
+    assert.deepEqual(r, { bytesPerSec: null, etaSec: null });
+  });
+
+  it("smooths rather than tracking each sample exactly", () => {
+    const t = createRateTracker();
+    t.observe(at("downloading", 0), 0);
+    t.observe(at("downloading", 10 * 1024 ** 2), 10_000);
+    // Rate doubles; the reported figure moves toward it without jumping to it.
+    const r = t.observe(at("downloading", 30 * 1024 ** 2), 20_000);
+    assert.ok(r.bytesPerSec !== null);
+    assert.ok(r.bytesPerSec > 1024 ** 2 && r.bytesPerSec < 2 * 1024 ** 2);
+  });
+
+  it("reports no ETA for a stalled download", () => {
+    const t = createRateTracker();
+    t.observe(at("downloading", 1_000_000), 0);
+    const r = t.observe(at("downloading", 1_000_000), 10_000);
+    assert.equal(r.etaSec, null);
+  });
+
+  it("forgets everything on reset", () => {
+    const t = createRateTracker();
+    t.observe(at("downloading", 0), 0);
+    t.observe(at("downloading", 10 * 1024 ** 2), 10_000);
+    t.reset();
+    assert.deepEqual(t.observe(at("downloading", 20 * 1024 ** 2), 20_000), {
+      bytesPerSec: null,
+      etaSec: null,
+    });
   });
 });
 
@@ -190,6 +285,69 @@ describe("runUpdateCheck", () => {
     assert.equal(r.restarted, false);
     assert.equal(r.update.autoRestart, false);
     assert.match(r.deferredReason ?? "", /disabled/);
+  });
+
+  it("uses installedBuild when it answers, without asking RCON", async () => {
+    let askedRcon = false;
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => 14_150,
+        rconExec: async () => {
+          askedRcon = true;
+          return "Server Version: 99999";
+        },
+      }),
+    );
+    assert.equal(r.update.installedVersion, 14_150);
+    assert.equal(askedRcon, false);
+  });
+
+  it("falls back to RCON when installedBuild cannot answer", async () => {
+    const r = await runUpdateCheck(
+      baseDeps({ installedBuild: async () => null }),
+    );
+    assert.equal(r.update.installedVersion, 14_150);
+    assert.equal(r.update.upToDate, false);
+  });
+
+  it("falls back to RCON when installedBuild throws", async () => {
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => {
+          throw new Error("ENOENT");
+        },
+      }),
+    );
+    assert.equal(r.update.installedVersion, 14_150);
+  });
+
+  it("reports an unknown build when neither source answers", async () => {
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => null,
+        rconExec: async () => "Unknown command 'version'!",
+      }),
+    );
+    assert.equal(r.update.upToDate, null);
+    assert.equal(r.restarted, false);
+    assert.equal(r.update.installedVersion, null);
+  });
+
+  it("never restarts on an undeterminable build", async () => {
+    // The failure that hides itself: an unknown build is not "up to date", but
+    // it is also not grounds to restart, so the check must do nothing *and*
+    // leave upToDate null for the caller to report.
+    let restarted = false;
+    const r = await runUpdateCheck(
+      baseDeps({
+        rconExec: async () => "Unknown command 'version'!",
+        restartContainer: async () => {
+          restarted = true;
+        },
+      }),
+    );
+    assert.equal(restarted, false);
+    assert.equal(r.update.upToDate, null);
   });
 
   it("does nothing when already up to date", async () => {
