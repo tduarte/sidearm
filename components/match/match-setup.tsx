@@ -1,16 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowClockwise,
-  FlagCheckered,
   Play,
   Trash,
   Warning,
 } from "@phosphor-icons/react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -30,43 +28,28 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { DangerConfirm } from "@/components/danger-confirm";
+import { TeamBuilder, type TeamEntry } from "@/components/match/team-builder";
 import { api } from "@/lib/api/client";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
-import { useMatchState } from "@/lib/hooks/use-match-state";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { isConvertibleSteamId } from "@/lib/cs2/steamid";
+import {
+  ACTIVE_DUTY_AS_OF,
+  activeDutyPool,
+} from "@/lib/cs2/map-pools";
 import { cn } from "@/lib/utils";
 import type { MatchDefinition } from "@/lib/cs2/match-config";
+import type { StoredMatchConfig } from "@/lib/db/match-configs";
 
-/** Which side of the setup a player has been put on. */
-type Side = "none" | "team1" | "team2";
-
-/**
- * Human-readable labels for MatchZy's gamestate.
- *
- * `none` never reaches here — the card only shows a running match when
- * something is actually loaded.
- */
-const STATE_LABEL: Record<string, string> = {
-  pending_restore: "Restoring a round backup",
-  waiting_for_players: "Waiting for players",
-  warmup: "Warmup — waiting for teams to ready up",
-  knife: "Knife round",
-  waiting_for_knife_decision: "Knife won — waiting for a side decision",
-  going_live: "Going live",
-  live: "Live",
-  post_game: "Match over",
-};
+/** A player on a roster, before we know whether they are on the server now. */
+type RosterMember = { id: string; name: string };
 
 export function MatchSetup() {
   const qc = useQueryClient();
   const { data: status } = useServerStatus();
-  const { data: match } = useMatchState();
   const { data: players = [] } = useLivePlayers();
 
   const matchzyUp = status?.plugins?.matchzy === true;
-  const loadedState = match?.matchzyState ?? null;
-  const running = loadedState !== null && loadedState !== "none";
 
   const saved = useQuery({
     queryKey: ["matches"],
@@ -79,7 +62,8 @@ export function MatchSetup() {
   const [name, setName] = useState("");
   const [team1, setTeam1] = useState("Team A");
   const [team2, setTeam2] = useState("Team B");
-  const [sides, setSides] = useState<Record<string, Side>>({});
+  const [roster1, setRoster1] = useState<RosterMember[]>([]);
+  const [roster2, setRoster2] = useState<RosterMember[]>([]);
   const [maps, setMaps] = useState<string[]>([]);
   const [numMaps, setNumMaps] = useState(1);
   const [skipVeto, setSkipVeto] = useState(true);
@@ -91,15 +75,82 @@ export function MatchSetup() {
     enabled: matchzyUp,
   });
 
+  const allMaps = useMemo(() => mapList.data?.all ?? [], [mapList.data]);
+  const activeDuty = useMemo(
+    () => activeDutyPool(allMaps.map((m) => m.name)),
+    [allMaps],
+  );
+
+  // Newest first — the one you ran last is the one you most likely want again.
+  const templates = useMemo(
+    () =>
+      [...(saved.data ?? [])].sort((a, b) =>
+        b.createdAt.localeCompare(a.createdAt),
+      ),
+    [saved.data],
+  );
+
+  const applyTemplate = (t: StoredMatchConfig) => {
+    const d = t.definition;
+    setName(d.id);
+    setTeam1(d.team1.name);
+    setTeam2(d.team2.name);
+    setRoster1(d.team1.players.map((p) => ({ id: p.steamId, name: p.name })));
+    setRoster2(d.team2.players.map((p) => ({ id: p.steamId, name: p.name })));
+    setMaps(d.maps);
+    setNumMaps(d.numMaps);
+    setSkipVeto(d.skipVeto);
+    setClinch(d.clinchSeries);
+  };
+
+  // Never start from blank. The form seeds itself from the most recent setup
+  // the first time one arrives — same friends, same pool, most nights — and
+  // then leaves the operator alone, so a later refetch cannot stamp on what
+  // they are in the middle of typing.
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (seeded.current || templates.length === 0) return;
+    seeded.current = true;
+    applyTemplate(templates[0]);
+  }, [templates]);
+
   // Bots have no Steam identity, so they cannot be on a roster — MatchZy would
-  // simply never recognise them and the match would never ready up. Shown
-  // anyway, greyed, because "where did my bots go" is a worse question than
-  // "why can't I pick them".
+  // simply never recognise them and the match would never ready up. Counted
+  // and explained rather than silently dropped.
   const eligible = useMemo(
     () => players.filter((p) => isConvertibleSteamId(p.steamId)),
     [players],
   );
   const ineligible = players.length - eligible.length;
+
+  const connectedIds = useMemo(
+    () => new Set(eligible.map((p) => p.steamId)),
+    [eligible],
+  );
+  const rostered = useMemo(
+    () => new Set([...roster1, ...roster2].map((p) => p.id)),
+    [roster1, roster2],
+  );
+  const pool = useMemo(
+    () =>
+      eligible
+        .filter((p) => !rostered.has(p.steamId))
+        .map((p) => ({ id: p.steamId, name: p.name })),
+    [eligible, rostered],
+  );
+
+  const withPresence = (r: RosterMember[]): TeamEntry[] =>
+    r.map((p) => ({ ...p, connected: connectedIds.has(p.id) }));
+
+  const assign = (id: string, side: "team1" | "team2") => {
+    const member = pool.find((p) => p.id === id);
+    if (!member) return;
+    (side === "team1" ? setRoster1 : setRoster2)((prev) => [...prev, member]);
+  };
+  const unassign = (id: string) => {
+    setRoster1((prev) => prev.filter((p) => p.id !== id));
+    setRoster2((prev) => prev.filter((p) => p.id !== id));
+  };
 
   const definition = (): MatchDefinition => ({
     id: name.trim(),
@@ -108,23 +159,15 @@ export function MatchSetup() {
     matchNumber: 0,
     team1: {
       name: team1,
-      players: eligible
-        .filter((p) => sides[p.steamId] === "team1")
-        .map((p) => ({ steamId: p.steamId, name: p.name })),
+      players: roster1.map((p) => ({ steamId: p.id, name: p.name })),
     },
     team2: {
       name: team2,
-      players: eligible
-        .filter((p) => sides[p.steamId] === "team2")
-        .map((p) => ({ steamId: p.steamId, name: p.name })),
+      players: roster2.map((p) => ({ steamId: p.id, name: p.name })),
     },
     maps,
     numMaps,
-    playersPerTeam: Math.max(
-      1,
-      eligible.filter((p) => sides[p.steamId] === "team1").length,
-      eligible.filter((p) => sides[p.steamId] === "team2").length,
-    ),
+    playersPerTeam: Math.max(1, roster1.length, roster2.length),
     minPlayersToReady: 1,
     skipVeto,
     clinchSeries: clinch,
@@ -144,6 +187,28 @@ export function MatchSetup() {
     },
   });
 
+  // The two-step this replaces — save, hunt for the row, load — was the whole
+  // reason a setup took two screens and three clicks to start. Saving is still
+  // what makes it re-runnable, so this does both rather than skipping it.
+  const saveAndStart = useMutation({
+    mutationFn: async () => {
+      const def = definition();
+      const { warnings } = await api.saveMatch(def);
+      await api.loadMatch(def.id);
+      return warnings;
+    },
+    meta: { action: "Starting the match" },
+    onSuccess: (warnings) => {
+      toast.success("Match loading", {
+        description:
+          "MatchZy is changing the map and starting warmup. Players ready up with .ready in chat.",
+      });
+      for (const w of warnings) toast.warning(w, { duration: 10000 });
+      qc.invalidateQueries({ queryKey: ["matches"] });
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
   const load = useMutation({
     mutationFn: (id: string) => api.loadMatch(id),
     meta: { action: "Loading the match" },
@@ -153,15 +218,6 @@ export function MatchSetup() {
           "MatchZy is changing the map and starting warmup. Players ready up with .ready in chat.",
       });
       qc.invalidateQueries({ queryKey: ["matches"] });
-      qc.invalidateQueries({ queryKey: ["match"] });
-    },
-  });
-
-  const end = useMutation({
-    mutationFn: () => api.endMatch(),
-    meta: { action: "Ending the match" },
-    onSuccess: () => {
-      toast.success("Match ended");
       qc.invalidateQueries({ queryKey: ["match"] });
     },
   });
@@ -180,65 +236,17 @@ export function MatchSetup() {
           <CardDescription>
             Needs MatchZy, which is not loaded on this server. Without it the
             panel can set up a knife round with cvars but cannot run a match
-            flow — no veto, no ready-up, no backups.
+            flow — no veto, no ready-up, no backups. The manual controls below
+            are what this server can do.
           </CardDescription>
         </CardHeader>
       </Card>
     );
   }
 
-  if (running) {
-    return (
-      <Card>
-        <CardHeader className="pb-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <CardTitle className="text-base">Match in progress</CardTitle>
-            <Badge variant="outline" className="gap-1.5">
-              <span className="relative flex h-2 w-2">
-                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-60" />
-                <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-              </span>
-              {STATE_LABEL[loadedState] ?? loadedState}
-            </Badge>
-          </div>
-          <CardDescription>
-            MatchZy is running this match, so it owns the map cycle, the
-            gameplay cvars and demo recording. The panel&apos;s own controls for
-            those stand down until it finishes.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <DangerConfirm
-            title="End the match?"
-            consequence="MatchZy stops the match immediately and returns the server to warmup. The result is not recorded."
-            operation="css_endmatch"
-            confirmLabel="End it"
-            onConfirm={() => end.mutate()}
-          >
-            {(arm) => (
-              <Button variant="destructive" onClick={arm} disabled={end.isPending}>
-                <FlagCheckered className="h-4 w-4" />
-                End match
-              </Button>
-            )}
-          </DangerConfirm>
-        </CardContent>
-      </Card>
-    );
-  }
-
-  const cycle = (steamId: string) =>
-    setSides((prev) => {
-      const next: Side =
-        prev[steamId] === "team1"
-          ? "team2"
-          : prev[steamId] === "team2"
-            ? "none"
-            : "team1";
-      return { ...prev, [steamId]: next };
-    });
-
-  const allMaps = mapList.data?.all ?? [];
+  const startable = name.trim() !== "" && maps.length > 0;
+  const vetoIsPointless =
+    !skipVeto && maps.length === numMaps && maps.length > 0;
 
   return (
     <Card>
@@ -246,17 +254,17 @@ export function MatchSetup() {
         <CardTitle className="text-base">Run a match</CardTitle>
         <CardDescription>
           MatchZy handles the veto, the knife round, ready-up and round backups.
-          Loading a match changes the map and restarts the game for everyone.
+          Starting a match changes the map and restarts the game for everyone.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-5">
-        {saved.data && saved.data.length > 0 && (
+        {templates.length > 0 && (
           <div className="space-y-2">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
               Saved setups
             </Label>
-            <ul className="divide-y rounded-md border">
-              {saved.data.map((m) => (
+            <ul className="divide-y border">
+              {templates.map((m) => (
                 <li
                   key={m.id}
                   className="flex flex-wrap items-center justify-between gap-2 px-3 py-2"
@@ -266,11 +274,20 @@ export function MatchSetup() {
                     <p className="truncate text-xs text-muted-foreground">
                       {m.definition.team1.name} vs {m.definition.team2.name} ·
                       BO{m.definition.numMaps} ·{" "}
-                      {m.definition.maps.join(", ") || "no maps"}
+                      {m.definition.maps.length} map
+                      {m.definition.maps.length === 1 ? "" : "s"}
+                      {m.definition.skipVeto ? "" : " · veto"}
                       {m.loadedAt ? " · loaded before" : ""}
                     </p>
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => applyTemplate(m)}
+                    >
+                      Edit
+                    </Button>
                     <DangerConfirm
                       title={`Load ${m.id}?`}
                       consequence="MatchZy changes the map and restarts the game. Anyone connected is put into warmup and has to ready up before it starts."
@@ -301,62 +318,45 @@ export function MatchSetup() {
           </div>
         )}
 
-        <div className="grid gap-3 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="match-name">Setup name</Label>
-            <Input
-              id="match-name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder="friday-scrim"
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="team1">Team 1</Label>
-            <Input id="team1" value={team1} onChange={(e) => setTeam1(e.target.value)} />
-          </div>
-          <div className="space-y-1.5">
-            <Label htmlFor="team2">Team 2</Label>
-            <Input id="team2" value={team2} onChange={(e) => setTeam2(e.target.value)} />
-          </div>
+        <div className="space-y-1.5">
+          <Label htmlFor="match-name">Setup name</Label>
+          <Input
+            id="match-name"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="friday-scrim"
+            className="sm:max-w-xs"
+          />
         </div>
 
         <div className="space-y-2">
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-            Teams — click a player to move them
-          </Label>
-          {players.length === 0 ? (
-            <p className="rounded-md border border-dashed px-3 py-4 text-sm text-muted-foreground">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              Teams
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              Arrows put a player on a team; click a name to take them off.
+            </p>
+          </div>
+          {players.length === 0 && roster1.length + roster2.length === 0 ? (
+            <p className="border border-dashed px-3 py-4 text-sm text-muted-foreground">
               Nobody is connected. Players have to be on the server to be put on
-              a team — MatchZy identifies them by Steam ID.
+              a team — MatchZy identifies them by Steam ID. A saved setup keeps
+              its roster, and MatchZy puts each player on their team as they
+              join.
             </p>
           ) : (
-            <div className="flex flex-wrap gap-1.5">
-              {eligible.map((p) => {
-                const side = sides[p.steamId] ?? "none";
-                return (
-                  <button
-                    key={p.steamId}
-                    type="button"
-                    onClick={() => cycle(p.steamId)}
-                    aria-pressed={side !== "none"}
-                    className={cn(
-                      "rounded-md border px-2.5 py-1 text-sm transition-colors",
-                      side === "none" && "text-muted-foreground hover:bg-muted",
-                      side === "team1" && "border-primary/50 bg-primary/10 text-foreground",
-                      side === "team2" && "border-sky-500/50 bg-sky-500/10 text-foreground",
-                    )}
-                  >
-                    {p.name}
-                    {side !== "none" && (
-                      <span className="ml-1.5 text-xs text-muted-foreground">
-                        {side === "team1" ? team1 : team2}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+            <TeamBuilder
+              pool={pool}
+              team1={withPresence(roster1)}
+              team2={withPresence(roster2)}
+              team1Name={team1}
+              team2Name={team2}
+              onTeam1Name={setTeam1}
+              onTeam2Name={setTeam2}
+              onAssign={assign}
+              onRemove={unassign}
+            />
           )}
           {ineligible > 0 && (
             <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -368,9 +368,38 @@ export function MatchSetup() {
         </div>
 
         <div className="space-y-2">
-          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-            Map pool
-          </Label>
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+              Map pool
+            </Label>
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={activeDuty.present.length === 0}
+              onClick={() => {
+                setMaps(activeDuty.present);
+                // Seven maps and a veto is the point of the preset; leaving
+                // skip-veto on would hand MatchZy the pool in order instead.
+                setSkipVeto(false);
+              }}
+            >
+              Active Duty
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Active Duty is the pool as of {ACTIVE_DUTY_AS_OF} — Valve rotates
+            it, and nothing the server reports says which maps are in it, so
+            check the seven below against the pool you meant to play.
+          </p>
+          {activeDuty.missing.length > 0 && (
+            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
+              <Warning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              This server does not have{" "}
+              {activeDuty.missing.map((m) => m.replace(/^de_/, "")).join(", ")}{" "}
+              installed, so the preset picks{" "}
+              {activeDuty.present.length} of 7.
+            </p>
+          )}
           <div className="flex flex-wrap gap-1.5">
             {allMaps.map((m) => {
               const picked = maps.includes(m.name);
@@ -387,7 +416,7 @@ export function MatchSetup() {
                     )
                   }
                   className={cn(
-                    "rounded-md border px-2.5 py-1 font-mono text-xs transition-colors",
+                    "border px-2.5 py-1 font-mono text-xs transition-colors",
                     picked
                       ? "border-primary/50 bg-primary/10 text-foreground"
                       : "text-muted-foreground hover:bg-muted",
@@ -417,7 +446,7 @@ export function MatchSetup() {
               </SelectContent>
             </Select>
           </div>
-          <div className="flex items-center justify-between gap-2 rounded-md border px-3">
+          <div className="flex items-center justify-between gap-2 border px-3">
             <div className="py-2">
               <Label htmlFor="skip-veto">Skip the veto</Label>
               <p className="text-xs text-muted-foreground">
@@ -426,7 +455,7 @@ export function MatchSetup() {
             </div>
             <Switch id="skip-veto" checked={skipVeto} onCheckedChange={setSkipVeto} />
           </div>
-          <div className="flex items-center justify-between gap-2 rounded-md border px-3">
+          <div className="flex items-center justify-between gap-2 border px-3">
             <div className="py-2">
               <Label htmlFor="clinch">Clinch the series</Label>
               <p className="text-xs text-muted-foreground">
@@ -443,7 +472,7 @@ export function MatchSetup() {
           it whatever was asked for. Said here rather than only in the save
           warning, so it is visible while the pool is being picked.
         */}
-        {!skipVeto && maps.length === numMaps && maps.length > 0 && (
+        {vetoIsPointless && (
           <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
             <Warning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             {maps.length} map{maps.length === 1 ? "" : "s"} in a best-of-
@@ -453,14 +482,41 @@ export function MatchSetup() {
         )}
 
         <div className="flex flex-wrap items-center gap-2">
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <DangerConfirm
+            title={`Start ${name.trim() || "this match"}?`}
+            consequence="MatchZy changes the map and restarts the game. Anyone connected is put into warmup and has to ready up before it starts."
+            operation="matchzy_loadmatch_url"
+            confirmLabel="Start it"
+            onConfirm={() => saveAndStart.mutate()}
+          >
+            {(arm) => (
+              <Button
+                onClick={arm}
+                disabled={!startable || saveAndStart.isPending}
+              >
+                {saveAndStart.isPending ? (
+                  <ArrowClockwise className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" weight="fill" />
+                )}
+                Save &amp; start
+              </Button>
+            )}
+          </DangerConfirm>
+          <Button
+            variant="outline"
+            onClick={() => save.mutate()}
+            disabled={!startable || save.isPending}
+          >
             {save.isPending ? (
               <ArrowClockwise className="h-4 w-4 animate-spin" />
             ) : null}
-            Save setup
+            Save for later
           </Button>
           <p className="text-xs text-muted-foreground">
-            Saved setups can be loaded from the list above.
+            {startable
+              ? "Saved setups are listed above and keep their roster."
+              : "Needs a name and at least one map."}
           </p>
         </div>
       </CardContent>
