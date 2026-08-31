@@ -27,6 +27,7 @@ import { getMatches, getMatchDetail } from "@/lib/db/matches";
 import { mergeHistory, readMatchZyMaps } from "@/lib/cs2/matchzy-db";
 import { buildMatchConfig, type MatchDefinition } from "@/lib/cs2/match-config";
 import { loadMatchCommand } from "@/lib/cs2/match-load";
+import { listRoundBackups, type RoundBackup } from "@/lib/cs2/round-backups";
 import {
   deleteMatchConfig,
   getMatchConfig,
@@ -1621,6 +1622,56 @@ export const realAdapter = {
   async endMatchZyMatch(): Promise<void> {
     await rconExec("css_endmatch");
     const ev = makeConsoleEvent("info", "admin", "Ended the MatchZy match");
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  /**
+   * Start a loaded match without waiting for everyone to `.ready`.
+   *
+   * The usual reason a match never starts: nine people readied up and the
+   * tenth is alt-tabbed. MatchZy treats a console-issued command as an admin
+   * (`IsPlayerAdmin` returns true for a null player), so this works over RCON
+   * where its knife-decision commands deliberately do not.
+   */
+  async forceStartMatch(): Promise<void> {
+    if (!matchzyOwnsMatch()) {
+      throw new Error(
+        "MatchZy has no match loaded, so there is nothing to start.",
+      );
+    }
+    await rconExec("css_start");
+    const ev = makeConsoleEvent("info", "admin", "Force-started the match");
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  async getRoundBackups(): Promise<RoundBackup[]> {
+    return listRoundBackups();
+  },
+
+  /**
+   * Put the match back to the start of a round.
+   *
+   * Gated on MatchZy actually running a match: `css_restore` is its command,
+   * and sending it otherwise gets a silent no-op in the server console, which
+   * is indistinguishable here from a restore that worked.
+   */
+  async restoreRound(round: number): Promise<void> {
+    if (!Number.isInteger(round) || round < 0) {
+      throw new Error("A round number must be a whole number.");
+    }
+    if (!matchzyOwnsMatch()) {
+      throw new Error(
+        "MatchZy is not running a match, so there is nothing to restore. Round backups belong to a loaded match.",
+      );
+    }
+    await rconExec(`css_restore ${round}`);
+    const ev = makeConsoleEvent(
+      "info",
+      "admin",
+      `Restored the match to round ${round}`,
+    );
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
   },

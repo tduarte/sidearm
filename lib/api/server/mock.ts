@@ -23,6 +23,7 @@ const mockCvars: Record<string, string> = { sv_cheats: "0" };
 import { workshopIdFromMapName, workshopMapPath } from "@/lib/cs2/workshop";
 import { buildMatchConfig, type MatchDefinition } from "@/lib/cs2/match-config";
 import type { StoredMatchConfig } from "@/lib/db/match-configs";
+import type { RoundBackup } from "@/lib/cs2/round-backups";
 
 /**
  * One saved match setup, so the form has something to show without a database.
@@ -31,6 +32,12 @@ import type { StoredMatchConfig } from "@/lib/db/match-configs";
  * setup form is that it converts SteamID3 to Steam64, and a mock full of
  * `12345` would never exercise that.
  */
+const mockRoundBackups: RoundBackup[] = [
+  { round: 12, matchId: 2, mapNumber: 0, fileName: "matchzy_2_0_round12.json", savedAt: new Date(Date.now() - 60_000).toISOString() },
+  { round: 11, matchId: 2, mapNumber: 0, fileName: "matchzy_2_0_round11.json", savedAt: new Date(Date.now() - 180_000).toISOString() },
+  { round: 10, matchId: 2, mapNumber: 0, fileName: "matchzy_2_0_round10.json", savedAt: new Date(Date.now() - 300_000).toISOString() },
+];
+
 const mockMatchConfigs: StoredMatchConfig[] = [
   {
     id: "friday-scrim",
@@ -388,6 +395,19 @@ export const mockAdapter = {
   async endMatchZyMatch(): Promise<void> {
     state.match = { ...state.match, matchzyState: "none", phase: "idle" };
     bus.emit({ type: "match.phase", phase: "idle" });
+  },
+
+  async forceStartMatch(): Promise<void> {
+    state.match = { ...state.match, matchzyState: "live", phase: "live" };
+    bus.emit({ type: "match.phase", phase: "live" });
+  },
+
+  async getRoundBackups(): Promise<RoundBackup[]> {
+    return mockRoundBackups;
+  },
+
+  async restoreRound(round: number): Promise<void> {
+    state.match = { ...state.match, round, matchzyState: "live" };
   },
 
   async deleteMatchConfig(id: string): Promise<void> {

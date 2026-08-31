@@ -8,6 +8,7 @@ import {
   Pause,
   Play,
   Record,
+  SkipForward,
   Stop,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -36,7 +37,14 @@ import { useServerStatus } from "@/lib/hooks/use-server-status";
  * the panel outright), so this card swaps the demo tiles for swap-sides and a
  * confirmed End match instead of offering buttons that cannot work.
  */
-export function LiveActionsCard({ takeover }: { takeover: boolean }) {
+export function LiveActionsCard({
+  takeover,
+  /** MatchZy has a match loaded that has not started yet. */
+  awaitingStart = false,
+}: {
+  takeover: boolean;
+  awaitingStart?: boolean;
+}) {
   const qc = useQueryClient();
   const { data: match } = useMatchState();
   const { data: status } = useServerStatus();
@@ -82,6 +90,17 @@ export function LiveActionsCard({ takeover }: { takeover: boolean }) {
     onSuccess: () => toast("rcon: mp_restartgame 1"),
   });
 
+  const forceStart = useMutation({
+    mutationFn: () => api.forceStartMatch(),
+    meta: { action: "Starting the match" },
+    onSuccess: () => {
+      toast.success("Match force-started", {
+        description: "MatchZy skips the remaining ready-ups and goes live.",
+      });
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
   const end = useMutation({
     mutationFn: () => api.endMatch(),
     meta: { action: "Ending the match" },
@@ -105,6 +124,22 @@ export function LiveActionsCard({ takeover }: { takeover: boolean }) {
       </CardHeader>
       <CardContent>
         <MatchActionGrid layout="actions">
+          {/*
+            First while it applies, because it is the one thing that unblocks a
+            match nobody can start: nine people readied and the tenth is
+            alt-tabbed. It disappears once the match is running.
+          */}
+          {awaitingStart && (
+            <MatchActionTile
+              icon={SkipForward}
+              label="Force start"
+              description="css_start · skips ready-up"
+              variant="default"
+              disabled={forceStart.isPending}
+              pending={forceStart.isPending}
+              onClick={() => forceStart.mutate()}
+            />
+          )}
           {/*
             Two tiles, not one toggle. CS2 exposes no pause state to read
             back, so a single button has to guess which way to go — and

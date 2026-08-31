@@ -3,6 +3,7 @@ import type { BanRecord } from "@/lib/cs2/bans";
 import type { DemoFile } from "@/lib/cs2/demos";
 import type { MatchDefinition } from "@/lib/cs2/match-config";
 import type { StoredMatchConfig } from "@/lib/db/match-configs";
+import type { RoundBackup } from "@/lib/cs2/round-backups";
 import type {
   ChatMessage,
   CvarGroup,
@@ -184,6 +185,16 @@ export const api = {
   getHistory: () => request<MatchHistoryDetail[]>("/api/history"),
 
   getMatchConfigs: () => request<StoredMatchConfig[]>("/api/matches"),
+
+  forceStartMatch: async () => {
+    await request<{ ok: true }>("/api/match/start", json({}));
+  },
+
+  getRoundBackups: () => request<RoundBackup[]>("/api/match/backups"),
+
+  restoreRound: async (round: number) => {
+    await request<{ ok: true }>("/api/match/restore", json({ round }));
+  },
 
   saveMatch: (def: MatchDefinition) =>
     request<{ warnings: string[] }>("/api/matches", json(def)),

@@ -9,6 +9,7 @@ import { LiveActionsCard } from "@/components/match/live-actions";
 import { ManualControls } from "@/components/match/manual-controls";
 import { MatchSetup } from "@/components/match/match-setup";
 import { ModeSections } from "@/components/match/mode-sections";
+import { RoundBackups } from "@/components/match/round-backups";
 import { ScoreboardHero, StatusStrip } from "@/components/match/scoreboard";
 import { useMatchState } from "@/lib/hooks/use-match-state";
 import type { MatchState } from "@/lib/api/types";
@@ -71,6 +72,12 @@ export default function MatchPage() {
   // refuses `tv_record` from the panel. That is a wider window than `underway`.
   const matchzyLoaded =
     match.matchzyState !== null && match.matchzyState !== "none";
+  // Loaded but not started: the ready-up window, where Force start is the
+  // only control that changes anything.
+  const awaitingStart =
+    matchzyLoaded &&
+    (match.matchzyState === "warmup" ||
+      match.matchzyState === "waiting_for_players");
 
   return (
     <div className="space-y-6">
@@ -90,7 +97,11 @@ export default function MatchPage() {
 
         <TabsContent value="live" className="mt-4 space-y-4">
           {underway && <ScoreboardHero match={match} />}
-          <LiveActionsCard takeover={matchzyLoaded} />
+          <LiveActionsCard
+            takeover={matchzyLoaded}
+            awaitingStart={awaitingStart}
+          />
+          {matchzyLoaded && <RoundBackups />}
           <DemoList />
         </TabsContent>
 
