@@ -169,6 +169,7 @@ export function MapPoolPicker({
         <Button
           size="sm"
           variant="outline"
+          className="min-h-11 sm:min-h-8"
           disabled={activeDuty.present.length === 0}
           onClick={() => applyPreset(activeDuty.present)}
         >
@@ -177,6 +178,7 @@ export function MapPoolPicker({
         <Button
           size="sm"
           variant="outline"
+          className="min-h-11 sm:min-h-8"
           disabled={reservePresent.length === 0}
           onClick={() => applyPreset([...reservePresent])}
         >
@@ -185,6 +187,7 @@ export function MapPoolPicker({
         <Button
           size="sm"
           variant="ghost"
+          className="min-h-11 sm:min-h-8"
           disabled={picked.length === 0}
           onClick={() => onChange([])}
         >
