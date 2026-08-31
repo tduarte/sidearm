@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Skeleton } from "@/components/ui/skeleton";
 import { LoadError } from "@/components/load-error";
 import { DemoList } from "@/components/match/demo-list";
@@ -9,26 +11,51 @@ import { MatchSetup } from "@/components/match/match-setup";
 import { ModeSections } from "@/components/match/mode-sections";
 import { ScoreboardHero, StatusStrip } from "@/components/match/scoreboard";
 import { useMatchState } from "@/lib/hooks/use-match-state";
+import type { MatchState } from "@/lib/api/types";
 
 /**
- * Match Control, ordered by what the server is doing.
+ * Is a match actually being played right now?
  *
- * The page used to show everything at once behind three mode tabs, which put
- * the setup form — the longest thing here — above every mid-match control. The
- * moment you need Pause is never the moment you are building a roster, so the
- * page now answers one of two questions:
+ * Deliberately NOT `phase === "live"`. This server is up essentially all the
+ * time and vanilla `phase` reports live with nobody connected, so treating it
+ * as evidence would hide the setup form almost permanently.
  *
- *  - Nothing running: *what do I set up?* Setup leads.
- *  - Something running: *what do I press right now?* The score and the live
- *    actions lead, in the first viewport, on a phone.
+ * MatchZy's own gamestate is the only trustworthy signal, and only past the
+ * point where the teams have readied up: a loaded config sitting in
+ * `warmup` or `waiting_for_players` is the setup still resolving, and that is
+ * exactly when you are most likely to want to change it.
+ */
+function matchUnderway(match: MatchState): boolean {
+  switch (match.matchzyState) {
+    case "knife":
+    case "waiting_for_knife_decision":
+    case "going_live":
+    case "live":
+    case "pending_restore":
+      return true;
+    default:
+      return false;
+  }
+}
+
+/**
+ * Match Control, split by the two jobs it serves.
  *
- * `takeover` is the stronger case: MatchZy has a config loaded, so it owns the
- * map cycle, the gameplay cvars and demo recording. Setup and the manual
- * knife/phase approximations are not merely lower down then, they are gone —
- * they would fight the plugin over the same settings.
+ * The page used to show everything at once behind three *mode* tabs
+ * (competitive / casual / practice), which put the setup form — the longest
+ * thing here — above every mid-match control. The moment you need Pause is
+ * never the moment you are building a roster.
+ *
+ * So the split is now by job rather than by mode: **Live** is what you press
+ * while something is happening, **Setup** is what you prepare beforehand. The
+ * opening tab is chosen from what the server is doing, and after that the
+ * operator's choice wins — both are always one click away, because no
+ * derived "is a match on" signal is good enough to justify hiding half the
+ * page behind it.
  */
 export default function MatchPage() {
   const { data: match, isPending, error, refetch } = useMatchState();
+  const [tab, setTab] = useState<string | null>(null);
 
   if (error && !match) {
     return <LoadError what="match state" error={error} onRetry={() => refetch()} />;
@@ -38,41 +65,41 @@ export default function MatchPage() {
     return <Skeleton className="h-96" />;
   }
 
-  const takeover =
+  const underway = matchUnderway(match);
+  // MatchZy owns the map cycle, the gameplay cvars and demo recording from the
+  // moment a config is loaded — including its warmup, where the server already
+  // refuses `tv_record` from the panel. That is a wider window than `underway`.
+  const matchzyLoaded =
     match.matchzyState !== null && match.matchzyState !== "none";
-  // A vanilla live match is not a takeover — the panel still owns everything —
-  // but it is just as urgent, so it gets the same lead.
-  const active = takeover || match.phase === "live";
 
   return (
     <div className="space-y-6">
       <div>
         <h1 className="font-heading text-2xl font-semibold">Match Control</h1>
         <p className="text-sm text-muted-foreground">
-          {takeover
-            ? "MatchZy is running this match. These are the controls that still reach it."
-            : "Drive the match: warmup → live → end, pause, sides, demos."}
+          Drive the match: warmup → live → end, pause, sides, demos.
         </p>
-        {!active && <StatusStrip match={match} />}
+        <StatusStrip match={match} />
       </div>
 
-      {active && (
-        <div className="space-y-4">
-          <ScoreboardHero match={match} />
-          <LiveActionsCard takeover={takeover} />
-        </div>
-      )}
+      <Tabs value={tab ?? (underway ? "live" : "setup")} onValueChange={setTab}>
+        <TabsList>
+          <TabsTrigger value="live">Live</TabsTrigger>
+          <TabsTrigger value="setup">Setup</TabsTrigger>
+        </TabsList>
 
-      {!takeover && (
-        <>
+        <TabsContent value="live" className="mt-4 space-y-4">
+          {underway && <ScoreboardHero match={match} />}
+          <LiveActionsCard takeover={matchzyLoaded} />
+          <DemoList />
+        </TabsContent>
+
+        <TabsContent value="setup" className="mt-4 space-y-4">
           <MatchSetup />
-          {!active && <LiveActionsCard takeover={false} />}
           <ManualControls />
-        </>
-      )}
-
-      <DemoList />
-      <ModeSections />
+          <ModeSections />
+        </TabsContent>
+      </Tabs>
     </div>
   );
 }

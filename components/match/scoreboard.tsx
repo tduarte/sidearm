@@ -1,8 +1,9 @@
 "use client";
 
-import { Pause, Record, Timer } from "@phosphor-icons/react";
+import { Pause, Record, Timer, Users } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { useServerStatus } from "@/lib/hooks/use-server-status";
 import type { MatchState } from "@/lib/api/types";
 
 /**
@@ -83,20 +84,38 @@ export function ScoreboardHero({ match }: { match: MatchState }) {
 }
 
 /**
- * The one-line read for when nothing urgent is on: phase, score if any, and
- * whatever the panel is still holding (pause, recording). Sits under the page
- * title so the big scoreboard card is not dead weight on an idle server.
+ * The one-line read that sits under the page title in every state.
+ *
+ * It leads with MatchZy's gamestate whenever a config is loaded, because
+ * vanilla `phase` is the misleading one: this server is up around the clock
+ * and reports `live` with nobody on it. The player count is here for the same
+ * reason — "live · 0 players" is an honest description of an empty server,
+ * and "live" alone is not.
  */
 export function StatusStrip({ match }: { match: MatchState }) {
+  const { data: status } = useServerStatus();
   const paused =
     match.pause === "paused" || match.pause === "pause_requested";
+  const matchzyLabel =
+    match.matchzyState && match.matchzyState !== "none"
+      ? (MATCHZY_STATE_LABEL[match.matchzyState] ?? match.matchzyState)
+      : null;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">
-      <Badge variant="outline" className="gap-1.5 capitalize">
+      <Badge
+        variant="outline"
+        className={matchzyLabel ? "gap-1.5" : "gap-1.5 capitalize"}
+      >
         <Timer className="h-3 w-3" />
-        {match.phase}
+        {matchzyLabel ?? match.phase}
       </Badge>
+      {typeof status?.players === "number" && (
+        <span className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
+          <Users className="h-3 w-3" />
+          {status.players} player{status.players === 1 ? "" : "s"}
+        </span>
+      )}
       {(match.round > 0 || match.score.ct + match.score.t > 0) && (
         <span className="text-xs tabular-nums text-muted-foreground">
           Round {match.round}

@@ -102,14 +102,6 @@ export function LiveActionsCard({ takeover }: { takeover: boolean }) {
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="text-base">Live actions</CardTitle>
-        {takeover && (
-          <CardDescription>
-            MatchZy is running this match, so it owns the map cycle, the
-            gameplay cvars and demo recording — it saves its own demo of every
-            map. The panel&apos;s setup form and match tools stand down until it
-            finishes.
-          </CardDescription>
-        )}
       </CardHeader>
       <CardContent>
         <MatchActionGrid layout="actions">
@@ -121,7 +113,9 @@ export function LiveActionsCard({ takeover }: { takeover: boolean }) {
           <MatchActionTile
             icon={Pause}
             label="Pause"
-            description="mp_pause_match · at round end"
+            description={
+              takeover ? "css_forcepause · at freezetime" : "mp_pause_match · at round end"
+            }
             variant={match.pause === "pause_requested" ? "default" : "outline"}
             disabled={pause.isPending}
             pending={pause.isPending}
@@ -131,7 +125,7 @@ export function LiveActionsCard({ takeover }: { takeover: boolean }) {
             icon={Play}
             iconWeight="fill"
             label="Resume"
-            description="mp_unpause_match"
+            description={takeover ? "css_forceunpause" : "mp_unpause_match"}
             variant="outline"
             disabled={pause.isPending}
             pending={pause.isPending}
@@ -204,6 +198,19 @@ export function LiveActionsCard({ takeover }: { takeover: boolean }) {
             />
           )}
         </MatchActionGrid>
+        {/*
+          Under the tiles, not above them. This is the explanation you read
+          once; the buttons are what you came for, and on a phone 160px of
+          prose between the score and Pause is the whole first viewport.
+        */}
+        {takeover && (
+          <CardDescription className="mt-4">
+            MatchZy is running this match, so it owns the map cycle, the
+            gameplay cvars and demo recording — it saves its own demo of every
+            map. The panel&apos;s setup form and match tools stand down until it
+            finishes.
+          </CardDescription>
+        )}
       </CardContent>
     </Card>
   );

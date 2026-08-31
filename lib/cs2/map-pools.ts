@@ -11,16 +11,16 @@
  * The preset only *fills* the picker. Every map stays togglable afterwards, so
  * being one map out of date costs a tap, not a broken match.
  */
-export const ACTIVE_DUTY_AS_OF = "the 2025 competitive season";
+export const ACTIVE_DUTY_AS_OF = "Premier Season 5 (July 2026)";
 
 export const ACTIVE_DUTY = [
   "de_ancient",
   "de_anubis",
+  "de_cache",
   "de_dust2",
   "de_inferno",
   "de_mirage",
   "de_nuke",
-  "de_train",
 ] as const;
 
 /**

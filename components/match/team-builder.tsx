@@ -80,18 +80,18 @@ export function TeamBuilder({
                 type="button"
                 aria-label={`Put ${p.name} on ${team1Name}`}
                 onClick={() => onAssign(p.id, "team1")}
-                className="flex items-center px-2.5 text-primary transition-colors hover:bg-primary/15"
+                className="flex min-h-11 items-center px-3 text-primary transition-colors hover:bg-primary/15"
               >
                 <CaretLeft weight="bold" className="size-4" />
               </button>
-              <span className="flex min-w-0 items-center border-x px-2.5 py-2 text-sm">
+              <span className="flex min-h-11 min-w-0 items-center border-x px-2.5 text-sm">
                 <span className="max-w-40 truncate">{p.name}</span>
               </span>
               <button
                 type="button"
                 aria-label={`Put ${p.name} on ${team2Name}`}
                 onClick={() => onAssign(p.id, "team2")}
-                className="flex items-center px-2.5 text-sky-400 transition-colors hover:bg-sky-400/15"
+                className="flex min-h-11 items-center px-3 text-sky-400 transition-colors hover:bg-sky-400/15"
               >
                 <CaretRight weight="bold" className="size-4" />
               </button>
@@ -130,7 +130,7 @@ export function TeamBuilder({
                       type="button"
                       onClick={() => onRemove(p.id)}
                       aria-label={`Take ${p.name} off ${col.name}`}
-                      className="flex w-full items-center justify-between gap-2 px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/40"
+                      className="flex min-h-11 w-full items-center justify-between gap-2 px-2.5 py-2 text-left text-sm transition-colors hover:bg-muted/40"
                     >
                       <span
                         className={cn(

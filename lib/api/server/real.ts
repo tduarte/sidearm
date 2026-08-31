@@ -1410,6 +1410,26 @@ export const realAdapter = {
    * it wants to go, and a wrong-direction send becomes impossible.
    */
   async setPause(action: "pause" | "unpause"): Promise<MatchState> {
+    // MatchZy runs its own pause system on top of `mp_pause_match`, and it
+    // keeps the bookkeeping that decides who is allowed to lift the pause:
+    // a normal pause needs BOTH teams to say `.unpause`, and an admin one can
+    // only be lifted by an admin. Sending the raw cvar past it leaves the
+    // plugin believing the match is unpaused while the server is frozen, so a
+    // player's `.unpause` does nothing and nobody can work out why.
+    //
+    // `css_forcepause` / `css_forceunpause` are the admin commands, which is
+    // the right authority for a button in the panel.
+    if (matchzyOwnsMatch()) {
+      await rconExec(action === "pause" ? "css_forcepause" : "css_forceunpause");
+      // No `pause_requested` limbo here: MatchZy reports `paused` on
+      // get5_status, so the next poll replaces this with a real reading.
+      cache().match = {
+        ...cache().match,
+        pause: action === "pause" ? "paused" : "running",
+      };
+      return { ...cache().match };
+    }
+
     await rconExec(action === "pause" ? "mp_pause_match" : "mp_unpause_match");
     // `mp_pause_match` lands at the end of the current round, so claiming
     // "paused" now would be wrong for up to a couple of minutes.
