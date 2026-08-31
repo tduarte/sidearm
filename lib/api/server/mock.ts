@@ -347,12 +347,15 @@ export const mockAdapter = {
 
   async saveMatch(def: MatchDefinition): Promise<{ warnings: string[] }> {
     const prior = mockMatchConfigs.find((m) => m.id === def.id);
+    // The form sends matchNumber: 0 to mean "assign one" — it is a number, not
+    // null, so `??` would keep the 0 and validation would reject the save.
     def = {
       ...def,
       matchNumber:
         prior?.definition.matchNumber ??
-        def.matchNumber ??
-        Math.max(0, ...mockMatchConfigs.map((m) => m.definition.matchNumber)) + 1,
+        (Number.isInteger(def.matchNumber) && def.matchNumber >= 1
+          ? def.matchNumber
+          : Math.max(0, ...mockMatchConfigs.map((m) => m.definition.matchNumber)) + 1),
     };
     // Validated in mock too: the form's error handling is a real code path and
     // a mock that accepts anything hides it.
