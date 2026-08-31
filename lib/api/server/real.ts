@@ -133,6 +133,7 @@ global.__cs2Cache ??= {
     demo: { state: "unknown", name: null },
     knifeSetupApplied: false,
     matchzyState: null,
+    series: null,
   },
   console: [],
   chat: [],
@@ -394,7 +395,14 @@ function phaseFromGamestate(g: string): MatchPhase | null {
 function applyMatchZyState(get5: Get5Status | null): void {
   const gamestate = get5?.gamestate ?? null;
   const wasOwned = matchzyOwnsMatch();
-  cache().match = { ...cache().match, matchzyState: gamestate };
+  // Read every poll rather than remembered: team names, the map number and the
+  // series score all change during a match, and a stale matchup is worse than
+  // no matchup — it labels the score with the wrong side after the half.
+  cache().match = {
+    ...cache().match,
+    matchzyState: gamestate,
+    series: get5?.series ?? null,
+  };
 
   // No config loaded — including every pug started in-game with `.start`, which
   // get5_status does not report on. Leave the log-derived state alone.

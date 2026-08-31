@@ -241,6 +241,46 @@ export interface MatchState {
    * demo recording, and the panel stands down from all three.
    */
   matchzyState: MatchZyGameState | null;
+  /**
+   * Who is actually playing, from the same `get5_status` reply.
+   *
+   * `null` for everything MatchZy does not report a config for — no plugin, a
+   * pug started in-game with `.start`, a vanilla server. The score is still
+   * CT and T there, which is all the panel can honestly say.
+   */
+  series: MatchZySeries | null;
+}
+
+/** One side of a MatchZy match, as `get5_status` describes it. */
+export interface MatchZyTeam {
+  name: string;
+  /** Maps won so far in the series. */
+  seriesScore: number;
+  /** Rounds won on the map being played. */
+  mapScore: number;
+  /**
+   * Which side they are on right now. This is what makes the team names
+   * usable: without it a name cannot be attached to a score, and after the
+   * half it would be attached to the wrong one.
+   */
+  side: Team | null;
+}
+
+/**
+ * The match MatchZy has loaded, beyond its gamestate.
+ *
+ * Only populated for a config-loaded match, which on this panel means one it
+ * loaded itself — `get5_status` reports every field null for a pug.
+ */
+export interface MatchZySeries {
+  /** MatchZy's own numeric match id, which is also its backup file prefix. */
+  matchId: number | null;
+  /** Zero-based index into `maps` of the one being played. */
+  mapNumber: number;
+  /** The map list the match was loaded with. */
+  maps: string[];
+  team1: MatchZyTeam;
+  team2: MatchZyTeam;
 }
 
 /**

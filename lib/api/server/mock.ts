@@ -410,12 +410,41 @@ export const mockAdapter = {
     row.loadedAt = new Date().toISOString();
     // Loading a match puts MatchZy into warmup waiting for players to ready —
     // the same transition the real server makes, so the UI can be seen doing it.
-    state.match = { ...state.match, matchzyState: "warmup", phase: "warmup" };
+    // The series comes from the definition just loaded, which is where the
+    // real one comes from too: get5_status reports back the config MatchZy
+    // was given. A mock that left it null could not show the matchup at all.
+    state.match = {
+      ...state.match,
+      matchzyState: "warmup",
+      phase: "warmup",
+      series: {
+        matchId: row.definition.matchNumber,
+        mapNumber: 0,
+        maps: [...row.definition.maps],
+        team1: {
+          name: row.definition.team1.name,
+          seriesScore: 0,
+          mapScore: state.match.score.t,
+          side: "T",
+        },
+        team2: {
+          name: row.definition.team2.name,
+          seriesScore: 0,
+          mapScore: state.match.score.ct,
+          side: "CT",
+        },
+      },
+    };
     bus.emit({ type: "match.phase", phase: "warmup" });
   },
 
   async endMatchZyMatch(): Promise<void> {
-    state.match = { ...state.match, matchzyState: "none", phase: "idle" };
+    state.match = {
+      ...state.match,
+      matchzyState: "none",
+      phase: "idle",
+      series: null,
+    };
     bus.emit({ type: "match.phase", phase: "idle" });
   },
 

@@ -22,6 +22,17 @@ const LIVE_GET5_STATUS =
   '{"plugin_version":"0.15.0","gamestate":"none","paused":false,' +
   '"loaded_config_file":null,"matchid":null,"map_number":null,' +
   '"round_number":-1,"round_time":null,"team1":null,"team2":null,"maps":null}\n';
+// The same command during a match the panel loaded, captured 2026-08-30. This
+// is the half of the reply that only exists for a config-loaded match, and
+// the reason `series` can be trusted for team names at all.
+const LIVE_GET5_LOADED =
+  '{"plugin_version":"0.15.0","gamestate":"live","paused":false,' +
+  '"loaded_config_file":"http://panel:3000/api/matchzy/config/deadbeef/test",' +
+  '"matchid":1,"map_number":0,"round_number":1,"round_time":null,' +
+  '"team1":{"name":"Team A","series_score":0,"current_map_score":0,' +
+  '"connected_clients":-1,"ready":true,"side":"terrorist"},' +
+  '"team2":{"name":"Team B","series_score":0,"current_map_score":1,' +
+  '"connected_clients":-1,"ready":true,"side":"ct"},"maps":["ar_pool_day"]}\n';
 const LIVE_META_LIST =
   "Listing 1 plugin:\n  [01] CounterStrikeSharp (v1.0.373 @ 3a59f2d) by Roflmuffin\n";
 const LIVE_CSS_PLUGINS =
@@ -74,6 +85,27 @@ describe("parseGet5Status", () => {
     assert.equal(r?.status?.raw.team1, null);
     // Hardcoded by MatchZy to the Get5 string. Never report it as a version.
     assert.equal(r?.status?.raw.plugin_version, "0.15.0");
+  });
+
+  it("reads the matchup out of a config-loaded match", () => {
+    const series = parseGet5Status(LIVE_GET5_LOADED)?.status?.series;
+    assert.ok(series, "a loaded match should report a series");
+    assert.equal(series.matchId, 1);
+    assert.equal(series.mapNumber, 0);
+    assert.deepEqual(series.maps, ["ar_pool_day"]);
+    assert.equal(series.team1.name, "Team A");
+    // MatchZy says `terrorist` / `ct`; the panel speaks in T / CT everywhere
+    // else, and the side is what pins a name to the right half of the score.
+    assert.equal(series.team1.side, "T");
+    assert.equal(series.team2.side, "CT");
+    assert.equal(series.team2.mapScore, 1);
+  });
+
+  it("has no series for a pug, where every field comes back null", () => {
+    // `.start` in chat runs a real match that get5_status reports nothing
+    // about. Inventing a matchup from null team blocks would put two blank
+    // names on the scoreboard.
+    assert.equal(parseGet5Status(LIVE_GET5_STATUS)?.status?.series, null);
   });
 
   it("returns null when RCON said nothing at all", () => {

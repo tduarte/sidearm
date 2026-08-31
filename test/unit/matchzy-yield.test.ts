@@ -101,6 +101,7 @@ describe("applyMatchZyState via updateCache", () => {
     updateCache(status(), null, undefined, {
       gamestate: "live",
       paused: true,
+      series: null,
       raw: {},
     });
     assert.equal(getMatchState().pause, "paused");
@@ -109,6 +110,7 @@ describe("applyMatchZyState via updateCache", () => {
     updateCache(status(), null, undefined, {
       gamestate: "live",
       paused: false,
+      series: null,
       raw: {},
     });
     assert.equal(getMatchState().pause, "running");
@@ -126,7 +128,7 @@ describe("applyMatchZyState via updateCache", () => {
     // cache carries whatever the previous test left, and "no match loaded" and
     // "a match just ended" are deliberately different cases now.
     updateMatchState({ matchzyState: null, phase: "warmup", pause: "pause_requested" });
-    updateCache(status(), null, undefined, { gamestate: "none", paused: false, raw: {} });
+    updateCache(status(), null, undefined, { gamestate: "none", paused: false, series: null, raw: {} });
     assert.equal(getMatchState().phase, "warmup");
     assert.equal(getMatchState().pause, "pause_requested");
     assert.equal(getMatchState().matchzyState, "none");
@@ -139,10 +141,10 @@ describe("applyMatchZyState via updateCache", () => {
     const { updateCache, getMatchState } = await import("@/lib/api/server/real");
     const status = await import("./helpers/status-fixture").then((m) => m.default);
 
-    updateCache(status(), null, undefined, { gamestate: "live", paused: true, raw: {} });
+    updateCache(status(), null, undefined, { gamestate: "live", paused: true, series: null, raw: {} });
     assert.equal(getMatchState().pause, "paused");
 
-    updateCache(status(), null, undefined, { gamestate: "none", paused: false, raw: {} });
+    updateCache(status(), null, undefined, { gamestate: "none", paused: false, series: null, raw: {} });
     assert.equal(getMatchState().pause, "unknown");
     assert.equal(getMatchState().matchzyState, "none");
   });
@@ -157,7 +159,7 @@ describe("applyMatchZyState via updateCache", () => {
 
     updateMatchState({ matchzyState: "none" });
     updateMatchState({ pause: "pause_requested" });
-    updateCache(status(), null, undefined, { gamestate: "none", paused: false, raw: {} });
+    updateCache(status(), null, undefined, { gamestate: "none", paused: false, series: null, raw: {} });
     assert.equal(getMatchState().pause, "pause_requested");
   });
 
@@ -166,7 +168,7 @@ describe("applyMatchZyState via updateCache", () => {
     // say the round does not count when it decides which side everyone plays.
     const { updateCache, getMatchState } = await import("@/lib/api/server/real");
     const status = await import("./helpers/status-fixture").then((m) => m.default);
-    updateCache(status(), null, undefined, { gamestate: "knife", paused: false, raw: {} });
+    updateCache(status(), null, undefined, { gamestate: "knife", paused: false, series: null, raw: {} });
     assert.equal(getMatchState().phase, "live");
   });
 });

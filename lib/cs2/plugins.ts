@@ -1,3 +1,5 @@
+import type { MatchZySeries, MatchZyTeam, Team } from "@/lib/api/types";
+
 /**
  * Is the plugin stack actually loaded?
  *
@@ -69,8 +71,55 @@ export interface Get5Status {
    * ever been able to say "a pause was requested".
    */
   paused: boolean | null;
+  /**
+   * Who is playing, when MatchZy has a config loaded. `null` for a pug: every
+   * field of the reply is null there, including the team names.
+   */
+  series: MatchZySeries | null;
   /** The whole payload, for callers that want more than the above. */
   raw: Record<string, unknown>;
+}
+
+/** MatchZy reports sides as `ct` / `terrorist`; anything else is unknown. */
+function parseSide(raw: unknown): Team | null {
+  if (raw === "ct") return "CT";
+  if (raw === "terrorist" || raw === "t") return "T";
+  return null;
+}
+
+function parseTeamBlock(raw: unknown): MatchZyTeam | null {
+  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) return null;
+  const obj = raw as Record<string, unknown>;
+  if (typeof obj.name !== "string" || obj.name === "") return null;
+  return {
+    name: obj.name,
+    seriesScore: typeof obj.series_score === "number" ? obj.series_score : 0,
+    mapScore:
+      typeof obj.current_map_score === "number" ? obj.current_map_score : 0,
+    side: parseSide(obj.side),
+  };
+}
+
+/**
+ * The half of the reply that only exists for a config-loaded match.
+ *
+ * A pug answers with the same keys and every value null, so this returns
+ * `null` unless both teams came back with a name — the panel would rather say
+ * CT and T than invent a matchup.
+ */
+function parseSeries(obj: Record<string, unknown>): MatchZySeries | null {
+  const team1 = parseTeamBlock(obj.team1);
+  const team2 = parseTeamBlock(obj.team2);
+  if (!team1 || !team2) return null;
+  return {
+    matchId: typeof obj.matchid === "number" ? obj.matchid : null,
+    mapNumber: typeof obj.map_number === "number" ? obj.map_number : 0,
+    maps: Array.isArray(obj.maps)
+      ? obj.maps.filter((m): m is string => typeof m === "string")
+      : [],
+    team1,
+    team2,
+  };
 }
 
 export interface Get5Probe {
@@ -115,6 +164,7 @@ export function parseGet5Status(text: string): Get5Probe | null {
     status: {
       gamestate: typeof obj.gamestate === "string" ? obj.gamestate : null,
       paused: typeof obj.paused === "boolean" ? obj.paused : null,
+      series: parseSeries(obj),
       raw: obj,
     },
   };

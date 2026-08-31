@@ -116,6 +116,7 @@ const initialMockState = {
     // No match config loaded: the panel's own controls are all live, which is
     // the state with more interface to show.
     matchzyState: null,
+    series: null,
   } as MatchState,
 
   console: [] as ConsoleEvent[],
