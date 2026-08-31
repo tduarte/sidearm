@@ -1548,10 +1548,15 @@ export const realAdapter = {
     // the number it already has, so re-saving does not orphan the results
     // MatchZy has already filed under it.
     const existing = getMatchConfig(def.id);
+    // The form sends matchNumber: 0 to mean "assign one" — it is a number, not
+    // null, so `??` would keep the 0 and validation would reject the save.
     const withNumber: MatchDefinition = {
       ...def,
       matchNumber:
-        existing?.definition.matchNumber ?? def.matchNumber ?? nextMatchNumber(),
+        existing?.definition.matchNumber ??
+        (Number.isInteger(def.matchNumber) && def.matchNumber >= 1
+          ? def.matchNumber
+          : nextMatchNumber()),
     };
 
     const { config, errors, warnings } = buildMatchConfig(withNumber);
