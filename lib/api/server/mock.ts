@@ -46,18 +46,18 @@ const mockRoundBackups: RoundBackup[] = [
  * mock that teaches the wrong thing.
  */
 const mockLiveRounds: RoundRecord[] = [
-  { round: 1, winner: "CT", reason: "ct_win_elimination", score: { ct: 1, t: 0 } },
+  { round: 1, winner: "CT", reason: "cts_win", score: { ct: 1, t: 0 } },
   { round: 2, winner: "CT", reason: "bomb_defused", score: { ct: 2, t: 0 } },
   { round: 3, winner: "T", reason: "target_bombed", score: { ct: 2, t: 1 } },
   { round: 4, winner: "CT", reason: "target_saved", score: { ct: 3, t: 1 } },
-  { round: 5, winner: "T", reason: "t_win_elimination", score: { ct: 3, t: 2 } },
-  { round: 6, winner: "CT", reason: "ct_win_elimination", score: { ct: 4, t: 2 } },
+  { round: 5, winner: "T", reason: "terrorists_win", score: { ct: 3, t: 2 } },
+  { round: 6, winner: "CT", reason: "cts_win", score: { ct: 4, t: 2 } },
   { round: 7, winner: "T", reason: "target_bombed", score: { ct: 4, t: 3 } },
-  { round: 8, winner: "T", reason: "t_win_elimination", score: { ct: 4, t: 4 } },
+  { round: 8, winner: "T", reason: "terrorists_win", score: { ct: 4, t: 4 } },
   { round: 9, winner: "CT", reason: "bomb_defused", score: { ct: 5, t: 4 } },
   { round: 10, winner: "CT", reason: "target_saved", score: { ct: 6, t: 4 } },
   { round: 11, winner: "T", reason: "target_bombed", score: { ct: 6, t: 5 } },
-  { round: 12, winner: "CT", reason: "ct_win_elimination", score: { ct: 7, t: 5 } },
+  { round: 12, winner: "CT", reason: "cts_win", score: { ct: 7, t: 5 } },
 ];
 
 const mockMatchConfigs: StoredMatchConfig[] = [

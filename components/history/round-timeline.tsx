@@ -79,15 +79,19 @@ export function RoundTimeline({
  * Turns the SFUI id into something readable, without hiding one it has not
  * seen before — an unknown condition shows its own name rather than "other".
  */
-function describeReason(reason: string): string {
+export function describeReason(reason: string): string {
+  // Keyed on what `winReason` actually produces from CS2's SFUI notice ids —
+  // `SFUI_Notice_CTs_Win` comes through as `cts_win`, verified against the
+  // live server's own recorded rounds. The invented spellings that used to be
+  // here (`c_ts_win`, `ct_win_elimination`) matched nothing, so the one
+  // outcome most rounds end with fell through to the raw id.
   const known: Record<string, string> = {
     bomb_defused: "bomb defused",
     target_bombed: "bomb detonated",
     target_saved: "time expired",
+    cts_win: "CT elimination",
     terrorists_win: "T elimination",
-    c_ts_win: "CT elimination",
-    ct_win_elimination: "CT elimination",
-    t_win_elimination: "T elimination",
+    all_hostages_rescued: "hostages rescued",
     hostages_rescued: "hostages rescued",
     hostages_not_rescued: "hostages held",
   };

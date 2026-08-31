@@ -1,9 +1,28 @@
 "use client";
 
-import { Plugs, PlugsConnected, Terminal } from "@phosphor-icons/react";
+import {
+  Plugs,
+  PlugsConnected,
+  ShieldWarning,
+  Terminal,
+} from "@phosphor-icons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { describePluginFailure } from "@/lib/cs2/plugins";
+import type { ServerStatus } from "@/lib/api/types";
+
+/**
+ * Whether the server is running without VAC — the dead-GSLT signature.
+ *
+ * `vacSecure` is `null` until RCON has read a `version :` line, and a server
+ * that is stopped or still booting has not got there yet, so only a *running*
+ * `false` means anything. Steam quietly reclaims tokens that go unused, which
+ * makes this something a working server turns into on its own, weeks after
+ * anyone touched the configuration.
+ */
+export function isUnprotected(status: ServerStatus): boolean {
+  return status.vacSecure === false && status.state === "running";
+}
 
 /**
  * Says which half of the panel is broken, when half of it is.
@@ -16,6 +35,8 @@ import { describePluginFailure } from "@/lib/cs2/plugins";
  *    memory tiles are dead; RCON, chat and the console are fine.
  *  - no RCON        → the roster, map changes and every match control are
  *    dead; the container can still be restarted.
+ *  - no GSLT        → the server runs, but unlisted and with VAC off, which
+ *    is a thing Steam does to it rather than a thing anyone changed.
  *  - no MatchZy     → only on a server that HAD it: a CS2 update rewrote
  *    `gameinfo.gi` and the plugins quietly stopped loading. Everything works;
  *    match control is just back to the panel's cvar approximation.
@@ -35,8 +56,6 @@ export function ControlPlaneBanner() {
     ? describePluginFailure(status.plugins, status.plugins.regressed)
     : null;
 
-  if (docker && rcon && !pluginFailure) return null;
-
   // While the container is genuinely stopped or still pulling game files, RCON
   // is *expected* to be silent. Saying "RCON is not answering" there would be
   // alarming and wrong — the status pill already tells that story properly.
@@ -47,7 +66,8 @@ export function ControlPlaneBanner() {
     status.state === "stopping";
 
   const showRcon = !rcon && !rconSilenceIsExpected;
-  if (docker && !showRcon && !pluginFailure) return null;
+  const showVac = isUnprotected(status);
+  if (docker && !showRcon && !pluginFailure && !showVac) return null;
 
   return (
     <div className="space-y-2 border-b bg-background px-4 py-2 md:px-6">
@@ -73,6 +93,33 @@ export function ControlPlaneBanner() {
             roster, map changes and every match control are unavailable. If the
             server was just restarted this clears on its own; if it persists,
             the console and container logs are the place to look.
+          </AlertDescription>
+        </Alert>
+      )}
+      {showVac && (
+        <Alert>
+          <ShieldWarning />
+          <AlertTitle>The server is running without VAC</AlertTitle>
+          <AlertDescription className="space-y-1">
+            <span>
+              It is unlisted in the server browser and anti-cheat is off, though
+              anyone with the connect string can still join. This is what a dead
+              or missing GSLT looks like — the container log repeats{" "}
+              <code className="font-mono">
+                Cert request for invalid failed with reason code 5005
+              </code>
+              . Steam reclaims tokens that go unused, so a server that was fine
+              for months can arrive here on its own.
+            </span>
+            <span className="text-muted-foreground">
+              Issue a new token at steamcommunity.com/dev/managegameservers, put
+              it in <code className="font-mono">GSLT</code> and run{" "}
+              <code className="font-mono">
+                docker compose up -d --force-recreate cs2
+              </code>
+              . It is a launch argument, so a restart will not pick it up — and
+              recreating the container drops everyone connected.
+            </span>
           </AlertDescription>
         </Alert>
       )}
