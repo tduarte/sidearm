@@ -53,11 +53,28 @@ describe("parseServerVersion", () => {
     assert.equal(parseServerVersion("Protocol version 14177"), 14177);
   });
 
-  it("reads ServerVersion from steam.inf", () => {
+  it("reads a ServerVersion= line", () => {
     assert.equal(
       parseServerVersion("PatchVersion=1.41.7.7\nServerVersion=14177\n"),
       14177,
     );
+  });
+
+  it("does not treat a real steam.inf as a source of the build", () => {
+    // Reading this file looks like the obvious way to avoid parsing `status`,
+    // and it is a trap. A live CS2 install writes ServerVersion=2000899 while
+    // `status` reports 1.41.7.8/14178, and 14178 is what UpToDateCheck compares
+    // against — numerically. Feed it 2000899 and Steam answers "up to date"
+    // forever. The parser reads the number, so the guard has to be that nothing
+    // wires steam.inf into the update check.
+    const REAL_STEAM_INF = [
+      "ClientVersion=2000899",
+      "ServerVersion=2000899",
+      "PatchVersion=1.41.7.8",
+      "ProductName=cs2",
+    ].join("\n");
+    assert.equal(parseServerVersion(REAL_STEAM_INF), 2_000_899);
+    assert.notEqual(parseServerVersion(REAL_STEAM_INF), 14_178);
   });
 
   it("reads the build out of real CS2 `status` output", () => {
@@ -270,23 +287,22 @@ describe("runUpdateCheck", () => {
     assert.match(r.deferredReason ?? "", /disabled/);
   });
 
-  it("prefers steam.inf over RCON for the installed build", async () => {
-    // The regression this guards: reading the build only from `status` means a
-    // version line the regex does not match pins `upToDate` at null forever,
-    // and a null build never triggers a restart. steam.inf does not depend on
-    // that match.
+  it("uses installedBuild when it answers, without asking RCON", async () => {
+    let askedRcon = false;
     const r = await runUpdateCheck(
       baseDeps({
         installedBuild: async () => 14_150,
-        rconExec: async () => "Unknown command 'version'!",
+        rconExec: async () => {
+          askedRcon = true;
+          return "Server Version: 99999";
+        },
       }),
     );
     assert.equal(r.update.installedVersion, 14_150);
-    assert.equal(r.update.upToDate, false);
-    assert.equal(r.restarted, true);
+    assert.equal(askedRcon, false);
   });
 
-  it("falls back to RCON when steam.inf cannot be read", async () => {
+  it("falls back to RCON when installedBuild cannot answer", async () => {
     const r = await runUpdateCheck(
       baseDeps({ installedBuild: async () => null }),
     );
@@ -294,7 +310,7 @@ describe("runUpdateCheck", () => {
     assert.equal(r.update.upToDate, false);
   });
 
-  it("falls back to RCON when reading steam.inf throws", async () => {
+  it("falls back to RCON when installedBuild throws", async () => {
     const r = await runUpdateCheck(
       baseDeps({
         installedBuild: async () => {
@@ -314,7 +330,24 @@ describe("runUpdateCheck", () => {
     );
     assert.equal(r.update.upToDate, null);
     assert.equal(r.restarted, false);
-    assert.match(r.update.message, /steam\.inf/);
+    assert.equal(r.update.installedVersion, null);
+  });
+
+  it("never restarts on an undeterminable build", async () => {
+    // The failure that hides itself: an unknown build is not "up to date", but
+    // it is also not grounds to restart, so the check must do nothing *and*
+    // leave upToDate null for the caller to report.
+    let restarted = false;
+    const r = await runUpdateCheck(
+      baseDeps({
+        rconExec: async () => "Unknown command 'version'!",
+        restartContainer: async () => {
+          restarted = true;
+        },
+      }),
+    );
+    assert.equal(restarted, false);
+    assert.equal(r.update.upToDate, null);
   });
 
   it("does nothing when already up to date", async () => {

@@ -105,16 +105,15 @@ export interface UpdateCheckDeps {
   /** Runs an RCON command; the watcher only ever issues `status`. */
   rconExec: (command: string) => Promise<string>;
   /**
-   * The installed build, read from `steam.inf` in the game files, tried before
-   * RCON.
+   * The installed build, tried before RCON. Optional; falls back to RCON.
    *
-   * RCON was the only source, and reading it means matching a version line
-   * whose layout CS2 has changed more than once. When that match failed the
-   * check returned "unknown" and — because an unknown build never triggers a
-   * restart — auto-update quietly stopped happening, with nothing in the log to
-   * say so. `steam.inf` is a `KEY=value` file steamcmd writes itself, so it does
-   * not depend on that regex, and unlike RCON it can still be read while the
-   * server is down. Optional: falls back to RCON when absent.
+   * There is deliberately no implementation of this reading `steam.inf`.
+   * That file looks like the obvious source and is not: it carries
+   * `ServerVersion=2000899` where `status` reports `1.41.7.8/14178`, and the
+   * `14178` is what `UpToDateCheck` compares against. Because that comparison
+   * is numeric, feeding it steam.inf's number answers `up_to_date: true`
+   * forever and the check silently never fires again. Verified against the
+   * live server on 2026-08-30 — steam.inf contains no `14178` anywhere.
    */
   installedBuild?: () => Promise<number | null>;
   /** Restarts the CS2 container, which re-runs steamcmd on boot. */
@@ -160,7 +159,6 @@ export async function runUpdateCheck(
     message: "",
   };
 
-  // The game files first, because they answer even when the server does not.
   let installedVersion: number | null = null;
   if (deps.installedBuild) {
     try {
@@ -191,8 +189,7 @@ export async function runUpdateCheck(
     return {
       update: {
         ...base,
-        message:
-          "Could not read a build number from steam.inf or the `status` version line",
+        message: "Could not read a build number from the `status` version line",
       },
       restarted: false,
     };

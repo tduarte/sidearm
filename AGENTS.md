@@ -92,13 +92,13 @@ waiting. It compares the installed build against Steam's
 `ISteamApps/UpToDateCheck` (public, no key), every `CS2_UPDATE_CHECK_MS`, and with
 `CS2_AUTO_UPDATE=1` restarts as soon as no humans are connected.
 
-- **Read the build from `steam.inf`, not from RCON `status`.** It was RCON-only, matched with a
-  regex against a version line CS2 has changed more than once. When that match failed the check
-  returned "unknown" — and an unknown build never triggers a restart, while the early return logged
-  nothing at all. On the live server that was ~290 checks over three days sitting on a six-day-old
-  update, in complete silence. `steam.inf` is `KEY=value` (`ServerVersion=14178`) written by
-  steamcmd itself, at `/cs2/game/csgo/steam.inf` through the panel's existing read-only mount, and
-  it is readable even while the server is down. RCON stays as the fallback.
+- **`steam.inf` is not the build number, however much it looks like one.** It is the obvious way to
+  avoid parsing `status`, and it is wrong: a live install writes `ServerVersion=2000899` while
+  `status` reports `version : 1.41.7.8/14178`, and `14178` is what `UpToDateCheck` compares
+  against — *numerically*. Feed it steam.inf's number and Steam answers `up_to_date: true` forever,
+  so the check never fires again. Verified on the live server 2026-08-30: steam.inf contains no
+  `14178` anywhere. `UpdateCheckDeps.installedBuild` exists for a better source than RCON if one is
+  ever found; steam.inf is not it.
 - **Every outcome of the check must log.** Four of its paths used to return silently, three of them
   failures, which is indistinguishable from "nothing to do". An inconclusive check now warns.
 - **`playerCount()` returning null means "not polled yet", never "empty".** Guessing wrong here
