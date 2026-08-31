@@ -93,6 +93,28 @@ app.prepare().then(async () => {
       }
       return;
     }
+    // A different MatchZy match, or the next map of a series. Without this the
+    // open row keeps absorbing rounds: two games merge into one history entry
+    // with a score that belongs to neither, and the live timeline shows the
+    // previous game's rounds under the current game's score. Only fires on a
+    // *change* the process has seen — the first sighting after a restart is
+    // the match already running, which must keep the record it resumed.
+    if (ev.type === "match.series") {
+      const cache = globalThis.__cs2Cache;
+      if (activeMatchId && ev.matchId !== null) {
+        endMatch(
+          activeMatchId,
+          cache?.match?.score ?? { ct: 0, t: 0 },
+          cache?.players ?? [],
+        );
+        activeMatchId = beginMatch(
+          cache?.status?.map ?? "unknown",
+          cache?.status?.gameMode ?? "competitive",
+        );
+        console.log(`[db] MatchZy started a new match; recording as ${activeMatchId}`);
+      }
+      return;
+    }
     if (ev.type !== "match.phase") return;
     const cache = globalThis.__cs2Cache;
     if (ev.phase === "live" && !activeMatchId) {

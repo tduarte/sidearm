@@ -392,17 +392,39 @@ function phaseFromGamestate(g: string): MatchPhase | null {
  * ever say "a pause was requested" and hope; `get5_status` answers the question
  * directly. Where MatchZy knows, MatchZy wins.
  */
+/**
+ * The MatchZy match the last poll saw, as `matchid:map_number`.
+ *
+ * `undefined` means no poll has landed in this process yet, which is different
+ * from `null` (polled, nothing loaded): a panel that has just restarted
+ * mid-match must not read its first sighting of the running match as a new one
+ * and close the record it just resumed.
+ */
+let lastSeriesKey: string | null | undefined = undefined;
+
 function applyMatchZyState(get5: Get5Status | null): void {
   const gamestate = get5?.gamestate ?? null;
   const wasOwned = matchzyOwnsMatch();
+  const series = get5?.series ?? null;
   // Read every poll rather than remembered: team names, the map number and the
   // series score all change during a match, and a stale matchup is worse than
   // no matchup — it labels the score with the wrong side after the half.
-  cache().match = {
-    ...cache().match,
-    matchzyState: gamestate,
-    series: get5?.series ?? null,
-  };
+  cache().match = { ...cache().match, matchzyState: gamestate, series };
+
+  // Announced before the score is adopted below, and the bus is synchronous:
+  // whoever closes the old match record has to read the score that record
+  // ended on, not the 0-0 the new one starts with.
+  const seriesKey = series
+    ? `${series.matchId ?? "?"}:${series.mapNumber}`
+    : null;
+  if (lastSeriesKey !== undefined && lastSeriesKey !== seriesKey) {
+    bus.emit({
+      type: "match.series",
+      matchId: series?.matchId ?? null,
+      mapNumber: series?.mapNumber ?? null,
+    });
+  }
+  lastSeriesKey = seriesKey;
 
   // No config loaded — including every pug started in-game with `.start`, which
   // get5_status does not report on. Leave the log-derived state alone.
@@ -426,7 +448,6 @@ function applyMatchZyState(get5: Get5Status | null): void {
   // wrong until the match ends — on a server that is up around the clock and
   // redeployed while a match is loaded, that is the normal case rather than
   // the exotic one. `round` follows because it is derived from the score.
-  const series = get5?.series ?? null;
   const ctTeam =
     series?.team1.side === "CT"
       ? series.team1

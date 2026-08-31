@@ -528,6 +528,12 @@ export type WsEvent =
   | { type: "match.phase"; phase: MatchPhase }
   | { type: "match.score"; score: { ct: number; t: number }; round: number }
   | { type: "server.update"; update: UpdateStatus }
+  /**
+   * MatchZy started a different match, or moved to the next map of a series.
+   * `null` when nothing is loaded. Carries identity only — the state itself
+   * arrives on the status poll.
+   */
+  | { type: "match.series"; matchId: number | null; mapNumber: number | null }
   | { type: "round.start" }
   | ({ type: "round.end" } & RoundRecord)
   | {
