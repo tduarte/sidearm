@@ -42,6 +42,7 @@ export function MapPoolPicker({
   picked,
   onChange,
   skipVeto,
+  onSkipVetoChange,
   numMaps,
 }: {
   maps: MapEntry[];
@@ -49,6 +50,7 @@ export function MapPoolPicker({
   onChange: (next: string[]) => void;
   /** Drives the order hint — order only matters when the veto is skipped. */
   skipVeto: boolean;
+  onSkipVetoChange: (skip: boolean) => void;
   numMaps: number;
 }) {
   const [showOther, setShowOther] = useState(false);
@@ -66,6 +68,18 @@ export function MapPoolPicker({
     () => RESERVE.filter((m) => byName.has(m)),
     [byName],
   );
+
+  /**
+   * A preset is a pool *and* a veto. Both presets hand over more maps than any
+   * series length here, which is the only situation where a veto does
+   * anything — and leaving `skipVeto` on would quietly make MatchZy play the
+   * seven in listed order instead, which is not what anyone pressing
+   * "Active Duty" is asking for.
+   */
+  const applyPreset = (names: string[]) => {
+    onChange(names);
+    onSkipVetoChange(false);
+  };
 
   const toggle = (name: string) =>
     onChange(
@@ -156,7 +170,7 @@ export function MapPoolPicker({
           size="sm"
           variant="outline"
           disabled={activeDuty.present.length === 0}
-          onClick={() => onChange(activeDuty.present)}
+          onClick={() => applyPreset(activeDuty.present)}
         >
           Active Duty · {activeDuty.present.length}
         </Button>
@@ -164,7 +178,7 @@ export function MapPoolPicker({
           size="sm"
           variant="outline"
           disabled={reservePresent.length === 0}
-          onClick={() => onChange([...reservePresent])}
+          onClick={() => applyPreset([...reservePresent])}
         >
           Reserve · {reservePresent.length}
         </Button>

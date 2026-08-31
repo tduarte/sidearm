@@ -364,6 +364,7 @@ export function MatchSetup() {
           picked={maps}
           onChange={setMaps}
           skipVeto={skipVeto}
+          onSkipVetoChange={setSkipVeto}
           numMaps={numMaps}
         />
 
