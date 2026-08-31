@@ -12,9 +12,10 @@ describe("ACTIVE_DUTY", () => {
     // Cache replaced Overpass for Premier Season 5 on 2026-07-06; Train left
     // the pool before that. Both are still installed on any CS2 server, so
     // nothing but this list keeps them out of a competitive veto.
-    assert.ok(ACTIVE_DUTY.includes("de_cache"));
-    assert.ok(!ACTIVE_DUTY.includes("de_overpass"));
-    assert.ok(!ACTIVE_DUTY.includes("de_train"));
+    const pool: readonly string[] = ACTIVE_DUTY;
+    assert.ok(pool.includes("de_cache"));
+    assert.ok(!pool.includes("de_overpass"));
+    assert.ok(!pool.includes("de_train"));
   });
 });
 

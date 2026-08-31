@@ -33,11 +33,7 @@ import { api } from "@/lib/api/client";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { isConvertibleSteamId } from "@/lib/cs2/steamid";
-import {
-  ACTIVE_DUTY_AS_OF,
-  activeDutyPool,
-} from "@/lib/cs2/map-pools";
-import { cn } from "@/lib/utils";
+import { MapPoolPicker } from "@/components/match/map-pool-picker";
 import type { MatchDefinition } from "@/lib/cs2/match-config";
 import type { StoredMatchConfig } from "@/lib/db/match-configs";
 
@@ -76,10 +72,6 @@ export function MatchSetup() {
   });
 
   const allMaps = useMemo(() => mapList.data?.all ?? [], [mapList.data]);
-  const activeDuty = useMemo(
-    () => activeDutyPool(allMaps.map((m) => m.name)),
-    [allMaps],
-  );
 
   // Newest first — the one you ran last is the one you most likely want again.
   const templates = useMemo(
@@ -367,67 +359,13 @@ export function MatchSetup() {
           )}
         </div>
 
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Label className="text-xs uppercase tracking-wide text-muted-foreground">
-              Map pool
-            </Label>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={activeDuty.present.length === 0}
-              onClick={() => {
-                setMaps(activeDuty.present);
-                // Seven maps and a veto is the point of the preset; leaving
-                // skip-veto on would hand MatchZy the pool in order instead.
-                setSkipVeto(false);
-              }}
-            >
-              Active Duty
-            </Button>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Active Duty is the pool as of {ACTIVE_DUTY_AS_OF} — Valve rotates
-            it, and nothing the server reports says which maps are in it, so
-            check the seven below against the pool you meant to play.
-          </p>
-          {activeDuty.missing.length > 0 && (
-            <p className="flex items-start gap-1.5 text-xs text-muted-foreground">
-              <Warning className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              This server does not have{" "}
-              {activeDuty.missing.map((m) => m.replace(/^de_/, "")).join(", ")}{" "}
-              installed, so the preset picks{" "}
-              {activeDuty.present.length} of 7.
-            </p>
-          )}
-          <div className="flex flex-wrap gap-1.5">
-            {allMaps.map((m) => {
-              const picked = maps.includes(m.name);
-              return (
-                <button
-                  key={m.name}
-                  type="button"
-                  aria-pressed={picked}
-                  onClick={() =>
-                    setMaps((prev) =>
-                      prev.includes(m.name)
-                        ? prev.filter((x) => x !== m.name)
-                        : [...prev, m.name],
-                    )
-                  }
-                  className={cn(
-                    "border px-2.5 py-1 font-mono text-xs transition-colors",
-                    picked
-                      ? "border-primary/50 bg-primary/10 text-foreground"
-                      : "text-muted-foreground hover:bg-muted",
-                  )}
-                >
-                  {m.displayName}
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        <MapPoolPicker
+          maps={allMaps}
+          picked={maps}
+          onChange={setMaps}
+          skipVeto={skipVeto}
+          numMaps={numMaps}
+        />
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-1.5">
