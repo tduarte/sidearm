@@ -163,6 +163,15 @@ export function StatusStrip({ match }: { match: MatchState }) {
         <Timer className="h-3 w-3" />
         {matchzyLabel ?? match.phase}
       </Badge>
+      {/*
+        Visible from the Setup tab too, which is the point: "what is loaded
+        right now" is the question you ask before changing anything.
+      */}
+      {match.series && (
+        <span className="min-w-0 max-w-60 truncate text-xs text-muted-foreground">
+          {match.series.team1.name} vs {match.series.team2.name}
+        </span>
+      )}
       {typeof status?.players === "number" && (
         <span className="flex items-center gap-1.5 text-xs tabular-nums text-muted-foreground">
           <Users className="h-3 w-3" />

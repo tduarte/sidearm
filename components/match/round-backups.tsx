@@ -15,6 +15,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { DangerConfirm } from "@/components/danger-confirm";
 import { api } from "@/lib/api/client";
+import { useMatchState } from "@/lib/hooks/use-match-state";
 import type { RoundBackup } from "@/lib/cs2/round-backups";
 
 function ago(iso: string): string {
@@ -38,6 +39,7 @@ function ago(iso: string): string {
  */
 export function RoundBackups() {
   const qc = useQueryClient();
+  const { data: match } = useMatchState();
 
   const backups = useQuery<RoundBackup[]>({
     queryKey: ["round-backups"],
@@ -57,15 +59,27 @@ export function RoundBackups() {
     },
   });
 
-  // Newest match id / map first, which `listRoundBackups` already sorted by.
+  /**
+   * MatchZy tells us its own match id and map number, so ask it rather than
+   * inferring. The inference was wrong in a way that would only show up
+   * later: backups sort by match id numerically, and match ids come from the
+   * panel's `match_number`, which is reused and not monotonic in time — load
+   * match 1 today after running match 5 last week and "newest" is last week's.
+   *
+   * The fallback stays for a pug, where get5_status reports nothing and the
+   * most recent files really are the best guess available.
+   */
+  const series = match?.series ?? null;
   const current = useMemo(() => {
     const all = backups.data ?? [];
     if (all.length === 0) return [];
-    const { matchId, mapNumber } = all[0];
+    const matchId = series?.matchId ?? all[0].matchId;
+    const mapNumber =
+      series?.matchId != null ? series.mapNumber : all[0].mapNumber;
     return all.filter(
       (b) => b.matchId === matchId && b.mapNumber === mapNumber,
     );
-  }, [backups.data]);
+  }, [backups.data, series]);
 
   return (
     <Card>
