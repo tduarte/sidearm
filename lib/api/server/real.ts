@@ -8,6 +8,7 @@ import type {
   CvarState,
   MatchPhase,
   MatchState,
+  RoundRecord,
   PendingOp,
   PendingOpKind,
   Player,
@@ -23,7 +24,12 @@ import { fetchStatus } from "@/lib/cs2/status";
 import type { Get5Status } from "@/lib/cs2/plugins";
 import { bus } from "@/lib/ws/bus";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
-import { getMatches, getMatchDetail } from "@/lib/db/matches";
+import {
+  findOpenMatch,
+  getMatches,
+  getMatchDetail,
+  getRounds,
+} from "@/lib/db/matches";
 import { mergeHistory, readMatchZyMaps } from "@/lib/cs2/matchzy-db";
 import { buildMatchConfig, type MatchDefinition } from "@/lib/cs2/match-config";
 import { loadMatchCommand } from "@/lib/cs2/match-load";
@@ -1674,6 +1680,27 @@ export const realAdapter = {
     );
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
+  },
+
+  /**
+   * The rounds of the match that is being played right now.
+   *
+   * `server.ts` has recorded every `Round_End` against the open match since
+   * round detail existed, but nothing could read them until the match was
+   * over — the story of a game was only ever available as history. This is
+   * the same rows, one match earlier.
+   *
+   * Empty is the honest answer for "no match open" as well as "no rounds
+   * yet": both mean there is nothing to draw, and the caller cannot act on
+   * the difference.
+   */
+  async getLiveRounds(): Promise<RoundRecord[]> {
+    try {
+      const open = findOpenMatch();
+      return open ? getRounds(open.id) : [];
+    } catch {
+      return [];
+    }
   },
 
   async deleteMatchConfig(id: string): Promise<void> {

@@ -6,6 +6,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { LoadError } from "@/components/load-error";
 import { DemoList } from "@/components/match/demo-list";
 import { LiveActionsCard } from "@/components/match/live-actions";
+import { LiveScoreboard } from "@/components/match/live-scoreboard";
+import { LiveTimeline } from "@/components/match/live-timeline";
 import { ManualControls } from "@/components/match/manual-controls";
 import { MatchSetup } from "@/components/match/match-setup";
 import { ModeSections } from "@/components/match/mode-sections";
@@ -97,10 +99,17 @@ export default function MatchPage() {
 
         <TabsContent value="live" className="mt-4 space-y-4">
           {underway && <ScoreboardHero match={match} />}
+          {/*
+            The timeline sits with the score because it is the score's story,
+            and the controls stay above the fold on a phone: it renders
+            nothing at all until a round has been played.
+          */}
+          <LiveTimeline match={match} />
           <LiveActionsCard
             takeover={matchzyLoaded}
             awaitingStart={awaitingStart}
           />
+          <LiveScoreboard />
           {matchzyLoaded && <RoundBackups />}
           <DemoList />
         </TabsContent>

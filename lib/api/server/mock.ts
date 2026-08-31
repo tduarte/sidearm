@@ -8,6 +8,7 @@ import type {
   MatchHistoryDetail,
   MatchState,
   Player,
+  RoundRecord,
   ServerConfig,
   ServerStatus,
   UpdateStatus,
@@ -36,6 +37,27 @@ const mockRoundBackups: RoundBackup[] = [
   { round: 12, matchId: 2, mapNumber: 0, fileName: "matchzy_2_0_round12.json", savedAt: new Date(Date.now() - 60_000).toISOString() },
   { round: 11, matchId: 2, mapNumber: 0, fileName: "matchzy_2_0_round11.json", savedAt: new Date(Date.now() - 180_000).toISOString() },
   { round: 10, matchId: 2, mapNumber: 0, fileName: "matchzy_2_0_round10.json", savedAt: new Date(Date.now() - 300_000).toISOString() },
+];
+
+/**
+ * The rounds behind the mock 7-5, so the live timeline has a shape to draw
+ * without a server. The running score has to add up: the timeline shows each
+ * round's score, and a sequence that disagrees with `state.match.score` is a
+ * mock that teaches the wrong thing.
+ */
+const mockLiveRounds: RoundRecord[] = [
+  { round: 1, winner: "CT", reason: "ct_win_elimination", score: { ct: 1, t: 0 } },
+  { round: 2, winner: "CT", reason: "bomb_defused", score: { ct: 2, t: 0 } },
+  { round: 3, winner: "T", reason: "target_bombed", score: { ct: 2, t: 1 } },
+  { round: 4, winner: "CT", reason: "target_saved", score: { ct: 3, t: 1 } },
+  { round: 5, winner: "T", reason: "t_win_elimination", score: { ct: 3, t: 2 } },
+  { round: 6, winner: "CT", reason: "ct_win_elimination", score: { ct: 4, t: 2 } },
+  { round: 7, winner: "T", reason: "target_bombed", score: { ct: 4, t: 3 } },
+  { round: 8, winner: "T", reason: "t_win_elimination", score: { ct: 4, t: 4 } },
+  { round: 9, winner: "CT", reason: "bomb_defused", score: { ct: 5, t: 4 } },
+  { round: 10, winner: "CT", reason: "target_saved", score: { ct: 6, t: 4 } },
+  { round: 11, winner: "T", reason: "target_bombed", score: { ct: 6, t: 5 } },
+  { round: 12, winner: "CT", reason: "ct_win_elimination", score: { ct: 7, t: 5 } },
 ];
 
 const mockMatchConfigs: StoredMatchConfig[] = [
@@ -408,6 +430,15 @@ export const mockAdapter = {
 
   async restoreRound(round: number): Promise<void> {
     state.match = { ...state.match, round, matchzyState: "live" };
+    // A restore un-plays the rounds after it, and the timeline reads from
+    // here — leaving them would show a match that is ahead of its own score.
+    const kept = mockLiveRounds.filter((r) => r.round < round);
+    mockLiveRounds.length = 0;
+    mockLiveRounds.push(...kept);
+  },
+
+  async getLiveRounds(): Promise<RoundRecord[]> {
+    return [...mockLiveRounds];
   },
 
   async deleteMatchConfig(id: string): Promise<void> {

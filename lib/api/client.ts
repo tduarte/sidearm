@@ -14,6 +14,7 @@ import type {
   MatchHistoryDetail,
   MatchState,
   Player,
+  RoundRecord,
   ServerConfig,
   ServerStatus,
   UpdateStatus,
@@ -191,6 +192,8 @@ export const api = {
   },
 
   getRoundBackups: () => request<RoundBackup[]>("/api/match/backups"),
+
+  getLiveRounds: () => request<RoundRecord[]>("/api/match/rounds"),
 
   restoreRound: async (round: number) => {
     await request<{ ok: true }>("/api/match/restore", json({ round }));
