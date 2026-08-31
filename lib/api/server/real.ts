@@ -420,6 +420,33 @@ function applyMatchZyState(get5: Get5Status | null): void {
   const phase = phaseFromGamestate(gamestate);
   if (phase) cache().match = { ...cache().match, phase };
 
+  // MatchZy's own score, which is the only one that survives a panel restart.
+  // The log-derived score is rebuilt from `Team ... triggered` lines as they
+  // arrive, so restarting the panel mid-match resets it to 0-0 and it stays
+  // wrong until the match ends — on a server that is up around the clock and
+  // redeployed while a match is loaded, that is the normal case rather than
+  // the exotic one. `round` follows because it is derived from the score.
+  const series = get5?.series ?? null;
+  const ctTeam =
+    series?.team1.side === "CT"
+      ? series.team1
+      : series?.team2.side === "CT"
+        ? series.team2
+        : null;
+  const tTeam =
+    series?.team1.side === "T"
+      ? series.team1
+      : series?.team2.side === "T"
+        ? series.team2
+        : null;
+  if (ctTeam && tTeam) {
+    cache().match = {
+      ...cache().match,
+      score: { ct: ctTeam.mapScore, t: tTeam.mapScore },
+      round: ctTeam.mapScore + tTeam.mapScore,
+    };
+  }
+
   if (get5?.paused !== null && get5?.paused !== undefined) {
     cache().match = {
       ...cache().match,

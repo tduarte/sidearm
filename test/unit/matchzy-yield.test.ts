@@ -163,6 +163,50 @@ describe("applyMatchZyState via updateCache", () => {
     assert.equal(getMatchState().pause, "pause_requested");
   });
 
+  it("takes the score from MatchZy, which survives a panel restart", async () => {
+    // The log-derived score is rebuilt from round-win lines as they arrive, so
+    // a redeploy mid-match leaves it at 0-0 for the rest of the game. MatchZy
+    // still knows, and this panel gets redeployed while matches are loaded.
+    const { updateCache, getMatchState, updateMatchState } = await import(
+      "@/lib/api/server/real"
+    );
+    const status = await import("./helpers/status-fixture").then((m) => m.default);
+    updateMatchState({ score: { ct: 0, t: 0 }, round: 0 });
+
+    updateCache(status(), null, undefined, {
+      gamestate: "live",
+      paused: false,
+      series: {
+        matchId: 1,
+        mapNumber: 0,
+        maps: ["de_nuke"],
+        // Team 1 is on T, so the CT score is team 2's — reading them in
+        // team order would report the match backwards.
+        team1: { name: "Team A", seriesScore: 0, mapScore: 4, side: "T" },
+        team2: { name: "Team B", seriesScore: 0, mapScore: 9, side: "CT" },
+      },
+      raw: {},
+    });
+
+    assert.deepEqual(getMatchState().score, { ct: 9, t: 4 });
+    assert.equal(getMatchState().round, 13);
+  });
+
+  it("leaves the score alone when MatchZy has not said whose side is whose", async () => {
+    const { updateCache, getMatchState, updateMatchState } = await import(
+      "@/lib/api/server/real"
+    );
+    const status = await import("./helpers/status-fixture").then((m) => m.default);
+    updateMatchState({ score: { ct: 5, t: 3 }, round: 8 });
+    updateCache(status(), null, undefined, {
+      gamestate: "live",
+      paused: false,
+      series: null,
+      raw: {},
+    });
+    assert.deepEqual(getMatchState().score, { ct: 5, t: 3 });
+  });
+
   it("maps the knife round to live, not warmup", async () => {
     // The panel's MatchPhase has no knife value, and calling it warmup would
     // say the round does not count when it decides which side everyone plays.
