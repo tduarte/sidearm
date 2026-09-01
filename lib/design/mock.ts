@@ -61,7 +61,7 @@ export const PLAYERS: MockPlayer[] = [
   { id: "3", name: "nine", side: "ct", kills: 11, deaths: 12, assists: 2, adr: 64, ping: 31 },
   { id: "4", name: "Bracket", side: "ct", kills: 9, deaths: 13, assists: 7, adr: 58, ping: 18 },
   { id: "5", name: "hollow", side: "ct", kills: 7, deaths: 14, assists: 3, adr: 44, ping: 47 },
-  { id: "6", name: "p4ul", side: "t", kills: 17, deaths: 10, assists: 3, adr: 88, ping: 15 },
+  { id: "6", name: "p4ul", side: "t", kills: 17, deaths: 10, assists: 3, adr: 88, ping: 15, captain: true },
   { id: "7", name: "dusk", side: "t", kills: 15, deaths: 11, assists: 5, adr: 81, ping: 22 },
   { id: "8", name: "Ferro", side: "t", kills: 12, deaths: 12, assists: 4, adr: 70, ping: 19 },
   { id: "9", name: "otter", side: "t", kills: 10, deaths: 13, assists: 8, adr: 61, ping: 55 },
