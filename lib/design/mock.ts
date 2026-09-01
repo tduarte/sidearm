@@ -7,7 +7,7 @@
  * Every direction reads this same object, so any difference between them is a
  * design difference and never a data one.
  *
- * The numbers are a real Friday: ten friends on, a best-of-three underway,
+ * The numbers are a real Friday: twelve friends on, a best-of-three underway,
  * second map, one round from the half.
  */
 
@@ -35,7 +35,7 @@ export const SERVER = {
   cpuPct: 34,
   memMb: 5120,
   memMaxMb: 12288,
-  slotsUsed: 10,
+  slotsUsed: 12,
   slotsTotal: 12,
   tickrate: 64,
   build: "1.41.7.8/14178",
@@ -68,6 +68,16 @@ export const PLAYERS: MockPlayer[] = [
   { id: "10", name: "SLATE", side: "t", kills: 6, deaths: 15, assists: 2, adr: 39, ping: 28 },
 ];
 
+/**
+ * Connected but not on a team. The broadcast direction drafts out of this pool,
+ * so it needs to exist in the fixture — a draft UI with nobody to draft reads
+ * as a bug rather than as an empty state.
+ */
+export const STANDBY: MockPlayer[] = [
+  { id: "11", name: "vex", side: "ct", kills: 0, deaths: 0, assists: 0, adr: 0, ping: 21 },
+  { id: "12", name: "Marrow", side: "t", kills: 0, deaths: 0, assists: 0, adr: 0, ping: 38 },
+];
+
 export const CT_PLAYERS = PLAYERS.filter((p) => p.side === "ct");
 export const T_PLAYERS = PLAYERS.filter((p) => p.side === "t");
 
@@ -80,6 +90,13 @@ export const MAP_POOL = [
   { name: "de_anubis", label: "Anubis", state: "banned" as const, by: "Team p4ul" },
   { name: "de_dust2", label: "Dust II", state: "banned" as const, by: "Team Fang" },
   { name: "de_train", label: "Train", state: "banned" as const, by: "Team p4ul" },
+];
+
+/** The series as a rundown: what has been played, what is on air, what is next. */
+export const SERIES_MAPS = [
+  { name: "de_inferno", label: "Inferno", state: "done" as const, note: "Team Fang 13-9" },
+  { name: "de_mirage", label: "Mirage", state: "live" as const, note: "Round 12" },
+  { name: "de_nuke", label: "Nuke", state: "next" as const, note: "Decider" },
 ];
 
 export const PRESETS = [

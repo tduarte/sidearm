@@ -12,9 +12,9 @@ const DIRECTION_NOTES = [
   {
     slug: "broadcast",
     name: "Broadcast",
-    line: "The match is the product. Scoreboard at stadium scale.",
+    line: "The match is the product. The scoreboard is also the control surface.",
     what:
-      "Full-bleed map art, enormous tabular scores, CT blue and T orange as whole colour fields. The roster is two mirrored columns with damage bars behind each row; controls are a strip at the bottom with their blast radius written under the label.",
+      "Full-bleed map art, enormous tabular scores, CT blue and T orange as whole colour fields. There is no setup screen: the scoreboard is the form. Team names, the map, the series format, overtime and who is on which side are all edited in place, and a gallery's two buses do the batching — edits land in PREVIEW, the bar at the bottom lists what is staged, TAKE cuts all of it to air at once.",
     cost:
       "Almost everything is the current match, so any screen that is not a live match has to justify itself. Nine of ten nights it is glorious; the tenth it is an empty stadium.",
   },
@@ -66,7 +66,7 @@ export default function DesignIndex() {
         <h1 className="mt-3 text-4xl font-semibold tracking-tight">Five directions</h1>
         <p className="mt-4 max-w-[62ch] text-[15px] leading-relaxed text-[#9a9aa8]">
           Five different answers to the same screen, all rendering the same fixture data — a
-          Friday best-of-three, second map, ten friends on — so every difference between them
+          Friday best-of-three, second map, twelve friends on — so every difference between them
           is a design difference and never a data one. Nothing here is wired to the server;
           buttons do not do anything. Pick the world, and the real panel gets rebuilt in it.
         </p>

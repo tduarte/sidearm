@@ -176,7 +176,7 @@ export default function LauncherDirection() {
               <h1 className="ln__title">{MATCH.mapLabel}</h1>
               <p className="ln__sub">
                 <b>{MATCH.ct.name}</b> against <b>{MATCH.t.name}</b>, round {MATCH.round}{" "}
-                of {MATCH.maxRounds}. Ten friends on, one slot spare.
+                of {MATCH.maxRounds}. Twelve on, ten of them playing.
               </p>
               <div className="ln__cta">
                 <button className="ln__play" type="button">

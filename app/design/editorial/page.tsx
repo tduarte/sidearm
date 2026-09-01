@@ -204,7 +204,7 @@ export default function EditorialDirection() {
             <p className="ed__standfirst">
               Round {MATCH.round} of {MATCH.maxRounds}. <b>{MATCH.ct.name}</b> took the series
               opener on Inferno; <b>{MATCH.t.name}</b> need this one to reach the decider on
-              Nuke. Ten connected, one slot spare, and the demo has been rolling since the
+              Nuke. Twelve connected, two of them waiting, and the demo has been rolling since the
               knife round.
             </p>
           </div>
