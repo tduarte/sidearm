@@ -103,6 +103,71 @@ describe("orphaned matches", () => {
   });
 });
 
+/**
+ * The live timeline reads rounds out of the *open* match, which is the one
+ * thing history never had to do: `getMatches` filters `ended_at IS NULL` out
+ * entirely, so nothing exercised the path until now.
+ */
+describe("rounds of the match in progress", () => {
+  it("reads back the open match's rounds, and has none once it ends", async () => {
+    const { beginMatch, insertRound, getRounds, findOpenMatch, endMatch } =
+      await import("@/lib/db/matches");
+
+    assert.equal(findOpenMatch(), null, "nothing should be open yet");
+    const id = beginMatch("de_ancient", "competitive");
+    insertRound(id, {
+      round: 1,
+      winner: "CT",
+      reason: "ct_win_elimination",
+      score: { ct: 1, t: 0 },
+    });
+    insertRound(id, {
+      round: 2,
+      winner: "T",
+      reason: "target_bombed",
+      score: { ct: 1, t: 1 },
+    });
+
+    const open = findOpenMatch();
+    assert.equal(open?.id, id);
+    assert.deepEqual(
+      getRounds(open!.id).map((r) => r.round),
+      [1, 2],
+    );
+
+    endMatch(id, { ct: 1, t: 1 }, []);
+    // The timeline follows the open match, so a finished one leaves the live
+    // view empty rather than showing the last game under the next one's score.
+    assert.equal(findOpenMatch(), null);
+  });
+
+  it("replaces a replayed round instead of listing it twice", async () => {
+    const { beginMatch, insertRound, getRounds, endMatch } = await import(
+      "@/lib/db/matches"
+    );
+    const id = beginMatch("de_dust2", "competitive");
+    insertRound(id, {
+      round: 5,
+      winner: "T",
+      reason: "target_bombed",
+      score: { ct: 2, t: 3 },
+    });
+    // `mp_restartgame` and a MatchZy round restore both replay a round number
+    // that is already recorded.
+    insertRound(id, {
+      round: 5,
+      winner: "CT",
+      reason: "bomb_defused",
+      score: { ct: 3, t: 2 },
+    });
+
+    const rounds = getRounds(id);
+    assert.equal(rounds.length, 1);
+    assert.equal(rounds[0].winner, "CT");
+    endMatch(id, { ct: 3, t: 2 }, []);
+  });
+});
+
 describe("plugin regression memory", () => {
   /**
    * The alarming transition is *was loaded, now is not* — and the panel

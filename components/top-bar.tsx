@@ -144,7 +144,7 @@ export function TopBar() {
             </div>
           )}
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex shrink-0 items-center gap-2">
             {updateAvailable && (
               <DangerConfirm
                 title="Apply the CS2 update now?"
@@ -164,9 +164,10 @@ export function TopBar() {
                     className="border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300"
                     onClick={arm}
                     disabled={applyUpdate.isPending}
+                    aria-label="Update available"
                   >
                     <CloudArrowDown className="h-4 w-4" />
-                    Update available
+                    <span className="hidden sm:inline">Update available</span>
                   </Button>
                 )}
               </DangerConfirm>
@@ -194,9 +195,10 @@ export function TopBar() {
                       onClick={arm}
                       disabled={restart.isPending || dockerDown}
                       title={dockerDown ? dockerReason : undefined}
+                      aria-label="Restart the server"
                     >
                       <ArrowsClockwise className="h-4 w-4" />
-                      Restart
+                      <span className="hidden sm:inline">Restart</span>
                     </Button>
                   )}
                 </DangerConfirm>
@@ -214,9 +216,10 @@ export function TopBar() {
                       onClick={arm}
                       disabled={toggle.isPending || dockerDown}
                       title={dockerDown ? dockerReason : undefined}
+                      aria-label="Stop the server"
                     >
                       <Stop className="h-4 w-4" weight="fill" />
-                      Stop
+                      <span className="hidden sm:inline">Stop</span>
                     </Button>
                   )}
                 </DangerConfirm>
@@ -234,9 +237,10 @@ export function TopBar() {
                   updating
                 }
                 title={dockerDown ? dockerReason : undefined}
+                aria-label="Start the server"
               >
                 <Play className="h-4 w-4" weight="fill" />
-                Start
+                <span className="hidden sm:inline">Start</span>
               </Button>
             )}
           </div>

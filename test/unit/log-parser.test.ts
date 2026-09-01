@@ -341,3 +341,35 @@ describe("panel self-chatter", () => {
     assert.ok(r.consoleEvents.length > 0);
   });
 });
+
+/**
+ * The timeline tooltip reads win conditions the parser produced, so the two
+ * have to agree on spelling. They did not: `SFUI_Notice_CTs_Win` normalises to
+ * `cts_win`, and the lookup was keyed on an invented `c_ts_win`, which meant
+ * the most common outcome in the game displayed as a raw id.
+ */
+describe("win conditions the timeline can name", () => {
+  it("names what the parser actually emits", async () => {
+    const { winReason } = await import("@/lib/cs2/log-parser");
+    const { describeReason } = await import(
+      "@/components/history/round-timeline"
+    );
+    const cases: [string, string][] = [
+      ["SFUI_Notice_CTs_Win", "CT elimination"],
+      ["SFUI_Notice_Terrorists_Win", "T elimination"],
+      ["SFUI_Notice_Bomb_Defused", "bomb defused"],
+      ["SFUI_Notice_Target_Bombed", "bomb detonated"],
+      ["SFUI_Notice_Target_Saved", "time expired"],
+    ];
+    for (const [sfui, expected] of cases) {
+      assert.equal(describeReason(winReason(sfui)), expected, sfui);
+    }
+  });
+
+  it("shows an unrecognised condition rather than hiding it", async () => {
+    const { describeReason } = await import(
+      "@/components/history/round-timeline"
+    );
+    assert.equal(describeReason("some_new_thing"), "some new thing");
+  });
+});

@@ -8,6 +8,7 @@ import type {
   CvarState,
   MatchPhase,
   MatchState,
+  RoundRecord,
   PendingOp,
   PendingOpKind,
   Player,
@@ -23,10 +24,16 @@ import { fetchStatus } from "@/lib/cs2/status";
 import type { Get5Status } from "@/lib/cs2/plugins";
 import { bus } from "@/lib/ws/bus";
 import { insertChatMessage, getChatMessages } from "@/lib/db/chat";
-import { getMatches, getMatchDetail } from "@/lib/db/matches";
+import {
+  findOpenMatch,
+  getMatches,
+  getMatchDetail,
+  getRounds,
+} from "@/lib/db/matches";
 import { mergeHistory, readMatchZyMaps } from "@/lib/cs2/matchzy-db";
 import { buildMatchConfig, type MatchDefinition } from "@/lib/cs2/match-config";
 import { loadMatchCommand } from "@/lib/cs2/match-load";
+import { listRoundBackups, type RoundBackup } from "@/lib/cs2/round-backups";
 import {
   deleteMatchConfig,
   getMatchConfig,
@@ -126,6 +133,7 @@ global.__cs2Cache ??= {
     demo: { state: "unknown", name: null },
     knifeSetupApplied: false,
     matchzyState: null,
+    series: null,
   },
   console: [],
   chat: [],
@@ -384,10 +392,39 @@ function phaseFromGamestate(g: string): MatchPhase | null {
  * ever say "a pause was requested" and hope; `get5_status` answers the question
  * directly. Where MatchZy knows, MatchZy wins.
  */
+/**
+ * The MatchZy match the last poll saw, as `matchid:map_number`.
+ *
+ * `undefined` means no poll has landed in this process yet, which is different
+ * from `null` (polled, nothing loaded): a panel that has just restarted
+ * mid-match must not read its first sighting of the running match as a new one
+ * and close the record it just resumed.
+ */
+let lastSeriesKey: string | null | undefined = undefined;
+
 function applyMatchZyState(get5: Get5Status | null): void {
   const gamestate = get5?.gamestate ?? null;
   const wasOwned = matchzyOwnsMatch();
-  cache().match = { ...cache().match, matchzyState: gamestate };
+  const series = get5?.series ?? null;
+  // Read every poll rather than remembered: team names, the map number and the
+  // series score all change during a match, and a stale matchup is worse than
+  // no matchup — it labels the score with the wrong side after the half.
+  cache().match = { ...cache().match, matchzyState: gamestate, series };
+
+  // Announced before the score is adopted below, and the bus is synchronous:
+  // whoever closes the old match record has to read the score that record
+  // ended on, not the 0-0 the new one starts with.
+  const seriesKey = series
+    ? `${series.matchId ?? "?"}:${series.mapNumber}`
+    : null;
+  if (lastSeriesKey !== undefined && lastSeriesKey !== seriesKey) {
+    bus.emit({
+      type: "match.series",
+      matchId: series?.matchId ?? null,
+      mapNumber: series?.mapNumber ?? null,
+    });
+  }
+  lastSeriesKey = seriesKey;
 
   // No config loaded — including every pug started in-game with `.start`, which
   // get5_status does not report on. Leave the log-derived state alone.
@@ -404,6 +441,32 @@ function applyMatchZyState(get5: Get5Status | null): void {
 
   const phase = phaseFromGamestate(gamestate);
   if (phase) cache().match = { ...cache().match, phase };
+
+  // MatchZy's own score, which is the only one that survives a panel restart.
+  // The log-derived score is rebuilt from `Team ... triggered` lines as they
+  // arrive, so restarting the panel mid-match resets it to 0-0 and it stays
+  // wrong until the match ends — on a server that is up around the clock and
+  // redeployed while a match is loaded, that is the normal case rather than
+  // the exotic one. `round` follows because it is derived from the score.
+  const ctTeam =
+    series?.team1.side === "CT"
+      ? series.team1
+      : series?.team2.side === "CT"
+        ? series.team2
+        : null;
+  const tTeam =
+    series?.team1.side === "T"
+      ? series.team1
+      : series?.team2.side === "T"
+        ? series.team2
+        : null;
+  if (ctTeam && tTeam) {
+    cache().match = {
+      ...cache().match,
+      score: { ct: ctTeam.mapScore, t: tTeam.mapScore },
+      round: ctTeam.mapScore + tTeam.mapScore,
+    };
+  }
 
   if (get5?.paused !== null && get5?.paused !== undefined) {
     cache().match = {
@@ -1410,6 +1473,26 @@ export const realAdapter = {
    * it wants to go, and a wrong-direction send becomes impossible.
    */
   async setPause(action: "pause" | "unpause"): Promise<MatchState> {
+    // MatchZy runs its own pause system on top of `mp_pause_match`, and it
+    // keeps the bookkeeping that decides who is allowed to lift the pause:
+    // a normal pause needs BOTH teams to say `.unpause`, and an admin one can
+    // only be lifted by an admin. Sending the raw cvar past it leaves the
+    // plugin believing the match is unpaused while the server is frozen, so a
+    // player's `.unpause` does nothing and nobody can work out why.
+    //
+    // `css_forcepause` / `css_forceunpause` are the admin commands, which is
+    // the right authority for a button in the panel.
+    if (matchzyOwnsMatch()) {
+      await rconExec(action === "pause" ? "css_forcepause" : "css_forceunpause");
+      // No `pause_requested` limbo here: MatchZy reports `paused` on
+      // get5_status, so the next poll replaces this with a real reading.
+      cache().match = {
+        ...cache().match,
+        pause: action === "pause" ? "paused" : "running",
+      };
+      return { ...cache().match };
+    }
+
     await rconExec(action === "pause" ? "mp_pause_match" : "mp_unpause_match");
     // `mp_pause_match` lands at the end of the current round, so claiming
     // "paused" now would be wrong for up to a couple of minutes.
@@ -1603,6 +1686,77 @@ export const realAdapter = {
     const ev = makeConsoleEvent("info", "admin", "Ended the MatchZy match");
     appendConsole(ev);
     bus.emit({ type: "console.line", event: ev });
+  },
+
+  /**
+   * Start a loaded match without waiting for everyone to `.ready`.
+   *
+   * The usual reason a match never starts: nine people readied up and the
+   * tenth is alt-tabbed. MatchZy treats a console-issued command as an admin
+   * (`IsPlayerAdmin` returns true for a null player), so this works over RCON
+   * where its knife-decision commands deliberately do not.
+   */
+  async forceStartMatch(): Promise<void> {
+    if (!matchzyOwnsMatch()) {
+      throw new Error(
+        "MatchZy has no match loaded, so there is nothing to start.",
+      );
+    }
+    await rconExec("css_start");
+    const ev = makeConsoleEvent("info", "admin", "Force-started the match");
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  async getRoundBackups(): Promise<RoundBackup[]> {
+    return listRoundBackups();
+  },
+
+  /**
+   * Put the match back to the start of a round.
+   *
+   * Gated on MatchZy actually running a match: `css_restore` is its command,
+   * and sending it otherwise gets a silent no-op in the server console, which
+   * is indistinguishable here from a restore that worked.
+   */
+  async restoreRound(round: number): Promise<void> {
+    if (!Number.isInteger(round) || round < 0) {
+      throw new Error("A round number must be a whole number.");
+    }
+    if (!matchzyOwnsMatch()) {
+      throw new Error(
+        "MatchZy is not running a match, so there is nothing to restore. Round backups belong to a loaded match.",
+      );
+    }
+    await rconExec(`css_restore ${round}`);
+    const ev = makeConsoleEvent(
+      "info",
+      "admin",
+      `Restored the match to round ${round}`,
+    );
+    appendConsole(ev);
+    bus.emit({ type: "console.line", event: ev });
+  },
+
+  /**
+   * The rounds of the match that is being played right now.
+   *
+   * `server.ts` has recorded every `Round_End` against the open match since
+   * round detail existed, but nothing could read them until the match was
+   * over — the story of a game was only ever available as history. This is
+   * the same rows, one match earlier.
+   *
+   * Empty is the honest answer for "no match open" as well as "no rounds
+   * yet": both mean there is nothing to draw, and the caller cannot act on
+   * the difference.
+   */
+  async getLiveRounds(): Promise<RoundRecord[]> {
+    try {
+      const open = findOpenMatch();
+      return open ? getRounds(open.id) : [];
+    } catch {
+      return [];
+    }
   },
 
   async deleteMatchConfig(id: string): Promise<void> {
