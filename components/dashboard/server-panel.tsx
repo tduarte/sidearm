@@ -48,10 +48,14 @@ import {
   fieldsForMode,
   modeNeedsMapReload,
   planApply,
+  presetActive,
+  presetDraft,
   type Draft,
   type FieldKey,
   type PanelValues,
 } from "@/lib/dashboard/panel";
+import { PRESETS, bootDiffers } from "@/lib/presets";
+import { suggestedSlots } from "@/lib/cs2/slots";
 import type { GameMode, MatchState, ServerStatus } from "@/lib/api/types";
 import { cn } from "@/lib/utils";
 
@@ -169,6 +173,7 @@ export function ServerPanel({
       botsEnabled: config.data.gameplay.botsEnabled,
       botQuota: config.data.gameplay.botQuota,
       botDifficulty: config.data.gameplay.botDifficulty,
+      visibleMaxPlayers: config.data.gameplay.visibleMaxPlayers,
       maxRounds: match?.maxRounds ?? null,
       overtime: match?.overtime ?? null,
     };
@@ -312,11 +317,74 @@ export function ServerPanel({
 
       {current && (
         <div className="divide-y divide-foreground/10 border-t border-foreground/10 px-4">
+          {/*
+            Presets first, because most nights are one of these and nothing
+            else. Tapping one stages rather than applies: it lands in the same
+            save bar as everything else, so "Wingman and de_shortdust" goes out
+            as one save with the map last, and a preset pressed by mistake is
+            one Discard away instead of six RCON writes deep.
+          */}
+          <div className="flex flex-wrap items-center gap-1.5 py-3">
+            {PRESETS.map((preset) => {
+              const active = presetActive(preset, current);
+              const staged = presetActive(preset, { ...current, ...draft });
+              const bootMismatch = bootDiffers(preset, status.maxPlayers);
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  disabled={lock}
+                  onClick={() => setDraft(presetDraft(preset, current))}
+                  aria-pressed={staged}
+                  title={
+                    bootMismatch
+                      ? `${preset.why} The server was started with ${status.maxPlayers} slots, not ${preset.boot.CS2_MAXPLAYERS} — see Config to change that.`
+                      : preset.why
+                  }
+                  className={cn(
+                    "flex min-h-8 items-center gap-1.5 border px-2.5 transition-colors",
+                    "disabled:cursor-not-allowed disabled:opacity-50",
+                    staged && !active
+                      ? "border-primary bg-primary/10 text-primary"
+                      : active
+                        ? "border-foreground/30 bg-muted/60 font-medium"
+                        : "border-foreground/15 hover:border-foreground/40 hover:bg-muted/40",
+                  )}
+                >
+                  {preset.label}
+                  {/*
+                    Slot counts are a launch argument, so a preset can set the
+                    mode and still not fit the players it implies. Said on the
+                    chip rather than discovered when the sixth person cannot
+                    connect.
+                  */}
+                  {bootMismatch === true && (
+                    <span className="text-muted-foreground">
+                      · {preset.boot.CS2_MAXPLAYERS - 1} slots
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
           <Row label="Mode" dirty={has("mode")}>
             <Select
               value={draft.mode ?? current.mode}
               disabled={lock}
-              onValueChange={(v) => set("mode", v as GameMode)}
+              onValueChange={(v) => {
+                const mode = v as GameMode;
+                // The advertised count is per-mode out of one ceiling: a
+                // 32-slot server runs deathmatch at 16 and competitive at 10.
+                // Leaving the old number behind is how a server ends up
+                // advertising 10 slots for a 20-player casual game.
+                const slots = suggestedSlots(mode, status.maxPlayers ?? null);
+                setDraft((d) => ({
+                  ...d,
+                  mode,
+                  ...(slots === null ? {} : { visibleMaxPlayers: slots }),
+                }));
+              }}
             >
               <SelectTrigger className="w-40" aria-label="Game mode">
                 <SelectValue />

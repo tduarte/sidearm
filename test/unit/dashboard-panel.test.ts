@@ -8,6 +8,8 @@ import {
   type Draft,
   type PanelValues,
 } from "@/lib/dashboard/panel";
+import { presetActive, presetDraft } from "@/lib/dashboard/panel";
+import { findPreset } from "@/lib/presets";
 import type { ServerConfig } from "@/lib/api/types";
 
 const current: PanelValues = {
@@ -18,6 +20,7 @@ const current: PanelValues = {
   botsEnabled: false,
   botQuota: 0,
   botDifficulty: 2,
+  visibleMaxPlayers: 10,
   maxRounds: 24,
   overtime: true,
 };
@@ -159,5 +162,38 @@ describe("a mode change that will not show up yet", () => {
 
   it("stays quiet when the mode is untouched", () => {
     assert.equal(modeNeedsMapReload(current, { map: "de_nuke" }), false);
+  });
+});
+
+describe("one-tap presets", () => {
+  const wingman = findPreset("wingman")!;
+
+  it("stages only what actually differs", () => {
+    // A preset that always reported five changes would make the save bar's
+    // count meaningless, which is the one thing it is for.
+    const d = presetDraft(wingman, current);
+    assert.equal(d.mode, "wingman");
+    assert.equal(d.visibleMaxPlayers, 4);
+    // Bots are already off and already on difficulty 2, so neither is staged.
+    assert.ok(!("botsEnabled" in d));
+    assert.ok(!("botDifficulty" in d));
+  });
+
+  it("stages nothing when the server already matches", () => {
+    const already: PanelValues = { ...current, mode: "wingman", visibleMaxPlayers: 4 };
+    assert.deepEqual(presetDraft(wingman, already), {});
+    assert.equal(presetActive(wingman, already), true);
+  });
+
+  it("leaves the map alone", () => {
+    // Presets say how to play, not where. One that also moved everyone to a
+    // different map would be something you never dare press mid-session.
+    assert.ok(!("map" in presetDraft(wingman, current)));
+  });
+
+  it("goes out as one config write", () => {
+    const steps = planApply(current, presetDraft(wingman, current), baseConfig);
+    assert.equal(steps.length, 1);
+    assert.equal(steps[0]?.kind, "config");
   });
 });

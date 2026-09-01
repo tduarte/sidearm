@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useForm, useWatch, type Resolver } from "react-hook-form";
+import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
@@ -18,20 +18,11 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
 import { LoadError } from "@/components/load-error";
 import { PresetPicker } from "@/components/config/preset-picker";
 import { api } from "@/lib/api/client";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
-import { suggestedSlots } from "@/lib/cs2/slots";
 import type { ModePreset } from "@/lib/presets";
 import type { ServerConfig } from "@/lib/api/types";
 
@@ -140,30 +131,21 @@ function ConfigForm({ initial }: { initial: FormValues }) {
     },
   });
 
-  // useWatch rather than form.watch: the latter returns a function the React
-  // Compiler cannot memoize, which makes it skip optimising the component.
-  const botsEnabled = useWatch({
-    control: form.control,
-    name: "gameplay.botsEnabled",
-  });
-
   /**
    * A preset writes the form, not the server. `shouldDirty` is what arms the
-   * Save button, so the operator still confirms — the same one review step
-   * every other change on this page gets.
+   * Save button, so the operator still confirms.
+   *
+   * Only the slot count: the mode and the bots are staged by the same preset
+   * on the dashboard, next to the values they change. Setting them from here
+   * as well would be two places writing one setting, and the loser would be
+   * whichever page was saved second.
    */
   const applyPreset = (p: ModePreset) => {
-    const opts = { shouldDirty: true, shouldTouch: true } as const;
-    form.setValue("gameplay.mode", p.live.mode as FormValues["gameplay"]["mode"], opts);
-    form.setValue("gameplay.visibleMaxPlayers", p.live.visibleMaxPlayers, opts);
-    form.setValue("gameplay.botsEnabled", p.live.botsEnabled, opts);
-    form.setValue("gameplay.botQuota", p.live.botQuota, opts);
-    form.setValue(
-      "gameplay.botDifficulty",
-      String(p.live.botDifficulty) as "0" | "1" | "2" | "3",
-      opts,
-    );
-    toast(`${p.label} filled in`, {
+    form.setValue("gameplay.visibleMaxPlayers", p.live.visibleMaxPlayers, {
+      shouldDirty: true,
+      shouldTouch: true,
+    });
+    toast(`${p.label} slots filled in`, {
       description: "Review it and hit Save changes to apply.",
     });
   };
@@ -200,102 +182,19 @@ function ConfigForm({ initial }: { initial: FormValues }) {
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-base">Identity</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <FormField
-              control={form.control}
-              name="identity.hostname"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Server name</FormLabel>
-                  <FormControl>
-                    <Input {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    Shown in the server browser. Sent as{" "}
-                    <span className="font-mono">hostname</span>.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-            <FormField
-              control={form.control}
-              name="access.serverPassword"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Server password</FormLabel>
-                  <FormControl>
-                    <Input type="password" placeholder="(no password)" {...field} />
-                  </FormControl>
-                  <FormDescription>
-                    Empty means anyone can join. Write-only — the panel never
-                    reads it back.
-                  </FormDescription>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Gameplay</CardTitle>
+            <CardTitle className="text-base">Slots</CardTitle>
             <CardDescription>
-              A game-mode change only takes effect when the map reloads, so
-              switch modes from Match Control if you want it applied now.
+              How full the server says it is. The mode, bots, name and password
+              moved to the dashboard, where the value you are looking at is the
+              one you change.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid items-start gap-4 md:grid-cols-2">
-            <FormField
-              control={form.control}
-              name="gameplay.mode"
-              render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Game mode</FormLabel>
-                  <Select
-                    onValueChange={(next) => {
-                      field.onChange(next);
-                      // The advertised count is per-mode: a 32-slot server runs
-                      // deathmatch at 16 and comp at 10 out of the same ceiling.
-                      // Leaving the old number behind is how a server ends up
-                      // advertising 10 slots for a 20-player casual game.
-                      const slots = suggestedSlots(
-                        next as FormValues["gameplay"]["mode"],
-                        status?.maxPlayers ?? null,
-                      );
-                      if (slots !== null) {
-                        form.setValue("gameplay.visibleMaxPlayers", slots, {
-                          shouldDirty: true,
-                        });
-                      }
-                    }}
-                    value={field.value}
-                  >
-                    <FormControl>
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                    </FormControl>
-                    <SelectContent>
-                      <SelectItem value="competitive">Competitive</SelectItem>
-                      <SelectItem value="wingman">Wingman</SelectItem>
-                      <SelectItem value="casual">Casual</SelectItem>
-                      <SelectItem value="deathmatch">Deathmatch</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <FormMessage />
-                </FormItem>
-              )}
-            />
+          <CardContent>
             <FormField
               control={form.control}
               name="gameplay.visibleMaxPlayers"
               render={({ field }) => (
-                <FormItem>
+                <FormItem className="max-w-sm">
                   <FormLabel>Advertised slots</FormLabel>
                   <FormControl>
                     <Input
@@ -308,8 +207,8 @@ function ConfigForm({ initial }: { initial: FormValues }) {
                   <FormDescription>
                     <span className="font-mono">sv_visiblemaxplayers</span> —
                     what the server browser shows, and what &ldquo;server
-                    full&rdquo; is measured against. Changing the game mode
-                    above moves this to that mode&apos;s usual size.{" "}
+                    full&rdquo; is measured against. A preset above moves it to
+                    that mode&apos;s usual size.{" "}
                     {status?.maxPlayers != null && (
                       <>
                         The ceiling is{" "}
@@ -330,73 +229,6 @@ function ConfigForm({ initial }: { initial: FormValues }) {
                 </FormItem>
               )}
             />
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Bots</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <FormField
-              control={form.control}
-              name="gameplay.botsEnabled"
-              render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-md border p-3">
-                  <div>
-                    <FormLabel>Fill with bots</FormLabel>
-                    <FormDescription>
-                      Off sends <span className="font-mono">bot_quota 0</span>.
-                    </FormDescription>
-                  </div>
-                  <FormControl>
-                    <Switch checked={field.value} onCheckedChange={field.onChange} />
-                  </FormControl>
-                </FormItem>
-              )}
-            />
-            <div className="grid items-start gap-4 md:grid-cols-2">
-              <FormField
-                control={form.control}
-                name="gameplay.botQuota"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Bot count</FormLabel>
-                    <FormControl>
-                      <Input type="number" min={0} max={32} disabled={!botsEnabled} {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <FormField
-                control={form.control}
-                name="gameplay.botDifficulty"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Difficulty</FormLabel>
-                    <Select
-                      onValueChange={field.onChange}
-                      value={field.value}
-                      disabled={!botsEnabled}
-                    >
-                      <FormControl>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                      </FormControl>
-                      <SelectContent>
-                        <SelectItem value="0">Easy</SelectItem>
-                        <SelectItem value="1">Normal</SelectItem>
-                        <SelectItem value="2">Hard</SelectItem>
-                        <SelectItem value="3">Expert</SelectItem>
-                      </SelectContent>
-                    </Select>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-            </div>
           </CardContent>
         </Card>
       </form>

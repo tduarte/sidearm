@@ -1,4 +1,5 @@
 import type { GameMode, ServerConfig } from "@/lib/api/types";
+import type { ModePreset } from "@/lib/presets";
 
 /**
  * The dashboard as something you edit, not something you read.
@@ -28,6 +29,13 @@ export interface PanelValues {
   botsEnabled: boolean;
   botQuota: number;
   botDifficulty: ServerConfig["gameplay"]["botDifficulty"];
+  /**
+   * `sv_visiblemaxplayers`. Not shown as a row — it is a Config-page number
+   * nobody sets by hand — but it belongs here because a preset moves it, and a
+   * save that changed the mode without it would advertise ten slots for a
+   * twenty-player casual game.
+   */
+  visibleMaxPlayers: number;
   /** `null` when the server has not answered yet; not editable until it has. */
   maxRounds: number | null;
   overtime: boolean | null;
@@ -55,6 +63,7 @@ export function fieldsForMode(mode: GameMode): FieldKey[] {
     "botsEnabled",
     "botQuota",
     "botDifficulty",
+    "visibleMaxPlayers",
   ];
   return mode === "competitive"
     ? [...always, "maxRounds", "overtime"]
@@ -120,6 +129,7 @@ export function planApply(
     "botsEnabled",
     "botQuota",
     "botDifficulty",
+    "visibleMaxPlayers",
   ];
   if (configKeys.some((k) => changed.has(k))) {
     steps.push({
@@ -144,6 +154,7 @@ export function planApply(
           botsEnabled: draft.botsEnabled ?? current.botsEnabled,
           botQuota: draft.botQuota ?? current.botQuota,
           botDifficulty: draft.botDifficulty ?? current.botDifficulty,
+          visibleMaxPlayers: draft.visibleMaxPlayers ?? current.visibleMaxPlayers,
         },
       },
     });
@@ -166,6 +177,7 @@ const LABELS: Record<FieldKey, string> = {
   botDifficulty: "Bot difficulty",
   maxRounds: "Round limit",
   overtime: "Overtime",
+  visibleMaxPlayers: "Advertised slots",
 };
 
 export function fieldLabel(key: FieldKey): string {
@@ -183,4 +195,39 @@ export function fieldLabel(key: FieldKey): string {
 export function modeNeedsMapReload(current: PanelValues, draft: Draft): boolean {
   const changed = new Set(changedKeys(current, draft));
   return changed.has("mode") && !changed.has("map");
+}
+
+/**
+ * A preset, as a staged edit.
+ *
+ * One tap has to be one tap — "we're playing Wingman tonight" instead of six
+ * fields — but it must not also be an immediate write. A preset stages like
+ * anything else, so what it is about to change is listed in the save bar and
+ * can be discarded, and so a preset plus a map change go out as one save with
+ * the map last.
+ *
+ * Deliberately silent about the map: presets say how to play, not where, and a
+ * preset that also moved everyone to a different map would make picking one
+ * mid-session something you do not dare press.
+ */
+export function presetDraft(preset: ModePreset, current: PanelValues): Draft {
+  const wanted: Draft = {
+    mode: preset.live.mode,
+    botsEnabled: preset.live.botsEnabled,
+    botQuota: preset.live.botQuota,
+    botDifficulty: preset.live.botDifficulty,
+    visibleMaxPlayers: preset.live.visibleMaxPlayers,
+  };
+  // Keys already correct are dropped, so the save bar counts what will really
+  // change rather than always claiming five.
+  const draft: Draft = {};
+  for (const key of changedKeys(current, wanted)) {
+    Object.assign(draft, { [key]: wanted[key] });
+  }
+  return draft;
+}
+
+/** Whether the server is already set up the way a preset describes. */
+export function presetActive(preset: ModePreset, current: PanelValues): boolean {
+  return Object.keys(presetDraft(preset, current)).length === 0;
 }
