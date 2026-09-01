@@ -11,7 +11,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { StatusLiveSync } from "@/components/status-live-sync";
 import { AuthGate } from "@/components/auth-gate";
-import { UnauthorizedError } from "@/lib/api/client";
+import { SessionProvider } from "@/components/session-provider";
+import { ForbiddenError, UnauthorizedError } from "@/lib/api/client";
 
 /**
  * Per-mutation label for the failure toast, e.g. `meta: { action: "Restart" }`.
@@ -27,6 +28,10 @@ function describeError(error: unknown): string {
   if (error instanceof UnauthorizedError) {
     return "Your session is no longer valid. Reload the page to sign in again.";
   }
+  // A 403 is not a session problem, and telling someone to sign in again when
+  // signing in cannot help is the most frustrating possible response. The
+  // server's message already names the role the action needs.
+  if (error instanceof ForbiddenError) return error.message;
   const message = error instanceof Error ? error.message : String(error);
   return message.trim() || "No reason was reported.";
 }
@@ -61,10 +66,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       <TooltipProvider delayDuration={200}>
-        <AuthGate>
-          <StatusLiveSync />
-          {children}
-        </AuthGate>
+        <SessionProvider>
+          <AuthGate>
+            <StatusLiveSync />
+            {children}
+          </AuthGate>
+        </SessionProvider>
         <Toaster richColors position="top-right" />
       </TooltipProvider>
     </QueryClientProvider>

@@ -7,7 +7,11 @@ import path from "node:path";
 import WebSocket from "ws";
 
 /**
- * Tier 2 — the `PANEL_TRUSTED_CIDRS` bypass, checked from the outside.
+ * Tier 2 — `PANEL_TRUSTED_CIDRS`, checked from the outside.
+ *
+ * The setting grants an implicit **viewer** identity rather than skipping auth,
+ * so a LAN scoreboard needs no account while anything that touches the running
+ * match still belongs to someone who signed in.
  *
  * Two panel configurations are exercised: one that trusts loopback (so the test
  * client counts as LAN) and one that does not (so the test client is a
@@ -96,22 +100,37 @@ describe("a peer inside PANEL_TRUSTED_CIDRS", () => {
   });
   after(stopPanel);
 
-  it("reaches the API with no credentials at all", async () => {
-    for (const route of ["/api/status", "/api/players", "/api/config"]) {
+  it("reads the spectator surface with no credentials at all", async () => {
+    for (const route of ["/api/status", "/api/players", "/api/demos"]) {
       const res = await fetch(`${BASE}${route}`);
-      assert.equal(res.status, 200, `${route} should bypass the token`);
+      assert.equal(res.status, 200, `${route} should be readable from the LAN`);
     }
   });
 
-  it("is told no login is needed, so the UI never prompts", async () => {
-    const res = await fetch(`${BASE}/api/auth`);
-    // Exempt because of the peer address, not because no token is set — a
-    // distinction Settings surfaces, since behind a proxy it exempts everyone.
-    assert.deepEqual(await res.json(), {
-      authRequired: false,
-      tokenConfigured: true,
-      trustedPeer: true,
+  it("gets a viewer's authority, not an admin's", async () => {
+    // The deliberate narrowing: a trusted address used to skip auth entirely,
+    // which made a wall display and a person with a keyboard indistinguishable.
+    // It now grants exactly what a kiosk needs and nothing that touches the
+    // running match.
+    const config = await fetch(`${BASE}/api/config`);
+    assert.equal(config.status, 403, "config is not spectator material");
+
+    const kick = await fetch(`${BASE}/api/players/kick`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ steamId: "76561100000000000" }),
     });
+    assert.equal(kick.status, 403, "a LAN address must not be able to kick");
+  });
+
+  it("is told it is a viewer, so the UI shows no login prompt it cannot use", async () => {
+    const res = await fetch(`${BASE}/api/auth`);
+    const body = await res.json();
+    assert.equal(body.role, "viewer");
+    assert.equal(body.source, "trusted-peer");
+    assert.equal(body.tokenConfigured, true);
+    // No account is attached: the address is the credential.
+    assert.equal(body.user, null);
   });
 
   it("may open the WebSocket without a token", async () => {
@@ -138,11 +157,10 @@ describe("a peer outside PANEL_TRUSTED_CIDRS", () => {
 
   it("is still told to log in", async () => {
     const res = await fetch(`${BASE}/api/auth`);
-    assert.deepEqual(await res.json(), {
-      authRequired: true,
-      tokenConfigured: true,
-      trustedPeer: false,
-    });
+    const body = await res.json();
+    assert.equal(body.role, null);
+    assert.equal(body.source, null);
+    assert.equal(body.tokenConfigured, true);
   });
 
   it("cannot forge the peer header to fake a trusted address", async () => {

@@ -1,67 +1,45 @@
 import { NextResponse } from "next/server";
-import { AUTH_COOKIE, PEER_HEADER, authRequired, isTrustedPeer, safeEqual } from "@/lib/auth";
+import { breakGlassTokenConfigured, PEER_HEADER } from "@/lib/auth";
+import { isFirstRun, resolveIdentity } from "@/lib/auth/identity";
+import {
+  readCookie,
+  SESSION_COOKIE,
+  destroySession,
+  sessionCookieOptions,
+} from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
 /**
- * Lets the UI find out whether it needs to prompt for a token.
+ * Tells the UI which of three screens to show: register, sign in, or nothing.
  *
- * A caller inside `PANEL_TRUSTED_CIDRS` is told `false`, so the LAN never sees
- * the login screen — matching what the proxy will actually enforce.
+ * This is the only route the browser can reach before it has an identity, so it
+ * carries everything the gate needs to decide, including *why* a caller is
+ * already authorised when they never signed in (a trusted-network device).
  */
 export async function GET(req: Request) {
-  const trusted = isTrustedPeer(req.headers.get(PEER_HEADER));
-  const configured = authRequired();
+  const identity = resolveIdentity({
+    cookieHeader: req.headers.get("cookie"),
+    authorization: req.headers.get("authorization"),
+    peer: req.headers.get(PEER_HEADER),
+  });
+
   return NextResponse.json({
-    authRequired: configured && !trusted,
-    /** Whether PANEL_ADMIN_TOKEN is set at all, regardless of this caller. */
-    tokenConfigured: configured,
-    /** This caller is exempt because its address is in PANEL_TRUSTED_CIDRS. */
-    trustedPeer: trusted,
+    /** No accounts exist: the panel has never been claimed. */
+    firstRun: isFirstRun(),
+    /** Whether registration will additionally demand the setup token. */
+    tokenConfigured: breakGlassTokenConfigured(),
+    user: identity?.user ?? null,
+    role: identity?.role ?? null,
+    source: identity?.source ?? null,
   });
 }
 
-/** Exchanges the admin token for an HttpOnly session cookie. */
-export async function POST(req: Request) {
-  const expected = process.env.PANEL_ADMIN_TOKEN ?? "";
-  if (expected === "") {
-    return NextResponse.json({ ok: true, authRequired: false });
-  }
-
-  let token = "";
-  try {
-    const body = (await req.json()) as { token?: unknown };
-    if (typeof body.token === "string") token = body.token;
-  } catch {
-    /* malformed body — treated as a failed attempt */
-  }
-
-  if (!safeEqual(token, expected)) {
-    return NextResponse.json({ error: "invalid token" }, { status: 401 });
-  }
-
+/** Signs this browser out. Other sessions for the same account are untouched. */
+export async function DELETE(req: Request) {
+  const token = readCookie(req.headers.get("cookie"), SESSION_COOKIE);
+  if (token) destroySession(token);
   const res = NextResponse.json({ ok: true });
-  res.cookies.set(AUTH_COOKIE, expected, {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    // The panel is commonly served over plain HTTP on a LAN, so `secure` would
-    // silently drop the cookie there. Opt in when running behind TLS.
-    secure: process.env.PANEL_HTTPS === "1",
-    maxAge: 60 * 60 * 24 * 30,
-  });
-  return res;
-}
-
-/** Clears the session cookie. The token itself is unchanged, of course. */
-export async function DELETE() {
-  const res = NextResponse.json({ ok: true });
-  res.cookies.set(AUTH_COOKIE, "", {
-    httpOnly: true,
-    sameSite: "lax",
-    path: "/",
-    secure: process.env.PANEL_HTTPS === "1",
-    maxAge: 0,
-  });
+  res.cookies.set(SESSION_COOKIE, "", sessionCookieOptions(0));
   return res;
 }

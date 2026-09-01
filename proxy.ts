@@ -1,46 +1,88 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { AUTH_COOKIE, PEER_HEADER, isTrustedPeer, safeEqual } from "@/lib/auth";
+import { PEER_HEADER } from "@/lib/auth";
+import { isFirstRun, resolveIdentity } from "@/lib/auth/identity";
+import {
+  canAccess,
+  isOpenRoute,
+  requiredRole,
+  ROLE_HEADER,
+  ROLE_LABEL,
+  USER_HEADER,
+} from "@/lib/auth/permissions";
 
 /**
- * Bearer-token gate over `/api/*`, backed by `PANEL_ADMIN_TOKEN`.
+ * Role-aware auth gate over `/api/*`, backed by panel accounts in SQLite.
  *
  * Next 16 renamed the `middleware` file convention to `proxy`; `middleware.ts`
- * still works but warns on every build.
+ * still works but warns on every build. Unlike the old middleware runtime, this
+ * runs on **Node.js**, so it can open the database and validate a session
+ * directly instead of deferring every check to the handlers.
  *
- * Opt-in by design: with no token configured the panel stays open, which is what
- * the README documents for first-run setup on a trusted network.
+ * The panel is no longer "open by default when no token is set". It is closed
+ * until someone registers, and the first person to register becomes the admin —
+ * which is both easier to explain and safer than an unauthenticated panel that
+ * can restart a container.
  *
- * Four exemptions:
- *  - `/api/ingest/logs/<secret>` — CS2 cannot send headers; it authenticates via
- *    the shared secret embedded in the URL it was given over RCON.
- *  - `/api/matchzy/config/<secret>/<id>` — same boundary, opposite direction:
- *    CS2 fetches this one, having been given the URL over RCON. It carries no
- *    session cookie either, and its own handler does a constant-time compare on
- *    the secret and 404s otherwise.
- *  - `/api/auth` — the endpoint used to exchange a token for a session cookie,
- *    which by definition has to be reachable unauthenticated.
- *  - peers inside `PANEL_TRUSTED_CIDRS` — a LAN convenience, off by default.
+ * Exemptions, all of which authenticate by other means, live in
+ * `lib/auth/permissions.ts` next to the role table they are the exception to.
+ *
+ * This is the first of two gates. Each handler re-checks independently
+ * (`lib/auth/guard.ts`); Next's docs are explicit that proxy checks are an
+ * optimisation and not the boundary.
  */
 export function proxy(req: NextRequest) {
-  const token = process.env.PANEL_ADMIN_TOKEN ?? "";
-  if (token === "") return NextResponse.next();
-
   const { pathname } = req.nextUrl;
-  if (pathname.startsWith("/api/ingest/logs/")) return NextResponse.next();
-  if (pathname.startsWith("/api/matchzy/config/")) return NextResponse.next();
-  if (pathname === "/api/auth") return NextResponse.next();
 
-  if (isTrustedPeer(req.headers.get(PEER_HEADER))) return NextResponse.next();
+  // Strip any inbound copy of the headers we are about to stamp. Same
+  // discipline as `PEER_HEADER` in `server.ts`: without this delete a client
+  // could simply send `x-sidearm-role: admin` and be believed by anything
+  // downstream that trusts it.
+  const headers = new Headers(req.headers);
+  headers.delete(ROLE_HEADER);
+  headers.delete(USER_HEADER);
 
-  const header = req.headers.get("authorization") ?? "";
-  const bearer = header.startsWith("Bearer ") ? header.slice(7) : "";
-  const cookie = req.cookies.get(AUTH_COOKIE)?.value ?? "";
+  const pass = () => NextResponse.next({ request: { headers } });
 
-  if (safeEqual(bearer, token) || safeEqual(cookie, token)) {
-    return NextResponse.next();
+  if (isOpenRoute(pathname)) return pass();
+
+  const identity = resolveIdentity({
+    cookieHeader: req.headers.get("cookie"),
+    authorization: req.headers.get("authorization"),
+    peer: req.headers.get(PEER_HEADER),
+  });
+
+  if (!identity) {
+    // Distinguishing "nobody has set this panel up" from "you are signed out"
+    // is what lets the UI show a registration form instead of a login form it
+    // could never satisfy.
+    const first = isFirstRun();
+    return NextResponse.json(
+      {
+        error: first
+          ? "This panel has no accounts yet. Create the first one to get started."
+          : "Sign in to do that.",
+        code: first ? "first-run" : "unauthenticated",
+      },
+      { status: 401 },
+    );
   }
 
-  return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  if (!canAccess(identity.role, pathname, req.method)) {
+    const needed = requiredRole(pathname, req.method);
+    return NextResponse.json(
+      {
+        error: needed
+          ? `That needs the ${ROLE_LABEL[needed]} role. You are signed in as ${ROLE_LABEL[identity.role]}.`
+          : "You are not allowed to do that.",
+        code: "forbidden",
+      },
+      { status: 403 },
+    );
+  }
+
+  headers.set(ROLE_HEADER, identity.role);
+  if (identity.user) headers.set(USER_HEADER, identity.user.id);
+  return pass();
 }
 
 export const config = {

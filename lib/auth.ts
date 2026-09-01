@@ -1,21 +1,24 @@
 /**
  * Shared auth constants and a constant-time comparison.
  *
- * Runs on the Edge runtime (middleware), so `node:crypto.timingSafeEqual` is not
- * available — hence the hand-rolled compare.
+ * The hand-rolled compare predates Next 16, when `proxy.ts` ran on the Edge
+ * runtime and `node:crypto.timingSafeEqual` was unavailable. The proxy is on
+ * the Node runtime now, but this is also imported by code that runs in several
+ * places, and a correct 12-line compare is not worth the churn to replace.
+ *
+ * Identity itself lives in `lib/auth/` — this file holds only what the network
+ * layer needs.
  */
 
 import { addrInCidr, parseCidrList } from "@/lib/net/cidr";
-
-export const AUTH_COOKIE = "sidearm_token";
 
 /**
  * Header carrying the peer address of the TCP connection, stamped by the
  * custom server in `server.ts`.
  *
- * It exists because `proxy.ts` runs on the Edge runtime, which has no access
- * to the socket. `server.ts` deletes any inbound copy before setting it, so a
- * client cannot forge one. Never swap this for `X-Forwarded-For`: that header
+ * It exists because a Next request handler has no access to the socket.
+ * `server.ts` deletes any inbound copy before setting it, so a client cannot
+ * forge one. Never swap this for `X-Forwarded-For`: that header
  * is attacker-controlled, and trusting it would let anyone on the internet
  * claim a LAN address.
  */
@@ -33,13 +36,20 @@ export function safeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-/** Auth is opt-in: with no token configured the panel stays open. */
-export function authRequired(): boolean {
+/**
+ * Whether a break-glass bearer token is configured.
+ *
+ * This no longer decides whether the panel is protected — accounts do. The
+ * token is an optional second credential for automation and for recovering an
+ * install whose admin password is lost, and it doubles as the setup token that
+ * proves possession of an existing deployment during first-run registration.
+ */
+export function breakGlassTokenConfigured(): boolean {
   return (process.env.PANEL_ADMIN_TOKEN ?? "") !== "";
 }
 
 /**
- * Networks allowed to skip the token, from `PANEL_TRUSTED_CIDRS`.
+ * Networks granted an implicit read-only identity, from `PANEL_TRUSTED_CIDRS`.
  *
  * Empty (the default) means no bypass at all, so behaviour is unchanged unless
  * an operator opts in.
@@ -49,7 +59,8 @@ export function trustedCidrs(): string[] {
 }
 
 /**
- * True when a peer sits in one of the trusted networks.
+ * True when a peer sits in one of the trusted networks, which makes it a
+ * `viewer` without signing in — see `lib/auth/identity.ts`.
  *
  * `addr` must be the real socket address. Note that behind a reverse proxy every
  * request appears to come *from the proxy*, so adding a proxy's own address here

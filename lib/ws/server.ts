@@ -2,36 +2,30 @@ import type { IncomingMessage, Server as HttpServer } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
 import type { WsEvent } from "@/lib/api/types";
-import { AUTH_COOKIE, isTrustedPeer, safeEqual } from "@/lib/auth";
+import { resolveIdentity } from "@/lib/auth/identity";
+import { roleAtLeast, wsEventMinRole, type Role } from "@/lib/auth/permissions";
+import { readCookie, SESSION_COOKIE, validateSession } from "@/lib/auth/session";
 import { bus } from "./bus";
 import { startMockEmitter } from "./mock-emitter";
 
 const HEARTBEAT_MS = 30_000;
 
-/** Reads one cookie out of a raw `Cookie:` header. */
-function readCookie(header: string | undefined, name: string): string {
-  if (!header) return "";
-  for (const part of header.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k === name) return decodeURIComponent(v.join("="));
-  }
-  return "";
-}
-
 /**
- * The WS stream carries the same data as `/api/*` (status, chat, players), so it
- * has to honour the same token. Middleware does not cover it — the upgrade is
- * handled by the custom server, not by Next.
+ * The WS stream carries the same data as `/api/*` (status, chat, players,
+ * console), so it honours the same identities. The proxy does not cover it —
+ * the upgrade is handled by the custom server, not by Next.
+ *
+ * Returns the caller's role, or null to refuse the upgrade. The peer address
+ * comes straight off the socket here, with no need for the `server.ts` header
+ * hop that HTTP requests take.
  */
-function isAuthorized(req: IncomingMessage): boolean {
-  const token = process.env.PANEL_ADMIN_TOKEN ?? "";
-  if (token === "") return true;
-  // Straight off the socket here — no need for the `server.ts` header hop.
-  if (isTrustedPeer(req.socket.remoteAddress)) return true;
-  const cookie = readCookie(req.headers.cookie, AUTH_COOKIE);
-  if (safeEqual(cookie, token)) return true;
-  const header = req.headers.authorization ?? "";
-  return header.startsWith("Bearer ") && safeEqual(header.slice(7), token);
+function resolveConnectionRole(req: IncomingMessage): Role | null {
+  const identity = resolveIdentity({
+    cookieHeader: req.headers.cookie,
+    authorization: req.headers.authorization,
+    peer: req.socket.remoteAddress,
+  });
+  return identity?.role ?? null;
 }
 
 /**
@@ -47,8 +41,22 @@ export function attachWsServer(httpServer: HttpServer, opts: { path?: string } =
   const clients = new Set<WebSocket>();
   /** Sockets that have not answered our last ping. */
   const alive = new WeakMap<WebSocket, boolean>();
+  /**
+   * What each connection is allowed to see, and the session it proved it with.
+   *
+   * The role is held per connection because a socket outlives the request that
+   * opened it: authorising the upgrade and then broadcasting everything to
+   * everyone would hand a viewer the console stream that `/api/console` denies
+   * them.
+   */
+  const connections = new WeakMap<WebSocket, { role: Role; sessionToken: string }>();
 
-  wss.on("connection", (ws) => {
+  wss.on("connection", (ws, req: IncomingMessage) => {
+    const role = resolveConnectionRole(req) ?? "viewer";
+    connections.set(ws, {
+      role,
+      sessionToken: readCookie(req.headers.cookie, SESSION_COOKIE),
+    });
     clients.add(ws);
     alive.set(ws, true);
     ws.on("pong", () => alive.set(ws, true));
@@ -65,6 +73,19 @@ export function attachWsServer(httpServer: HttpServer, opts: { path?: string } =
         ws.terminate();
         continue;
       }
+      // Re-check the session on the beat we already have. A socket opened
+      // before a role change or a sign-out would otherwise keep streaming for
+      // as long as it stayed connected, which is indefinitely.
+      const conn = connections.get(ws);
+      if (conn?.sessionToken) {
+        const user = validateSession(conn.sessionToken);
+        if (!user) {
+          clients.delete(ws);
+          ws.close(4401, "session ended");
+          continue;
+        }
+        conn.role = user.role;
+      }
       alive.set(ws, false);
       try {
         ws.ping();
@@ -75,11 +96,14 @@ export function attachWsServer(httpServer: HttpServer, opts: { path?: string } =
   }, HEARTBEAT_MS);
   heartbeat.unref();
 
-  // Broadcast every bus event to all live WS connections.
+  // Broadcast every bus event to the connections allowed to see it.
   bus.subscribe((event: WsEvent) => {
     const frame = JSON.stringify(event);
+    const needed = wsEventMinRole(event.type);
     for (const ws of clients) {
-      if (ws.readyState === ws.OPEN) ws.send(frame);
+      if (ws.readyState !== ws.OPEN) continue;
+      if (!roleAtLeast(connections.get(ws)?.role ?? null, needed)) continue;
+      ws.send(frame);
     }
   });
 
@@ -87,7 +111,7 @@ export function attachWsServer(httpServer: HttpServer, opts: { path?: string } =
     try {
       const { pathname } = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
       if (pathname !== path) return; // let Next handle HMR / other upgrades
-      if (!isAuthorized(req)) {
+      if (resolveConnectionRole(req) === null) {
         socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
         socket.destroy();
         return;
