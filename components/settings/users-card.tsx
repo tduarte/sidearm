@@ -44,7 +44,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { useSession } from "@/components/session-provider";
 import { api, type PanelUser } from "@/lib/api/client";
-import { MIN_PASSWORD_LENGTH } from "@/lib/auth/passwords";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth/credentials";
 import { ROLE_DESCRIPTION, ROLE_LABEL, ROLES, type Role } from "@/lib/auth/permissions";
 
 const USERS_KEY = ["users"] as const;

@@ -7,7 +7,7 @@ import type { ComponentType, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 const tileVariants = cva(
-  "flex w-full min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-none px-3 py-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
+  "flex w-full min-h-[5.5rem] flex-col items-center justify-center gap-2 rounded-md px-3 py-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50",
   {
     variants: {
       variant: {

@@ -8,8 +8,8 @@ const scoreboardGridClass =
   "grid grid-cols-[minmax(0,1fr)_3rem_3rem_3rem] items-center gap-x-3 max-sm:gap-x-2 sm:grid-cols-[2.5rem_minmax(0,1fr)_3rem_3rem_3rem_4.5rem] sm:gap-x-5";
 
 function pingClass(ping: number) {
-  if (ping > 150) return "text-red-400";
-  if (ping > 100) return "text-amber-400";
+  if (ping > 150) return "text-danger";
+  if (ping > 100) return "text-warn";
   return "text-foreground";
 }
 
@@ -78,22 +78,22 @@ function TeamPanel({
 }) {
   const bar =
     accent === "ct"
-      ? "border-t-2 border-t-blue-500/70"
+      ? "border-t-2 border-t-team-ct/70"
       : accent === "t"
-        ? "border-t-2 border-t-amber-500/70"
-        : "border-t-2 border-t-zinc-500/50";
+        ? "border-t-2 border-t-team-t/70"
+        : "border-t-2 border-t-unknown/50";
 
   const titleColor =
     accent === "ct"
-      ? "text-blue-400"
+      ? "text-team-ct"
       : accent === "t"
-        ? "text-amber-400"
-        : "text-zinc-400";
+        ? "text-warn"
+        : "text-unknown";
 
   return (
     <div
       className={cn(
-        "min-w-0 overflow-hidden rounded-none border border-border bg-card/40 ring-1 ring-foreground/5",
+        "min-w-0 overflow-hidden rounded-lg border border-border bg-card/40",
         bar,
       )}
     >
@@ -129,7 +129,7 @@ export function MatchScoreboard({ players }: { players: Player[] }) {
 
   if (players.length === 0) {
     return (
-      <div className="rounded-none border border-dashed border-border px-4 py-10 text-center">
+      <div className="rounded-lg border border-dashed border-border px-4 py-10 text-center">
         <p className="text-sm text-muted-foreground">No players connected.</p>
       </div>
     );

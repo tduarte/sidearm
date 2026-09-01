@@ -9,6 +9,16 @@ import {
   Trash,
   Warning,
 } from "@phosphor-icons/react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -214,10 +224,26 @@ export function MatchSetup() {
     },
   });
 
+  /**
+   * Deliberately an AlertDialog and not `DangerConfirm`.
+   *
+   * DangerConfirm skips its prompt when nobody is connected, which is exactly
+   * right for a restart and exactly wrong here: deleting a saved setup destroys
+   * a team list and a map pool someone typed in, and it is no less permanent on
+   * an empty server.
+   */
+  const [deleteTarget, setDeleteTarget] = useState<StoredMatchConfig | null>(
+    null,
+  );
+
   const remove = useMutation({
     mutationFn: (id: string) => api.deleteMatch(id),
     meta: { action: "Deleting the match setup" },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["matches"] }),
+    onSuccess: (_r, id) => {
+      toast.success(`Deleted ${id}`);
+      setDeleteTarget(null);
+      qc.invalidateQueries({ queryKey: ["matches"] });
+    },
   });
 
   if (!matchzyUp) {
@@ -298,7 +324,7 @@ export function MatchSetup() {
                       size="sm"
                       variant="ghost"
                       aria-label={`Delete ${m.id}`}
-                      onClick={() => remove.mutate(m.id)}
+                      onClick={() => setDeleteTarget(m)}
                       disabled={remove.isPending}
                     >
                       <Trash className="h-4 w-4" />
@@ -459,6 +485,43 @@ export function MatchSetup() {
           </p>
         </div>
       </CardContent>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => !o && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.id}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-3">
+                <p>
+                  The saved setup is removed for good. Nothing on the server
+                  changes and a match already running is unaffected — but the
+                  roster and map pool have to be typed in again to get it back.
+                </p>
+                {deleteTarget && (
+                  <p className="font-mono text-xs text-muted-foreground">
+                    {deleteTarget.definition.team1.name} vs{" "}
+                    {deleteTarget.definition.team2.name} · BO
+                    {deleteTarget.definition.numMaps} ·{" "}
+                    {deleteTarget.definition.maps.length} map
+                    {deleteTarget.definition.maps.length === 1 ? "" : "s"}
+                  </p>
+                )}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => deleteTarget && remove.mutate(deleteTarget.id)}
+            >
+              Delete setup
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }

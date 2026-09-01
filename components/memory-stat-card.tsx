@@ -19,7 +19,7 @@ const chartConfig = {
   },
   free: {
     label: "Free",
-    color: "var(--chart-4)",
+    color: "var(--muted-foreground)",
   },
 } satisfies ChartConfig;
 

@@ -28,9 +28,11 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { LoadError } from "@/components/load-error";
+import { PresetPicker } from "@/components/config/preset-picker";
 import { api } from "@/lib/api/client";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { suggestedSlots } from "@/lib/cs2/slots";
+import type { ModePreset } from "@/lib/presets";
 import type { ServerConfig } from "@/lib/api/types";
 
 const schema = z.object({
@@ -41,7 +43,14 @@ const schema = z.object({
     serverPassword: z.string(),
   }),
   gameplay: z.object({
-    mode: z.enum(["competitive", "wingman", "deathmatch", "casual", "custom"]),
+    mode: z.enum([
+      "competitive",
+      "wingman",
+      "deathmatch",
+      "casual",
+      "practice",
+      "custom",
+    ]),
     visibleMaxPlayers: z.coerce.number().min(1).max(64),
     botsEnabled: z.boolean(),
     botDifficulty: z.enum(["0", "1", "2", "3"]),
@@ -90,7 +99,22 @@ export default function ConfigPage() {
   }
 
   if (isLoading || !data) {
-    return <Skeleton className="h-96" />;
+    return (
+      <div className="space-y-4">
+        <Skeleton className="h-8 w-40" />
+        <div className="space-y-3 rounded-lg border p-6">
+          <Skeleton className="h-5 w-24" />
+          <Skeleton className="h-9 w-full" />
+          <Skeleton className="h-5 w-32" />
+          <Skeleton className="h-9 w-full" />
+        </div>
+        <div className="space-y-3 rounded-lg border p-6">
+          <Skeleton className="h-5 w-28" />
+          <Skeleton className="h-9 w-2/3" />
+          <Skeleton className="h-9 w-1/2" />
+        </div>
+      </div>
+    );
   }
 
   return <ConfigForm initial={toForm(data)} />;
@@ -123,6 +147,27 @@ function ConfigForm({ initial }: { initial: FormValues }) {
     name: "gameplay.botsEnabled",
   });
 
+  /**
+   * A preset writes the form, not the server. `shouldDirty` is what arms the
+   * Save button, so the operator still confirms — the same one review step
+   * every other change on this page gets.
+   */
+  const applyPreset = (p: ModePreset) => {
+    const opts = { shouldDirty: true, shouldTouch: true } as const;
+    form.setValue("gameplay.mode", p.live.mode as FormValues["gameplay"]["mode"], opts);
+    form.setValue("gameplay.visibleMaxPlayers", p.live.visibleMaxPlayers, opts);
+    form.setValue("gameplay.botsEnabled", p.live.botsEnabled, opts);
+    form.setValue("gameplay.botQuota", p.live.botQuota, opts);
+    form.setValue(
+      "gameplay.botDifficulty",
+      String(p.live.botDifficulty) as "0" | "1" | "2" | "3",
+      opts,
+    );
+    toast(`${p.label} filled in`, {
+      description: "Review it and hit Save changes to apply.",
+    });
+  };
+
   return (
     <Form {...form}>
       <form
@@ -147,6 +192,11 @@ function ConfigForm({ initial }: { initial: FormValues }) {
             Save changes
           </Button>
         </div>
+
+        <PresetPicker
+          installedMaxPlayers={status?.maxPlayers}
+          onApply={applyPreset}
+        />
 
         <Card>
           <CardHeader className="pb-2">
@@ -292,7 +342,7 @@ function ConfigForm({ initial }: { initial: FormValues }) {
               control={form.control}
               name="gameplay.botsEnabled"
               render={({ field }) => (
-                <FormItem className="flex items-center justify-between rounded-none border p-3">
+                <FormItem className="flex items-center justify-between rounded-md border p-3">
                   <div>
                     <FormLabel>Fill with bots</FormLabel>
                     <FormDescription>

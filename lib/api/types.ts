@@ -5,7 +5,17 @@ export type ServerState =
   /** Container is up but steamcmd is still pulling game files; srcds is not listening. */
   | "updating"
   | "stopping"
-  | "crashed";
+  | "crashed"
+  /**
+   * Both control planes are silent: the Docker socket is unreachable *and*
+   * RCON is not answering, so the panel has no evidence either way.
+   *
+   * This is not a failure state, it is the absence of one. It exists because
+   * the alternative is picking a state we cannot support — and the reassuring
+   * guess ("running") and the alarming one ("crashed") are both lies. Never
+   * render it as either.
+   */
+  | "unknown";
 
 export type GameMode =
   | "competitive"

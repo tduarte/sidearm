@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { identityFrom, requireRole } from "@/lib/auth/guard";
-import {
-  hashPassword,
-  validatePassword,
-  verifyPassword,
-} from "@/lib/auth/passwords";
+import { validatePassword } from "@/lib/auth/credentials";
+import { hashPassword, verifyPassword } from "@/lib/auth/passwords";
 import {
   createSession,
   destroyUserSessions,

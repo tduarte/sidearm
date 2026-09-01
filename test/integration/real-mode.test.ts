@@ -24,6 +24,14 @@ import type { ChatMessage, Player, WsEvent } from "@/lib/api/types";
 
 const PORT = 31234;
 const SECRET = "test-ingest-secret";
+/**
+ * The panel requires an identity on every `/api/*` route now, so this suite —
+ * which predates accounts — authenticates with the break-glass bearer token
+ * rather than registering a user. It resolves to `admin`, which is what these
+ * tests need: they change maps and subscribe workshop items.
+ */
+const ADMIN_TOKEN = "integration-admin-token";
+const auth = { authorization: `Bearer ${ADMIN_TOKEN}` };
 const BASE = `http://127.0.0.1:${PORT}`;
 
 const ROSTER = [
@@ -109,6 +117,7 @@ before(async () => {
       RCON_PORT: String(rcon.port),
       RCON_PASSWORD: "test-password",
       LOG_INGEST_SECRET: SECRET,
+      PANEL_ADMIN_TOKEN: ADMIN_TOKEN,
       SQLITE_PATH: path.join(dbDir, "test.db"),
       PANEL_URL: BASE,
       // Pin the IP so the status poll never reaches out to api.ipify.org.
@@ -141,7 +150,7 @@ before(async () => {
   for (;;) {
     if (Date.now() > deadline) throw new Error("panel did not become ready");
     try {
-      const res = await fetch(`${BASE}/api/status`);
+      const res = await fetch(`${BASE}/api/status`, { headers: auth });
       if (res.ok) break;
     } catch {
       /* not up yet */
@@ -149,7 +158,7 @@ before(async () => {
     await new Promise((r) => setTimeout(r, 500));
   }
 
-  ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`);
+  ws = new WebSocket(`ws://127.0.0.1:${PORT}/ws`, { headers: auth });
   ws.on("message", (d) => {
     try {
       frames.push(JSON.parse(String(d)) as WsEvent);
@@ -170,7 +179,7 @@ before(async () => {
   // before this point would make the stat assertions racy.
   const rosterDeadline = Date.now() + 20_000;
   for (;;) {
-    const players = (await (await fetch(`${BASE}/api/players`)).json()) as Player[];
+    const players = (await (await fetch(`${BASE}/api/players`, { headers: auth })).json()) as Player[];
     if (players.length === ROSTER.length) break;
     if (Date.now() > rosterDeadline) throw new Error("roster never populated");
     await new Promise((r) => setTimeout(r, 250));
@@ -204,7 +213,7 @@ describe("real mode over a stub CS2 server", () => {
   });
 
   it("reports the server as running even though Docker is unreachable", async () => {
-    const res = await fetch(`${BASE}/api/status`);
+    const res = await fetch(`${BASE}/api/status`, { headers: auth });
     const status = (await res.json()) as { state: string; hostname: string; map: string };
     // Regression: any inspect failure used to report "stopped", which flips the
     // top bar to a Start button on a healthy server.
@@ -214,7 +223,7 @@ describe("real mode over a stub CS2 server", () => {
   });
 
   it("parses the roster with real SteamIDs and userids", async () => {
-    const players = (await (await fetch(`${BASE}/api/players`)).json()) as Player[];
+    const players = (await (await fetch(`${BASE}/api/players`, { headers: auth })).json()) as Player[];
     assert.equal(players.length, 2);
     assert.deepEqual(
       players.map((p) => p.steamId),
@@ -243,7 +252,7 @@ describe("real mode over a stub CS2 server", () => {
       logLine(`World triggered "Match_Start" on "de_mirage"`),
     ]);
     await waitForFrame((e) => e.type === "match.phase" && e.phase === "live");
-    const players = (await (await fetch(`${BASE}/api/players`)).json()) as Player[];
+    const players = (await (await fetch(`${BASE}/api/players`, { headers: auth })).json()) as Player[];
     assert.equal(players.find((p) => p.name === "Neo")?.team, "CT");
     assert.equal(players.find((p) => p.name === "Trinity")?.team, "T");
   });
@@ -262,7 +271,7 @@ describe("real mode over a stub CS2 server", () => {
     // The poll runs every 2s and reports k/d/a as 0. Before the roster merge,
     // stats were wiped within one tick.
     await new Promise((r) => setTimeout(r, 3000));
-    const players = (await (await fetch(`${BASE}/api/players`)).json()) as Player[];
+    const players = (await (await fetch(`${BASE}/api/players`, { headers: auth })).json()) as Player[];
     assert.equal(players.find((p) => p.name === "Neo")?.k, 2, "kills wiped by poll");
     assert.equal(players.find((p) => p.name === "Trinity")?.d, 2, "deaths wiped by poll");
     assert.equal(
@@ -280,7 +289,7 @@ describe("real mode over a stub CS2 server", () => {
     assert.equal(frame.type, "match.score");
     assert.deepEqual(frame.score, { ct: 9, t: 5 });
 
-    const match = (await (await fetch(`${BASE}/api/match`)).json()) as {
+    const match = (await (await fetch(`${BASE}/api/match`, { headers: auth })).json()) as {
       score: { ct: number; t: number };
     };
     assert.deepEqual(match.score, { ct: 9, t: 5 });
@@ -291,7 +300,7 @@ describe("real mode over a stub CS2 server", () => {
     await waitForFrame(
       (e) => e.type === "chat.message" && e.message.message === "rush B",
     );
-    const chat = (await (await fetch(`${BASE}/api/chat`)).json()) as ChatMessage[];
+    const chat = (await (await fetch(`${BASE}/api/chat`, { headers: auth })).json()) as ChatMessage[];
     const row = chat.find((m) => m.message === "rush B");
     assert.ok(row, "expected the message to come back from the database");
     assert.equal(row.name, "Trinity");
@@ -308,7 +317,7 @@ describe("real mode over a stub CS2 server", () => {
     // if the phase event crossed the module boundary.
     const deadline = Date.now() + 5000;
     for (;;) {
-      const history = (await (await fetch(`${BASE}/api/history`)).json()) as unknown[];
+      const history = (await (await fetch(`${BASE}/api/history`, { headers: auth })).json()) as unknown[];
       if (history.length > 0) return;
       if (Date.now() > deadline) {
         assert.fail("no match was recorded in history");
@@ -321,7 +330,7 @@ describe("real mode over a stub CS2 server", () => {
     const id = "3070563536";
     const added = await fetch(`${BASE}/api/maps/workshop`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auth },
       body: JSON.stringify({ workshopId: id, displayName: "aim botz" }),
     });
     assert.equal(added.status, 200);
@@ -339,7 +348,7 @@ describe("real mode over a stub CS2 server", () => {
 
     const played = await fetch(`${BASE}/api/maps/current`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auth },
       body: JSON.stringify({ name: entry.name }),
     });
     assert.equal(played.status, 200);
@@ -354,7 +363,7 @@ describe("real mode over a stub CS2 server", () => {
   it("changes to an official map with changelevel", async () => {
     const res = await fetch(`${BASE}/api/maps/current`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auth },
       body: JSON.stringify({ name: "de_nuke" }),
     });
     assert.equal(res.status, 200);

@@ -63,7 +63,7 @@ export function TeamBuilder({
       name: team2Name,
       onName: onTeam2Name,
       entries: team2,
-      dot: "bg-sky-400",
+      dot: "bg-info",
     },
   ];
 
@@ -91,7 +91,7 @@ export function TeamBuilder({
                 type="button"
                 aria-label={`Put ${p.name} on ${team2Name}`}
                 onClick={() => onAssign(p.id, "team2")}
-                className="flex min-h-11 items-center px-3 text-sky-400 transition-colors hover:bg-sky-400/15"
+                className="flex min-h-11 items-center px-3 text-info transition-colors hover:bg-info/15"
               >
                 <CaretRight weight="bold" className="size-4" />
               </button>
@@ -112,7 +112,7 @@ export function TeamBuilder({
                 aria-label={`${col.label} name`}
                 value={col.name}
                 onChange={(e) => col.onName(e.target.value)}
-                className="h-7 min-w-0 flex-1 rounded-none border-0 bg-transparent px-1 text-sm font-medium shadow-none focus-visible:ring-1"
+                className="h-7 min-w-0 flex-1 rounded-md border-0 bg-transparent px-1 text-sm font-medium shadow-none focus-visible:ring-1"
               />
               <span className="text-xs tabular-nums text-muted-foreground">
                 {col.entries.length}

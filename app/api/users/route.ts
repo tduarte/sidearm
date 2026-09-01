@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireRole } from "@/lib/auth/guard";
-import { hashPassword, validatePassword, validateUsername } from "@/lib/auth/passwords";
+import { validatePassword, validateUsername } from "@/lib/auth/credentials";
+import { hashPassword } from "@/lib/auth/passwords";
 import { isRole } from "@/lib/auth/permissions";
 import { route } from "@/lib/api/route";
 import { createUser, listUsers } from "@/lib/db/users";

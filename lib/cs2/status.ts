@@ -603,7 +603,10 @@ export function containerStateToServerState(
   s: DockerState | null,
   rconAlive = false,
 ): ServerStatus["state"] {
-  if (!s) return rconAlive ? "running" : "crashed";
+  // No Docker answer at all. If RCON is alive the server is plainly running and
+  // only the socket proxy is down. If neither answers we know nothing: saying
+  // "crashed" here reported a diagnosis the panel had not made.
+  if (!s) return rconAlive ? "running" : "unknown";
   if (s.Restarting) return "starting";
   if (s.Paused) return "stopping";
   if (s.Running) {

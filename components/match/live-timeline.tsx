@@ -85,7 +85,7 @@ export function LiveTimeline({ match }: { match: MatchState }) {
             <>
               {" · "}
               <span
-                className={run.team === "CT" ? "text-blue-400" : "text-amber-400"}
+                className={run.team === "CT" ? "text-team-ct" : "text-warn"}
               >
                 {run.team} on {run.count}
               </span>

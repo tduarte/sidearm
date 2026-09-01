@@ -84,7 +84,7 @@ export function ScoreboardHero({ match }: { match: MatchState }) {
                 {ctName}
               </p>
             )}
-            <p className="text-xs uppercase tracking-wide text-blue-400">CT</p>
+            <p className="text-xs uppercase tracking-wide text-team-ct">CT</p>
             <p className="text-6xl font-bold tabular-nums">{match.score.ct}</p>
           </div>
           <div className="max-w-xs flex-1 space-y-2 text-center">
@@ -112,7 +112,7 @@ export function ScoreboardHero({ match }: { match: MatchState }) {
             {match.demo.state === "recording" && (
               <Badge
                 variant="outline"
-                className="gap-1.5 border-red-500/40 text-red-400"
+                className="gap-1.5 border-danger/40 text-danger"
               >
                 <Record className="h-3 w-3" weight="fill" />
                 REC
@@ -128,7 +128,7 @@ export function ScoreboardHero({ match }: { match: MatchState }) {
                 {tName}
               </p>
             )}
-            <p className="text-xs uppercase tracking-wide text-amber-400">T</p>
+            <p className="text-xs uppercase tracking-wide text-team-t">T</p>
             <p className="text-6xl font-bold tabular-nums">{match.score.t}</p>
           </div>
         </div>
@@ -194,7 +194,7 @@ export function StatusStrip({ match }: { match: MatchState }) {
       {match.demo.state === "recording" && (
         <Badge
           variant="outline"
-          className="gap-1.5 border-red-500/40 text-red-400"
+          className="gap-1.5 border-danger/40 text-danger"
         >
           <Record className="h-3 w-3" weight="fill" />
           REC

@@ -5,7 +5,7 @@
  * an empty command list — nothing was sent and success was reported anyway.
  * This replaces that with something that actually runs, and says plainly what
  * it cannot do: the panel cannot detect who won or swap sides for you. A real
- * competitive flow needs Get5 or MatchZy, as HANDOFF.md already noted.
+ * competitive flow needs Get5 or MatchZy.
  *
  * The cvars are captured before they are overwritten so the change can be
  * undone. Restoring a captured baseline beats `exec gamemode_competitive.cfg`

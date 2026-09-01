@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { identityFrom, requireRole } from "@/lib/auth/guard";
-import { hashPassword, validatePassword } from "@/lib/auth/passwords";
+import { validatePassword } from "@/lib/auth/credentials";
+import { hashPassword } from "@/lib/auth/passwords";
 import { isRole } from "@/lib/auth/permissions";
 import { destroyUserSessions } from "@/lib/auth/session";
 import { route } from "@/lib/api/route";

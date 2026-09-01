@@ -6,14 +6,20 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ArrowsClockwise,
+  ClockCounterClockwise,
   Gauge,
+  Gear,
   MapTrifold,
+  Moon,
   Pause,
   Play,
+  Sliders,
+  Sun,
   Terminal,
   Trophy,
   UserMinus,
 } from "@phosphor-icons/react";
+import { useTheme } from "next-themes";
 import {
   CommandDialog,
   CommandEmpty,
@@ -23,9 +29,34 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { useSession } from "@/components/session-provider";
 import { api } from "@/lib/api/client";
+import type { Role } from "@/lib/auth/permissions";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
+
+/**
+ * Every destination, filtered by what the account is allowed to reach.
+ *
+ * A palette that offers a page you will be refused at is worse than one that
+ * omits it: you spend the move, land on a wall of 403s, and learn not to trust
+ * the palette. The roles here are the same ones `sidebar-nav.tsx` filters on
+ * and the same ones the server enforces.
+ */
+const DESTINATIONS: Array<{
+  href: string;
+  label: string;
+  icon: typeof Gauge;
+  role: Role;
+}> = [
+  { href: "/dashboard", label: "Dashboard", icon: Gauge, role: "viewer" },
+  { href: "/match", label: "Match Control", icon: Trophy, role: "moderator" },
+  { href: "/maps", label: "Maps", icon: MapTrifold, role: "moderator" },
+  { href: "/console", label: "Console", icon: Terminal, role: "moderator" },
+  { href: "/config", label: "Config", icon: Sliders, role: "admin" },
+  { href: "/history", label: "History", icon: ClockCounterClockwise, role: "viewer" },
+  { href: "/settings", label: "Settings", icon: Gear, role: "viewer" },
+];
 
 /**
  * One-move reach for the things you need mid-match.
@@ -39,10 +70,24 @@ import { useServerStatus } from "@/lib/hooks/use-server-status";
  * everyone, and an action that severe should not be two keystrokes and a
  * fuzzy match away.
  */
+/**
+ * ⌘K is invisible until someone tells you about it, so the top bar has a chip
+ * that opens the same palette. An event rather than lifted state: the trigger
+ * and the dialog sit in different branches of the shell, and threading a
+ * setter through `AppShell` would make every page re-render on open.
+ */
+const OPEN_EVENT = "sidearm:command-palette";
+
+export function openCommandPalette() {
+  window.dispatchEvent(new Event(OPEN_EVENT));
+}
+
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
   const qc = useQueryClient();
+  const { can } = useSession();
+  const { resolvedTheme, setTheme } = useTheme();
 
   const { data: status } = useServerStatus();
   const { data: players } = useLivePlayers();
@@ -52,7 +97,7 @@ export function CommandPalette() {
   const maps = useQuery({
     queryKey: ["maps"],
     queryFn: () => api.getMaps(),
-    enabled: open,
+    enabled: open && can("moderator"),
   });
 
   useEffect(() => {
@@ -62,8 +107,13 @@ export function CommandPalette() {
         setOpen((v) => !v);
       }
     };
+    const onOpen = () => setOpen(true);
     document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
+    window.addEventListener(OPEN_EVENT, onOpen);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      window.removeEventListener(OPEN_EVENT, onOpen);
+    };
   }, []);
 
   const kick = useMutation({
@@ -122,6 +172,7 @@ export function CommandPalette() {
       <CommandList>
         <CommandEmpty>Nothing matches.</CommandEmpty>
 
+        {can("moderator") && (
         <CommandGroup heading="Match">
           <CommandItem onSelect={() => act(() => pause.mutate("pause"))}>
             <Pause className="h-4 w-4" />
@@ -134,6 +185,7 @@ export function CommandPalette() {
             <Play className="h-4 w-4" />
             Resume match
           </CommandItem>
+          {can("admin") && (
           <CommandItem
             disabled={dockerDown}
             onSelect={() => act(() => restart.mutate())}
@@ -144,9 +196,11 @@ export function CommandPalette() {
               {dockerDown ? "Docker unreachable" : "drops everyone"}
             </span>
           </CommandItem>
+          )}
         </CommandGroup>
+        )}
 
-        {(players?.length ?? 0) > 0 && (
+        {can("moderator") && (players?.length ?? 0) > 0 && (
           <>
             <CommandSeparator />
             <CommandGroup heading="Kick">
@@ -167,6 +221,8 @@ export function CommandPalette() {
           </>
         )}
 
+        {can("moderator") && (
+          <>
         <CommandSeparator />
         <CommandGroup heading="Change map">
           {(maps.data?.all ?? []).map((m) => (
@@ -184,24 +240,52 @@ export function CommandPalette() {
             </CommandItem>
           ))}
         </CommandGroup>
+          </>
+        )}
 
         <CommandSeparator />
         <CommandGroup heading="Go to">
-          {[
-            { href: "/dashboard", label: "Dashboard", icon: Gauge },
-            { href: "/match", label: "Match Control", icon: Trophy },
-            { href: "/maps", label: "Maps", icon: MapTrifold },
-            { href: "/console", label: "Console", icon: Terminal },
-          ].map(({ href, label, icon: Icon }) => (
+          {DESTINATIONS.filter((d) => can(d.role)).map(
+            ({ href, label, icon: Icon }) => (
+              <CommandItem
+                key={href}
+                value={`go ${label}`}
+                onSelect={() => act(() => router.push(href))}
+              >
+                <Icon className="h-4 w-4" />
+                {label}
+              </CommandItem>
+            ),
+          )}
+          {can("admin") && (
             <CommandItem
-              key={href}
-              value={`go ${label}`}
-              onSelect={() => act(() => router.push(href))}
+              value="rcon run command console"
+              onSelect={() => act(() => router.push("/console"))}
             >
-              <Icon className="h-4 w-4" />
-              {label}
+              <Terminal className="h-4 w-4" />
+              Run an RCON command…
+              <span className="ml-auto text-xs text-muted-foreground">
+                opens Console
+              </span>
             </CommandItem>
-          ))}
+          )}
+        </CommandGroup>
+
+        <CommandSeparator />
+        <CommandGroup heading="Appearance">
+          <CommandItem
+            value="theme dark light appearance"
+            onSelect={() =>
+              act(() => setTheme(resolvedTheme === "dark" ? "light" : "dark"))
+            }
+          >
+            {resolvedTheme === "dark" ? (
+              <Sun className="h-4 w-4" />
+            ) : (
+              <Moon className="h-4 w-4" />
+            )}
+            Switch to {resolvedTheme === "dark" ? "light" : "dark"} theme
+          </CommandItem>
         </CommandGroup>
       </CommandList>
     </CommandDialog>

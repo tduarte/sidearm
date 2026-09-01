@@ -9,6 +9,7 @@ import { usePanelInfo } from "@/components/panel-info";
 import { AccountCard } from "@/components/settings/account-card";
 import { UsersCard } from "@/components/settings/users-card";
 import { useSession } from "@/components/session-provider";
+import { ThemeToggle } from "@/components/theme-toggle";
 import { useConsolePrefs } from "@/lib/hooks/use-console-prefs";
 
 /**
@@ -42,8 +43,11 @@ export default function SettingsPage() {
           <CardTitle className="text-base">Preferences</CardTitle>
           <CardDescription>Stored in this browser only.</CardDescription>
         </CardHeader>
-        <CardContent>
-          <div className="flex items-center justify-between rounded-none border p-3">
+        <CardContent className="space-y-3">
+          <div className="rounded-md border p-3">
+            <ThemeToggle />
+          </div>
+          <div className="flex items-center justify-between gap-3 rounded-md border p-3">
             <div>
               <Label htmlFor="autoscroll">Follow the console</Label>
               <p className="text-xs text-muted-foreground">

@@ -6,6 +6,7 @@ import {
   Memory,
   UsersThree,
 } from "@phosphor-icons/react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -28,6 +29,7 @@ import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useStatHistory } from "@/lib/hooks/use-stat-history";
 import { useMatchState } from "@/lib/hooks/use-match-state";
 import { useMediaQuery } from "@/lib/hooks/use-media-query";
+import { useCan } from "@/components/session-provider";
 import { cn } from "@/lib/utils";
 
 function formatUptime(s: number | null) {
@@ -42,13 +44,13 @@ function formatUptime(s: number | null) {
 function VacBadge({ secure }: { secure: boolean | null }) {
   if (secure === null) return null;
   return secure ? (
-    <Badge variant="outline" className="border-emerald-500/30 bg-emerald-500/15 text-emerald-400">
+    <Badge variant="outline" className="border-ok/30 bg-ok/12 text-ok">
       VAC secure
     </Badge>
   ) : (
     <Badge
       variant="outline"
-      className="border-red-500/30 bg-red-500/15 text-red-400"
+      className="border-danger/30 bg-danger/12 text-danger"
       title="The server is running but unlisted and unprotected — usually a dead or missing GSLT. Reissue it at steamcommunity.com/dev/managegameservers."
     >
       VAC insecure
@@ -59,7 +61,8 @@ function VacBadge({ secure }: { secure: boolean | null }) {
 export default function DashboardPage() {
   const isNarrow = useMediaQuery("(max-width: 639px)");
   const { data: status, isPending, error, refetch } = useServerStatus();
-  const { data: match } = useMatchState();
+  const { data: match, isPending: matchPending, error: matchError } = useMatchState();
+  const canModerate = useCan("moderator");
   const { cpu } = useStatHistory();
 
   if (error && !status) {
@@ -162,14 +165,27 @@ export default function DashboardPage() {
 
       {/* Match + scoreboard */}
       <Card>
-        <CardHeader className="pb-2">
+        <CardHeader className="flex-row items-center justify-between pb-2">
           <CardTitle className="text-base">Match</CardTitle>
+          {/*
+            The score is the one thing on this page you routinely want to act
+            on, and until now the only way from here to the controls was the
+            sidebar. Moderators only: for a viewer the link leads to a wall.
+          */}
+          {canModerate && (
+            <Link
+              href="/match"
+              className="text-xs font-medium text-info hover:underline"
+            >
+              Match Control
+            </Link>
+          )}
         </CardHeader>
         <CardContent className="space-y-6">
           {match ? (
             <div className="flex flex-wrap items-center justify-center gap-8 md:gap-12 lg:gap-16">
               <div className="min-w-[5rem] text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-blue-400">
+                <p className="text-xs font-medium uppercase tracking-wide text-team-ct">
                   CT
                 </p>
                 <p className="text-5xl font-bold tabular-nums leading-none sm:text-6xl md:text-7xl">
@@ -189,7 +205,7 @@ export default function DashboardPage() {
                 </p>
               </div>
               <div className="min-w-[5rem] text-center">
-                <p className="text-xs font-medium uppercase tracking-wide text-amber-400">
+                <p className="text-xs font-medium uppercase tracking-wide text-team-t">
                   T
                 </p>
                 <p className="text-5xl font-bold tabular-nums leading-none sm:text-6xl md:text-7xl">
@@ -197,8 +213,36 @@ export default function DashboardPage() {
                 </p>
               </div>
             </div>
+          ) : matchPending ? (
+            <div className="mx-auto flex w-full max-w-2xl items-center justify-center gap-12">
+              {/* Shaped like the scoreline it stands in for, not a grey slab. */}
+              <Skeleton className="h-16 w-20" />
+              <Skeleton className="h-6 w-24" />
+              <Skeleton className="h-16 w-20" />
+            </div>
           ) : (
-            <Skeleton className="h-24 w-full max-w-2xl mx-auto" />
+            /*
+              An undefined match used to render the loading skeleton forever,
+              which said "still fetching" about a request that had already
+              finished. These are different situations and read differently.
+            */
+            <div className="py-6 text-center text-sm text-muted-foreground">
+              {matchError ? (
+                <>
+                  <p>Could not read the match state.</p>
+                  <p className="text-xs">
+                    The server answers this over RCON; it may be starting up.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p>No match is running.</p>
+                  <p className="text-xs">
+                    Scores appear here once a match goes live.
+                  </p>
+                </>
+              )}
+            </div>
           )}
         </CardContent>
       </Card>

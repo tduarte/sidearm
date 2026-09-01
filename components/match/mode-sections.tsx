@@ -157,7 +157,7 @@ export function ModeSections() {
         open={practiceOpen}
         onToggle={() => setPracticeOpen((v) => !v)}
       >
-        <div className="flex items-center justify-between rounded-none border p-3">
+        <div className="flex items-center justify-between rounded-md border p-3">
           <div>
             <Label htmlFor="sv-cheats">sv_cheats</Label>
             <p className="text-xs text-muted-foreground">

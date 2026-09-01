@@ -7,7 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api, UnauthorizedError } from "@/lib/api/client";
-import { MIN_PASSWORD_LENGTH } from "@/lib/auth/passwords";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth/credentials";
 
 type Screen = "checking" | "ready" | "register" | "login";
 

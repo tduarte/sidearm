@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { breakGlassTokenConfigured, PEER_HEADER, safeEqual } from "@/lib/auth";
-import {
-  hashPassword,
-  validatePassword,
-  validateUsername,
-} from "@/lib/auth/passwords";
+import { validatePassword, validateUsername } from "@/lib/auth/credentials";
+import { hashPassword } from "@/lib/auth/passwords";
 import { rateLimit } from "@/lib/auth/rate-limit";
 import {
   createSession,

@@ -190,11 +190,27 @@ export default function MapsPage() {
 
       <RotationCard maps={data.all} current={current} />
 
-      {workshop.length > 0 && (
+      {/*
+        The heading stays when the list is empty. Hiding the section entirely
+        meant a fresh install had no way to learn that workshop maps are
+        supported at all — the feature was invisible until you already knew
+        about it, which is the wrong way round.
+      */}
+      <div>
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+          Workshop
+        </h2>
+        {workshop.length === 0 ? (
+          <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
+            <p>No workshop maps subscribed.</p>
+            <p className="mt-1 text-xs">
+              Paste a Steam Workshop URL or ID above and the server downloads it
+              on first load. Community maps, surf, retakes — anything with a
+              workshop page.
+            </p>
+          </div>
+        ) : (
         <div>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Workshop
-          </h2>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {workshop.map((m) => (
               <MapTile
@@ -215,7 +231,8 @@ export default function MapsPage() {
             ))}
           </div>
         </div>
-      )}
+        )}
+      </div>
 
       <div>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -271,7 +288,7 @@ function MapTile({
       className={cn(
         "relative w-full overflow-hidden pt-0 transition",
         isCurrent && "ring-2 ring-primary",
-        isLoadingNow && "ring-2 ring-amber-500/70",
+        isLoadingNow && "ring-2 ring-pending/70",
       )}
     >
       <div className="relative aspect-video w-full overflow-hidden bg-muted">
@@ -291,8 +308,8 @@ function MapTile({
         {(isCurrent || badge || isLoadingNow) && (
           <CardAction>
             {isLoadingNow ? (
-              <Badge className="gap-1.5 border-amber-500/30 bg-amber-500/15 text-amber-400">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+              <Badge className="gap-1.5 border-pending/30 bg-pending/12 text-pending">
+                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pending" />
                 Loading
               </Badge>
             ) : isCurrent ? (

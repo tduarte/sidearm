@@ -110,10 +110,76 @@ Leave RCON (`27015/**tcp**`) closed. It is deliberately not published outside
 the compose network, and exposing it hands out full server control.
 
 The panel on `3000/tcp` should stay on your LAN, or behind a reverse proxy with
-`PANEL_ADMIN_TOKEN` set and `PANEL_HTTPS=1`.
+`PANEL_HTTPS=1` so the session cookie is marked `Secure`.
 
 Then connect with `steam://connect/<your-public-ip>:27015`, or copy the connect
 string straight off the dashboard.
+
+---
+
+## Accounts and roles
+
+The first time you open the panel it asks you to create an account. That account
+is an admin, and from then on every request needs a session — there is no
+"open panel" mode.
+
+If `PANEL_ADMIN_TOKEN` is set, registration also asks for it. That is the
+upgrade path: a deployment that was protected by a token cannot be claimed by
+whoever reaches it first after a redeploy.
+
+Three roles, each a superset of the one before it:
+
+| | viewer | moderator | admin |
+|---|---|---|---|
+| Dashboard, scoreboard, match history | ✅ | ✅ | ✅ |
+| **Download demos** | ✅ | ✅ | ✅ |
+| Kick and ban players | | ✅ | ✅ |
+| Change map, pause, run a match | | ✅ | ✅ |
+| Read the server log | | ✅ | ✅ |
+| Start / stop / restart the server | | | ✅ |
+| Config, presets, workshop, rotation | | | ✅ |
+| Run raw RCON commands | | | ✅ |
+| Manage accounts | | | ✅ |
+
+Admins create the other accounts in **Settings → Users**. Changing someone's
+role or disabling them signs them out everywhere immediately, including their
+open WebSocket.
+
+The panel never shows a link to a page the account cannot use, and the server
+enforces the same table independently — the navigation is a convenience, not
+the boundary.
+
+Accounts live in the panel's SQLite database on the `panel-data` volume, so
+they survive a redeploy. Passwords are scrypt-hashed.
+
+---
+
+## Picking a preset
+
+Slots, game type and game mode are not three independent decisions: choosing
+Wingman settles all three. Both `scripts/setup.sh` and the panel's **Config →
+Presets** card offer the same set, with the same numbers:
+
+| Preset | Players | `CS2_MAXPLAYERS` |
+|---|---|---|
+| Competitive 5v5 | 10 | `11` |
+| Wingman 2v2 | 4 | `5` |
+| Deathmatch | 24 | `25` |
+| Casual 10v10 | 20 | `21` |
+| Practice | up to 10 | `11` |
+
+Every count is one higher than the number of humans, because GOTV occupies a
+slot. Getting this wrong is the classic new-server failure: ten slots looks
+right for a 5v5 and only nine people can join.
+
+The cvar half of a preset (mode, advertised slots, bots) applies over RCON
+while people are playing. The slot ceiling is a launch argument, so the panel
+cannot change it — the Presets card prints the exact `.env` lines and the one
+command instead:
+
+```bash
+docker compose up -d --force-recreate cs2   # drops everyone connected
+```
 
 ---
 
@@ -130,7 +196,7 @@ Copy `.env.example` to `.env` and fill in:
 | `SERVER_NAME` | No | Server browser name (default: `sidearm`) |
 | `CS2_MAXPLAYERS` | No | Hard slot ceiling, i.e. `-maxplayers` (default: `11`). Set once to the largest roster you will ever host; the advertised count varies per game mode underneath it. GOTV takes one slot, so budget an extra — 11 fits a 5v5, 33 fits 32 players. |
 | `CS2_STARTMAP` | No | Starting map (default: `de_mirage`) |
-| `PANEL_ADMIN_TOKEN` | No | Bearer token for `/api/*` and `/ws`. Blank = open panel. When set, the UI prompts once and keeps an HttpOnly session cookie. |
+| `PANEL_ADMIN_TOKEN` | No | **Not the login** — the panel uses accounts (see [Accounts and roles](#accounts-and-roles)). This is a break-glass bearer token for `/api/*` and `/ws` that always resolves to `admin`, for scripts and for getting back in if you lock yourself out. When set it is also required as a setup token to register the first account, so a redeployed panel cannot be claimed by a stranger. |
 | `PANEL_HTTPS` | No | Set to `1` when serving over HTTPS so the session cookie is marked `Secure`. |
 | `SERVER_IP` | No | Public address for the connect URL. Set it to avoid an outbound lookup to api.ipify.org each poll. |
 | `BIND_HOST` | No | Interface to bind (default `0.0.0.0`). Deliberately not `HOSTNAME`, which shells and Docker both set. |
@@ -138,7 +204,7 @@ Copy `.env.example` to `.env` and fill in:
 | `CS2_UPDATE_CHECK_MS` | No | How often to check for a CS2 update (default `900000`, 15 min). `0` disables the check. |
 | `CS2_GAMETYPE` / `CS2_GAMEMODE` | No | Starting game mode as Valve's two numbers (default `0` / `1` — competitive). The panel's Config page changes this at runtime; these only set what the server boots into. |
 | `CS2_MAPGROUP` | No | Map group for the boot map cycle (default `mg_active`). |
-| `PANEL_TRUSTED_CIDRS` | No | Comma-separated CIDRs whose clients skip `PANEL_ADMIN_TOKEN` — e.g. `192.168.1.0/24`. Matched against the **real TCP peer**, never `X-Forwarded-For`, so it does nothing behind a reverse proxy — and listing the proxy's own address would exempt the entire internet. |
+| `PANEL_TRUSTED_CIDRS` | No | Comma-separated CIDRs whose clients get **`viewer`** without signing in — e.g. `192.168.1.0/24` for a scoreboard on a wall display. This is no longer a full bypass: reads work, every mutation still needs an account. Matched against the **real TCP peer**, never `X-Forwarded-For`, so it does nothing behind a reverse proxy — and listing the proxy's own address would exempt the entire internet. |
 | `MATCHZY_CONFIG_SECRET` | No | Secret CS2 presents when fetching a match config. Falls back to `LOG_INGEST_SECRET`, so leaving it blank is fine. |
 | `TV_ENABLE` | No | GOTV on/off (default `1`). Required for demo recording — `tv_record` needs it. |
 | `TV_DELAY` | No | GOTV broadcast delay in seconds (default `30`). `0` lets spectators watch live and call positions. |

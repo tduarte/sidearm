@@ -12,11 +12,6 @@ const geistSans = Geist({
   variable: "--font-geist-sans",
 });
 
-const geistMonoHeading = Geist_Mono({
-  subsets: ["latin"],
-  variable: "--font-geist-heading",
-});
-
 const geistMono = Geist_Mono({
   variable: "--font-geist-mono",
   subsets: ["latin"],
@@ -49,12 +44,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={cn(
-        "h-full dark antialiased",
-        geistSans.variable,
-        geistMono.variable,
-        geistMonoHeading.variable,
-      )}
+      // next-themes writes the theme class here before paint, from its inline
+      // script, so the server-rendered markup cannot match. Suppressing the
+      // warning on this element is its documented App Router pattern.
+      suppressHydrationWarning
+      className={cn("h-full antialiased", geistSans.variable, geistMono.variable)}
     >
       <body className="min-h-full flex flex-col font-sans">
         {/*

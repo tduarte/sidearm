@@ -1,8 +1,16 @@
-# sidearm — UX brief
+# sidearm — UX brief (superseded 2026-08-31)
 
-Scope: the whole panel, all eight routes. **Visual identity is pinned and unchanged** —
-dark shadcn/ui, amber `--primary`, Geist Sans/Mono, Phosphor icons, sidebar + top bar. Every
-change below is structure, interaction, state, or copy. Mode: **Operate**.
+> **Superseded.** This brief was written while the visual identity was pinned, and while the
+> panel had a single shared token instead of accounts. Both premises are now false: see
+> `DESIGN.md` for the visual system and `PRODUCT.md` for the three-role model. Its structural
+> findings were implemented and are kept here as the record of why — the copy, state and
+> interaction reasoning below is still accurate. Do not take its *visual* constraints as
+> current.
+
+Scope: the whole panel, all eight routes. Visual identity was pinned and unchanged at the
+time of writing — dark shadcn/ui, amber `--primary`, Geist Sans/Mono, Phosphor icons,
+sidebar + top bar. Every change below is structure, interaction, state, or copy.
+Mode: **Operate**.
 
 ---
 

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { cn } from "@/lib/utils";
+import { useCan } from "@/components/session-provider";
 import { api } from "@/lib/api/client";
 import { useConsoleStream } from "@/lib/hooks/use-console-stream";
 import { useConsolePrefs } from "@/lib/hooks/use-console-prefs";
@@ -20,9 +21,9 @@ import type { ConsoleLevel } from "@/lib/api/types";
 
 const LEVEL_COLOR: Record<ConsoleLevel, string> = {
   info: "text-muted-foreground",
-  warn: "text-amber-400",
-  error: "text-red-400",
-  chat: "text-emerald-300",
+  warn: "text-warn",
+  error: "text-danger",
+  chat: "text-ok",
 };
 
 export function ConsolePane() {
@@ -45,6 +46,8 @@ export function ConsolePane() {
   const [history, setHistory] = useState<string[]>([]);
   const [histIdx, setHistIdx] = useState(-1);
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  // `/api/rcon` is admin-only, so a moderator reads the log and sends nothing.
+  const canSend = useCan("admin");
 
   const filtered = useMemo(
     () => events.filter((e) => levels.includes(e.level)),
@@ -97,8 +100,16 @@ export function ConsolePane() {
     }
   }
 
+  /*
+   * Fills its parent rather than choosing a height. The log used to be a
+   * fixed `60vh` inside an auto-height card, which on a phone pushed the RCON
+   * input a full screen below the fold — you had to scroll past an
+   * autoscrolling log to reach the only thing on the page you can type into.
+   * The page now hands this a definite height and the log takes what is left,
+   * so the input sits on the bottom edge at every size.
+   */
   return (
-    <div className="flex h-full min-h-[500px] flex-col gap-3">
+    <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <ToggleGroup
           type="multiple"
@@ -139,10 +150,10 @@ export function ConsolePane() {
         </div>
       </div>
 
-      <ScrollArea className="flex-1 rounded-md border bg-background/50">
+      <ScrollArea className="min-h-0 flex-1 rounded-md border bg-background/50">
         <div
           ref={viewportRef}
-          className="h-[60vh] min-h-[400px] overflow-auto p-3 font-mono text-xs leading-relaxed"
+          className="h-full overflow-auto p-3 font-mono text-xs leading-relaxed"
         >
           {filtered.map((e) => (
             <div key={e.id} className="flex gap-2">
@@ -194,21 +205,27 @@ export function ConsolePane() {
         </div>
       </ScrollArea>
 
-      <form onSubmit={submit} className="flex gap-2">
-        <Input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="RCON command (e.g. status, mp_restartgame 1)"
-          className="font-mono"
-          autoComplete="off"
-          spellCheck={false}
-        />
-        <Button type="submit" disabled={!input.trim() || rcon.isPending}>
-          <PaperPlaneRight className="h-4 w-4" weight="fill" />
-          Send
-        </Button>
-      </form>
+      {canSend ? (
+        <form onSubmit={submit} className="flex shrink-0 gap-2">
+          <Input
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            placeholder="RCON command (e.g. status, mp_restartgame 1)"
+            className="font-mono"
+            autoComplete="off"
+            spellCheck={false}
+          />
+          <Button type="submit" disabled={!input.trim() || rcon.isPending}>
+            <PaperPlaneRight className="h-4 w-4" weight="fill" />
+            <span className="hidden sm:inline">Send</span>
+          </Button>
+        </form>
+      ) : (
+        <p className="shrink-0 rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+          Running commands needs an admin account. You can read the log here.
+        </p>
+      )}
     </div>
   );
 }

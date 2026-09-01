@@ -104,21 +104,3 @@ export async function burnPasswordTime(password: string): Promise<void> {
   decoyHash ??= await hashPassword(randomBytes(24).toString("base64url"));
   await verifyPassword(password, decoyHash);
 }
-
-/** The rules the register and change-password forms state up front. */
-export const MIN_PASSWORD_LENGTH = 10;
-
-export function validatePassword(password: string): string | null {
-  if (password.length < MIN_PASSWORD_LENGTH) {
-    return `Use at least ${MIN_PASSWORD_LENGTH} characters.`;
-  }
-  if (password.length > 256) return "That is longer than 256 characters.";
-  return null;
-}
-
-export function validateUsername(username: string): string | null {
-  if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
-    return "Use 3–32 characters: letters, numbers, dot, dash or underscore.";
-  }
-  return null;
-}

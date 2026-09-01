@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useSession } from "@/components/session-provider";
 import { api } from "@/lib/api/client";
-import { MIN_PASSWORD_LENGTH } from "@/lib/auth/passwords";
+import { MIN_PASSWORD_LENGTH } from "@/lib/auth/credentials";
 import { ROLE_DESCRIPTION, ROLE_LABEL } from "@/lib/auth/permissions";
 
 /** Who you are signed in as, and the two things you can do about it. */

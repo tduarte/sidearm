@@ -4,12 +4,34 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+  sidearm's visual system.
+
+  THESIS: an ops dashboard a stranger trusts at a glance. Neutral surfaces,
+  hairline borders, and colour spent only where it carries state — the opposite
+  of the dark-with-one-neon-accent look the game-server category defaults to.
+  The panel is read in a bright room before a session and in a dark one at 2am,
+  so both themes are real and the system follows the operating system.
+
+  Colour strategy: Restrained. A near-neutral ground, a high-contrast neutral
+  primary (black on white, white on black), and one blue reserved for focus,
+  links and information. Every other colour in the panel means something: see
+  the state tokens below, which exist so that "running" is not a hand-picked
+  emerald in one component and a different emerald in the next.
+*/
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-geist-heading);
+  /*
+    Headings are sans now. They were Geist Mono, which reads as a terminal
+    affectation on a page of prose labels; mono is kept for the things that are
+    literally machine text — commands, ids, telemetry — where the fixed advance
+    earns its place.
+  */
+  --font-heading: var(--font-geist-sans);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -39,6 +61,33 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
+
+  /*
+    Semantic state colours.
+
+    These exist because the panel's whole job is reporting state, and state was
+    being spelled with raw palette classes — `emerald-500` in the status pill,
+    a different green in the console, a third in the scoreboard. Naming them
+    once means "running" looks the same everywhere, and the light theme is not
+    a separate guessing exercise per component.
+  */
+  --color-ok: var(--ok);
+  --color-ok-foreground: var(--ok-foreground);
+  --color-warn: var(--warn);
+  --color-warn-foreground: var(--warn-foreground);
+  --color-danger: var(--danger);
+  --color-danger-foreground: var(--danger-foreground);
+  --color-info: var(--info);
+  --color-info-foreground: var(--info-foreground);
+  --color-pending: var(--pending);
+  --color-pending-foreground: var(--pending-foreground);
+  /* "We do not know", which must never be dressed as either good or bad. */
+  --color-unknown: var(--unknown);
+  --color-unknown-foreground: var(--unknown-foreground);
+  /* The two sides. Blue and orange because that is what CS2 itself uses. */
+  --color-team-ct: var(--team-ct);
+  --color-team-t: var(--team-t);
+
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -49,72 +98,116 @@
 }
 
 :root {
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.153 0.006 107.1);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.153 0.006 107.1);
-  --primary: oklch(0.852 0.199 91.936);
-  --primary-foreground: oklch(0.421 0.095 57.708);
-  --secondary: oklch(0.967 0.001 286.375);
-  --secondary-foreground: oklch(0.21 0.006 285.885);
-  --muted: oklch(0.966 0.005 106.5);
-  --muted-foreground: oklch(0.58 0.031 107.3);
-  --accent: oklch(0.966 0.005 106.5);
-  --accent-foreground: oklch(0.228 0.013 107.4);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.93 0.007 106.5);
-  --input: oklch(0.93 0.007 106.5);
-  --ring: oklch(0.737 0.021 106.9);
-  --chart-1: oklch(0.905 0.182 98.111);
-  --chart-2: oklch(0.795 0.184 86.047);
-  --chart-3: oklch(0.681 0.162 75.834);
-  --chart-4: oklch(0.554 0.135 66.442);
-  --chart-5: oklch(0.476 0.114 61.907);
-  --radius: 0.625rem;
-  --sidebar: oklch(0.988 0.003 106.5);
-  --sidebar-foreground: oklch(0.153 0.006 107.1);
-  --sidebar-primary: oklch(0.681 0.162 75.834);
-  --sidebar-primary-foreground: oklch(0.987 0.026 102.212);
-  --sidebar-accent: oklch(0.966 0.005 106.5);
-  --sidebar-accent-foreground: oklch(0.228 0.013 107.4);
-  --sidebar-border: oklch(0.93 0.007 106.5);
-  --sidebar-ring: oklch(0.737 0.021 106.9);
+  --radius: 0.5rem;
+
   --background: oklch(1 0 0);
-  --foreground: oklch(0.153 0.006 107.1);
+  --foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+
+  /* The primary action is ink, not a hue. Colour is reserved for meaning. */
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.505 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --destructive: oklch(0.545 0.22 27.3);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.58 0.19 258);
+
+  --ok: oklch(0.52 0.14 150);
+  --ok-foreground: oklch(0.985 0 0);
+  --warn: oklch(0.55 0.13 72);
+  --warn-foreground: oklch(0.985 0 0);
+  --danger: oklch(0.545 0.22 27.3);
+  --danger-foreground: oklch(0.985 0 0);
+  --info: oklch(0.55 0.18 258);
+  --info-foreground: oklch(0.985 0 0);
+  --pending: oklch(0.58 0.13 72);
+  --pending-foreground: oklch(0.985 0 0);
+  --unknown: oklch(0.505 0 0);
+  --unknown-foreground: oklch(0.985 0 0);
+  --team-ct: oklch(0.52 0.15 250);
+  --team-t: oklch(0.58 0.16 52);
+
+  /*
+    Categorical chart colours. The previous set was five steps of one amber
+    ramp — a sequential scale, which cannot tell two series apart.
+  */
+  --chart-1: oklch(0.55 0.18 258);
+  --chart-2: oklch(0.55 0.14 165);
+  --chart-3: oklch(0.62 0.15 60);
+  --chart-4: oklch(0.55 0.19 305);
+  --chart-5: oklch(0.6 0.13 200);
+
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.955 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.58 0.19 258);
 }
 
 .dark {
-  --background: oklch(0.153 0.006 107.1);
-  --foreground: oklch(0.988 0.003 106.5);
-  --card: oklch(0.228 0.013 107.4);
-  --card-foreground: oklch(0.988 0.003 106.5);
-  --popover: oklch(0.228 0.013 107.4);
-  --popover-foreground: oklch(0.988 0.003 106.5);
-  --primary: oklch(0.795 0.184 86.047);
-  --primary-foreground: oklch(0.421 0.095 57.708);
-  --secondary: oklch(0.274 0.006 286.033);
+  --background: oklch(0.145 0 0);
+  --foreground: oklch(0.985 0 0);
+  /* Cards lift off the ground rather than being outlined against it. */
+  --card: oklch(0.185 0 0);
+  --card-foreground: oklch(0.985 0 0);
+  --popover: oklch(0.205 0 0);
+  --popover-foreground: oklch(0.985 0 0);
+
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.26 0 0);
   --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.286 0.016 107.4);
-  --muted-foreground: oklch(0.737 0.021 106.9);
-  --accent: oklch(0.286 0.016 107.4);
-  --accent-foreground: oklch(0.988 0.003 106.5);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
+  --muted: oklch(0.26 0 0);
+  --muted-foreground: oklch(0.708 0 0);
+  --accent: oklch(0.26 0 0);
+  --accent-foreground: oklch(0.985 0 0);
+  --destructive: oklch(0.68 0.19 25);
+  --border: oklch(1 0 0 / 11%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.58 0.031 107.3);
-  --chart-1: oklch(0.905 0.182 98.111);
-  --chart-2: oklch(0.795 0.184 86.047);
-  --chart-3: oklch(0.681 0.162 75.834);
-  --chart-4: oklch(0.554 0.135 66.442);
-  --chart-5: oklch(0.476 0.114 61.907);
-  --sidebar: oklch(0.228 0.013 107.4);
-  --sidebar-foreground: oklch(0.988 0.003 106.5);
-  --sidebar-primary: oklch(0.795 0.184 86.047);
-  --sidebar-primary-foreground: oklch(0.987 0.026 102.212);
-  --sidebar-accent: oklch(0.286 0.016 107.4);
-  --sidebar-accent-foreground: oklch(0.988 0.003 106.5);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.58 0.031 107.3);
+  --ring: oklch(0.68 0.16 258);
+
+  /* Lifted and slightly desaturated: the same meanings, legible on near-black. */
+  --ok: oklch(0.75 0.16 152);
+  --ok-foreground: oklch(0.145 0 0);
+  --warn: oklch(0.8 0.14 78);
+  --warn-foreground: oklch(0.145 0 0);
+  --danger: oklch(0.7 0.18 24);
+  --danger-foreground: oklch(0.145 0 0);
+  --info: oklch(0.72 0.14 255);
+  --info-foreground: oklch(0.145 0 0);
+  --pending: oklch(0.8 0.13 76);
+  --pending-foreground: oklch(0.145 0 0);
+  --unknown: oklch(0.708 0 0);
+  --unknown-foreground: oklch(0.145 0 0);
+  --team-ct: oklch(0.72 0.13 250);
+  --team-t: oklch(0.76 0.15 58);
+
+  --chart-1: oklch(0.7 0.15 258);
+  --chart-2: oklch(0.72 0.14 165);
+  --chart-3: oklch(0.78 0.14 65);
+  --chart-4: oklch(0.7 0.17 305);
+  --chart-5: oklch(0.72 0.12 200);
+
+  --sidebar: oklch(0.165 0 0);
+  --sidebar-foreground: oklch(0.985 0 0);
+  --sidebar-primary: oklch(0.985 0 0);
+  --sidebar-primary-foreground: oklch(0.205 0 0);
+  --sidebar-accent: oklch(0.26 0 0);
+  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-border: oklch(1 0 0 / 11%);
+  --sidebar-ring: oklch(0.68 0.16 258);
 }
 
 @layer base {
@@ -126,5 +219,12 @@
   }
   html {
     @apply font-sans;
+  }
+  /*
+    Numbers that change in place — scores, ping, CPU, timers — must not make the
+    layout twitch on every poll.
+  */
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }

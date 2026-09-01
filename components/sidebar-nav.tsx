@@ -25,22 +25,37 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { usePanelInfo } from "@/components/panel-info";
+import { useSession } from "@/components/session-provider";
+import type { Role } from "@/lib/auth/permissions";
 
-const NAV = [
+/**
+ * `role` is the minimum needed to reach the page at all — the same bar the
+ * server enforces on the routes each page calls. A viewer shown a Console link
+ * would arrive at a page of 403s, so the entry is not drawn rather than being
+ * drawn and disabled.
+ */
+const NAV: Array<{
+  href: string;
+  label: string;
+  icon: typeof Gauge;
+  role: Role;
+}> = [
   // No Players entry: the roster lives on the Dashboard now, and a nav item
   // that bounces you somewhere else is worse than no nav item.
-  { href: "/dashboard", label: "Dashboard", icon: Gauge },
-  { href: "/match", label: "Match Control", icon: Trophy },
-  { href: "/maps", label: "Maps", icon: MapTrifold },
-  { href: "/console", label: "Console", icon: Terminal },
-  { href: "/config", label: "Config", icon: Sliders },
-  { href: "/history", label: "History", icon: ClockCounterClockwise },
-  { href: "/settings", label: "Settings", icon: Gear },
-] as const;
+  { href: "/dashboard", label: "Dashboard", icon: Gauge, role: "viewer" },
+  { href: "/match", label: "Match Control", icon: Trophy, role: "moderator" },
+  { href: "/maps", label: "Maps", icon: MapTrifold, role: "moderator" },
+  { href: "/console", label: "Console", icon: Terminal, role: "moderator" },
+  { href: "/config", label: "Config", icon: Sliders, role: "admin" },
+  { href: "/history", label: "History", icon: ClockCounterClockwise, role: "viewer" },
+  { href: "/settings", label: "Settings", icon: Gear, role: "viewer" },
+];
 
 export function SidebarNav() {
   const pathname = usePathname();
   const { apiMode, version } = usePanelInfo();
+  const { can } = useSession();
+  const nav = NAV.filter((item) => can(item.role));
 
   return (
     <Sidebar collapsible="icon">
@@ -65,7 +80,7 @@ export function SidebarNav() {
           </SidebarGroupLabel>
           <SidebarGroupContent className="text-sm">
             <SidebarMenu className="gap-1 group-data-[collapsible=icon]:gap-2">
-              {NAV.map((item) => {
+              {nav.map((item) => {
                 const active =
                   pathname === item.href || pathname.startsWith(item.href + "/");
                 const Icon = item.icon;

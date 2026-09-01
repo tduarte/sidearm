@@ -250,16 +250,19 @@ export function addChat(msg: Omit<ChatMessage, "id" | "ts">): ChatMessage {
   addConsole("info", "server", "Loading map de_mirage");
   addConsole("info", "engine", "tickrate 128 active");
   addConsole("info", "gc", "GameCoordinator connected");
-  addChat({
-    steamId: state.players[0].steamId,
-    name: state.players[0].name,
-    team: "CT",
-    message: "gl hf",
-  });
-  addChat({
-    steamId: state.players[5].steamId,
-    name: state.players[5].name,
-    team: "T",
-    message: "glhf",
-  });
+  /*
+    Indexed off whoever is actually in the roster, not off fixed slots. The
+    seed used to read `state.players[5]` directly; the mock roster churns, and
+    on a run where it started with fewer than six players this threw at module
+    scope — which meant *every* route in mock mode answered 500, not just chat.
+    A demo fixture must not be able to take the server down.
+  */
+  const ct = state.players.find((p) => p.team === "CT");
+  const t = state.players.find((p) => p.team === "T");
+  if (ct) {
+    addChat({ steamId: ct.steamId, name: ct.name, team: "CT", message: "gl hf" });
+  }
+  if (t) {
+    addChat({ steamId: t.steamId, name: t.name, team: "T", message: "glhf" });
+  }
 })();

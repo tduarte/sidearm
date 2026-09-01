@@ -1,12 +1,11 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
-  hashPassword,
   MIN_PASSWORD_LENGTH,
   validatePassword,
   validateUsername,
-  verifyPassword,
-} from "@/lib/auth/passwords";
+} from "@/lib/auth/credentials";
+import { hashPassword, verifyPassword } from "@/lib/auth/passwords";
 
 describe("password hashing", () => {
   it("round-trips a password", async () => {

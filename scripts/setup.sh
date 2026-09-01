@@ -103,6 +103,8 @@ PANEL_ADMIN_TOKEN="$(existing PANEL_ADMIN_TOKEN)"
 GSLT="$(existing GSLT)"
 SERVER_NAME="$(existing SERVER_NAME)"
 CS2_MAXPLAYERS="$(existing CS2_MAXPLAYERS)"
+CS2_GAMETYPE="$(existing CS2_GAMETYPE)"
+CS2_GAMEMODE="$(existing CS2_GAMEMODE)"
 
 [ -n "$RCON_PASSWORD" ]     || RCON_PASSWORD="$(random_hex)"
 [ -n "$LOG_INGEST_SECRET" ] || LOG_INGEST_SECRET="$(random_hex)"
@@ -121,17 +123,47 @@ say "Leave blank for LAN-only play."
 printf 'GSLT [%s]: ' "${GSLT:-none}"
 read -r reply; GSLT="${reply:-$GSLT}"
 
+# The slot ceiling, the game type and the game mode are not three independent
+# questions: picking Wingman settles all three. Asking for the mode and deriving
+# the rest is the difference between a setup someone can complete and one where
+# they guess 10 for a 5v5 and find GOTV has eaten a slot.
+#
+# These numbers are the same ones `lib/presets.ts` serves to the panel's Config
+# page. Keep the two in step.
 say
-say "Slot ceiling. GOTV takes one, so budget an extra: 11 fits a 5v5, 33 fits 32"
-say "players. It is a launch argument, so changing it later needs a container"
-say "recreate — set it to the largest roster you will ever want."
-printf 'CS2_MAXPLAYERS [%s]: ' "${CS2_MAXPLAYERS:-11}"
-read -r reply; CS2_MAXPLAYERS="${reply:-${CS2_MAXPLAYERS:-11}}"
+say "How will you mostly play? This sets the slot ceiling and the game mode."
+say "GOTV takes a slot, so each count below is already one more than the players."
+say
+say "  1) Competitive 5v5   11 slots"
+say "  2) Wingman 2v2        5 slots"
+say "  3) Deathmatch        25 slots"
+say "  4) Casual 10v10      21 slots"
+say "  5) Custom            enter your own slot count"
+say
+say "The slot ceiling is a launch argument: changing it later needs a container"
+say "recreate, so lean high if you are unsure."
+printf 'Preset [1]: '
+read -r reply
+case "${reply:-1}" in
+  2) CS2_MAXPLAYERS=5;  CS2_GAMETYPE=0; CS2_GAMEMODE=2 ;;
+  3) CS2_MAXPLAYERS=25; CS2_GAMETYPE=1; CS2_GAMEMODE=2 ;;
+  4) CS2_MAXPLAYERS=21; CS2_GAMETYPE=0; CS2_GAMEMODE=0 ;;
+  5)
+    printf 'CS2_MAXPLAYERS [%s]: ' "${CS2_MAXPLAYERS:-11}"
+    read -r reply; CS2_MAXPLAYERS="${reply:-${CS2_MAXPLAYERS:-11}}"
+    CS2_GAMETYPE="${CS2_GAMETYPE:-0}"; CS2_GAMEMODE="${CS2_GAMEMODE:-1}"
+    ;;
+  # Default, and what an unattended run gets: the same 11/0/1 as .env.example.
+  *) CS2_MAXPLAYERS=11; CS2_GAMETYPE=0; CS2_GAMEMODE=1 ;;
+esac
 
 say
-say "The panel has no login by default, which is fine on a trusted LAN."
-say "A token requires it on every request; the UI asks once and remembers."
-printf 'Require a token to open the panel? [y/N] '
+say "The panel asks you to create an admin account the first time you open it,"
+say "and everything behind that account needs a login. A token here is a second,"
+say "optional lock: it is required to register that first account, and works as"
+say "a break-glass credential for scripts. Say yes if the panel is reachable"
+say "from outside your network."
+printf 'Also set an admin token? [y/N] '
 read -r reply
 case "$reply" in
   y|Y) [ -n "$PANEL_ADMIN_TOKEN" ] || PANEL_ADMIN_TOKEN="$(random_hex)" ;;
@@ -173,6 +205,8 @@ set_var PANEL_ADMIN_TOKEN "$PANEL_ADMIN_TOKEN"
 set_var GSLT              "$GSLT"
 set_var SERVER_NAME       "$SERVER_NAME"
 set_var CS2_MAXPLAYERS    "$CS2_MAXPLAYERS"
+set_var CS2_GAMETYPE      "$CS2_GAMETYPE"
+set_var CS2_GAMEMODE      "$CS2_GAMEMODE"
 chmod 600 "$ENV_FILE"
 
 say

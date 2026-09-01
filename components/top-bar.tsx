@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import {
   ArrowsClockwise,
   CloudArrowDown,
+  MagnifyingGlass,
   Play,
   Stop,
   UsersThree,
@@ -17,6 +18,8 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { StatusPill } from "@/components/status-pill";
 import { formatEta, gb } from "@/components/update-progress-card";
 import { DangerConfirm } from "@/components/danger-confirm";
+import { openCommandPalette } from "@/components/command-palette";
+import { useCan } from "@/components/session-provider";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { useUpdateStatus } from "@/lib/hooks/use-update-status";
 import { api } from "@/lib/api/client";
@@ -31,6 +34,9 @@ export function TopBar() {
   const { data: status, isPending } = useServerStatus();
   const { data: update } = useUpdateStatus();
   const qc = useQueryClient();
+  // Every lifecycle route is admin-only, so for anyone else these buttons are
+  // a row of 403s waiting to happen.
+  const canControl = useCan("admin");
 
   // `meta.action` names the action in the global failure toast
   // (components/providers.tsx). Every mutation carries one.
@@ -97,7 +103,7 @@ export function TopBar() {
               className="hidden items-center gap-1.5 text-xs text-muted-foreground tabular-nums sm:inline-flex"
               title={describePendingOp(lifecyclePending).detail}
             >
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
+              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-pending" />
               {describePendingOp(lifecyclePending).label} ·{" "}
               {formatElapsed(elapsedSec)}
             </span>
@@ -145,7 +151,25 @@ export function TopBar() {
           )}
 
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            {updateAvailable && (
+            {/*
+              The palette is the fastest path to everything here, and a
+              keyboard shortcut nobody has been told about may as well not
+              exist. Doubles as the search affordance on a phone, where the
+              shortcut cannot be typed at all.
+            */}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={openCommandPalette}
+              className="gap-2 text-muted-foreground"
+              aria-label="Open the command palette"
+            >
+              <MagnifyingGlass className="h-4 w-4" />
+              <kbd className="hidden font-sans text-[0.6875rem] tracking-wide sm:inline">
+                ⌘K
+              </kbd>
+            </Button>
+            {canControl && updateAvailable && (
               <DangerConfirm
                 title="Apply the CS2 update now?"
                 consequence="Applying the update restarts the container, so everyone connected is dropped. The server downloads the new build on boot, which can take a while."
@@ -161,7 +185,7 @@ export function TopBar() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="border-sky-500/30 bg-sky-500/10 text-sky-400 hover:bg-sky-500/20 hover:text-sky-300"
+                    className="border-info/30 bg-info/10 text-info hover:bg-info/20"
                     onClick={arm}
                     disabled={applyUpdate.isPending}
                     aria-label="Update available"
@@ -172,7 +196,7 @@ export function TopBar() {
                 )}
               </DangerConfirm>
             )}
-            {status.state === "running" ? (
+            {!canControl ? null : status.state === "running" ? (
               <>
                 <DangerConfirm
                   title="Restart the server?"

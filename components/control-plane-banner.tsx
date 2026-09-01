@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import {
   Plugs,
   PlugsConnected,
@@ -7,6 +8,7 @@ import {
   Terminal,
 } from "@phosphor-icons/react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useCan } from "@/components/session-provider";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
 import { describePluginFailure } from "@/lib/cs2/plugins";
 import type { ServerStatus } from "@/lib/api/types";
@@ -46,6 +48,7 @@ export function isUnprotected(status: ServerStatus): boolean {
  */
 export function ControlPlaneBanner() {
   const { data: status } = useServerStatus();
+  const canReadConsole = useCan("moderator");
   if (!status) return null;
 
   const { docker, rcon } = status.control;
@@ -91,8 +94,20 @@ export function ControlPlaneBanner() {
           <AlertDescription>
             The container is up but the game server is not responding, so the
             roster, map changes and every match control are unavailable. If the
-            server was just restarted this clears on its own; if it persists,
-            the console and container logs are the place to look.
+            server was just restarted this clears on its own; if it persists,{" "}
+            {/*
+              The banner names the console as the place to look and, until now,
+              made you find it yourself. Moderators and up only — a viewer
+              cannot open the console.
+            */}
+            {canReadConsole ? (
+              <Link href="/console" className="font-medium underline">
+                the console
+              </Link>
+            ) : (
+              "the console"
+            )}{" "}
+            and the container logs are the place to look.
           </AlertDescription>
         </Alert>
       )}
