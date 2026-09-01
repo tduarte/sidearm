@@ -100,23 +100,44 @@ export default function DashboardPage() {
         <UpdateProgressCard progress={status.updateProgress ?? null} />
       )}
 
-      {/* Hero */}
+      {/*
+        Hero.
+
+        From `sm` up the top bar already carries the status pill, the hostname
+        and the map, forty pixels above this card. Repeating them here spent
+        the entire first viewport saying "Running / sidearm / de_mirage" twice
+        and reaching no telemetry at all. So the identity strip renders only
+        below `sm`, where the top bar drops it, and from `sm` up this card is
+        the one thing the header cannot hold: the address you paste to join.
+      */}
       <Card>
         <CardContent className="p-6 max-sm:pr-8">
           <div className="flex flex-col gap-3">
-            <div className="flex flex-wrap items-center gap-3">
-              <StatusPill state={status.state} />
-              <Badge variant="secondary">{status.gameMode}</Badge>
-              <VacBadge secure={status.vacSecure} />
-            </div>
-            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              <div className="min-w-0 shrink">
+            <div className="flex flex-col gap-3 sm:hidden">
+              <div className="flex flex-wrap items-center gap-3">
+                <StatusPill state={status.state} />
+                <Badge variant="secondary">{status.gameMode}</Badge>
+                <VacBadge secure={status.vacSecure} />
+              </div>
+              <div className="min-w-0">
                 <p className="truncate text-sm text-muted-foreground" title={status.hostname}>
                   {status.hostname}
                 </p>
                 <h1 className="min-w-0 truncate font-mono text-2xl font-semibold tracking-tight">
                   {status.map}
                 </h1>
+              </div>
+            </div>
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              {/*
+                Only one of the two headings is ever in the accessibility tree:
+                `hidden` is display:none, so the map above is the h1 on a phone
+                and this is the h1 everywhere else.
+              */}
+              <div className="hidden min-w-0 shrink flex-wrap items-center gap-2 sm:flex">
+                <h1 className="text-sm font-medium">Connect</h1>
+                <Badge variant="secondary">{status.gameMode}</Badge>
+                <VacBadge secure={status.vacSecure} />
               </div>
               <div className="flex w-full min-w-0 justify-stretch sm:w-auto sm:shrink-0 sm:justify-end">
                 <InputGroup className="h-9 w-full min-w-0 max-w-full sm:w-max">
@@ -247,10 +268,11 @@ export default function DashboardPage() {
         </CardContent>
       </Card>
 
-      {/* The roster, absorbed from /players — see components/players/roster.tsx */}
-      <Roster />
-
-      {/* Stats */}
+      {/*
+        Stats sit above the roster: a ten-row table pushed CPU and memory three
+        scrolls down, so the page answered "who is on" long before "is this
+        machine coping", which is the question the tiles exist for.
+      */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 [&>*]:min-h-0">
         {/*
           The Players tile used to embed a second, smaller roster table — a
@@ -287,6 +309,9 @@ export default function DashboardPage() {
           honest can fill it, so it is gone rather than faked.
         */}
       </div>
+
+      {/* The roster, absorbed from /players — see components/players/roster.tsx */}
+      <Roster />
     </div>
   );
 }

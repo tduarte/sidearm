@@ -248,7 +248,7 @@ function ConfigForm({ initial }: { initial: FormValues }) {
               switch modes from Match Control if you want it applied now.
             </CardDescription>
           </CardHeader>
-          <CardContent className="grid gap-4 md:grid-cols-2">
+          <CardContent className="grid items-start gap-4 md:grid-cols-2">
             <FormField
               control={form.control}
               name="gameplay.mode"
@@ -355,7 +355,7 @@ function ConfigForm({ initial }: { initial: FormValues }) {
                 </FormItem>
               )}
             />
-            <div className="grid gap-4 md:grid-cols-2">
+            <div className="grid items-start gap-4 md:grid-cols-2">
               <FormField
                 control={form.control}
                 name="gameplay.botQuota"

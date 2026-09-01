@@ -170,6 +170,20 @@ export function ActionBar() {
 
   const paused = match?.pause === "paused";
   const pausePending = pause.isPending || match?.pause === "pause_requested";
+  /*
+    `mp_pause_match` does nothing outside a live round, so offering Pause
+    against a match whose own badge reads "Ended" is a button that reports
+    success and changes nothing. Warmup counts: a pause there holds the freeze
+    time, which is exactly what you want while someone reconnects.
+  */
+  const canPause = match?.phase === "live" || match?.phase === "warmup";
+  /*
+    The same reason the header disables Restart (components/top-bar.tsx): with
+    the Docker socket proxy down the panel cannot touch the container at all,
+    and this is the one surface where the whole point is that the control works
+    when you reach for it.
+  */
+  const dockerDown = status ? !status.control.docker : false;
 
   return (
     <>
@@ -186,6 +200,7 @@ export function ActionBar() {
             label={paused ? "Resume" : "Pause"}
             icon={paused ? Play : Pause}
             pending={pausePending}
+            disabled={!canPause && !paused}
             onClick={() => pause.mutate(paused ? "unpause" : "pause")}
           />
           <BarButton
@@ -330,7 +345,12 @@ export function ActionBar() {
             </SheetDescription>
           </SheetHeader>
           <div className="flex flex-col gap-2 px-4 pb-6">
-            {canAdmin ? (
+            {canAdmin && dockerDown ? (
+              <p className="py-4 text-sm text-muted-foreground">
+                The Docker socket proxy is unreachable, so the panel cannot
+                restart the container. RCON, chat and the console still work.
+              </p>
+            ) : canAdmin ? (
               <DangerConfirm
                 title="Restart the server?"
                 consequence="Everyone is disconnected and the match in progress is lost."

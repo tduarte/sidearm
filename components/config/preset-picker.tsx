@@ -184,8 +184,17 @@ export function PresetPicker({
                   </Badge>
                 </span>
                 <span className="text-xs text-muted-foreground">{p.tagline}</span>
+                {/*
+                  The two numbers are different things and the card used to
+                  print only the larger one: `CS2_MAXPLAYERS` is the launch
+                  ceiling, which includes GOTV's slot, so a 2v2 advertised
+                  itself as "5 slots". Say what people get, then what the
+                  container needs — and read GOTV from the preset rather than
+                  asserting it in a string that cannot go stale honestly.
+                */}
                 <span className="mt-1 font-mono text-[0.6875rem] text-muted-foreground">
-                  {p.boot.CS2_MAXPLAYERS} slots · GOTV on
+                  {p.live.visibleMaxPlayers} players · {p.boot.CS2_MAXPLAYERS}{" "}
+                  slots{p.boot.TV_ENABLE ? " with GOTV" : ""}
                 </span>
               </button>
             );

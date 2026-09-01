@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import {
   PaperPlaneRight,
-  Broom,
+  ArrowLineUp,
   PushPin,
   PushPinSlash,
 } from "@phosphor-icons/react";
@@ -132,10 +132,14 @@ export function ConsolePane() {
             onClick={() => setAutoscrollOverride(!autoscroll)}
             title={autoscroll ? "Pause autoscroll" : "Resume autoscroll"}
           >
+            {/*
+              Pinned means following. These were the other way round, so the
+              only indicator of whether the log was live read as its opposite.
+            */}
             {autoscroll ? (
-              <PushPinSlash className="h-4 w-4" />
+              <PushPin className="h-4 w-4" weight="fill" />
             ) : (
-              <PushPin className="h-4 w-4" />
+              <PushPinSlash className="h-4 w-4" />
             )}
             {autoscroll ? "Follow" : "Paused"}
           </Button>
@@ -144,7 +148,7 @@ export function ConsolePane() {
             variant="ghost"
             onClick={() => viewportRef.current?.scrollTo({ top: 0 })}
           >
-            <Broom className="h-4 w-4" />
+            <ArrowLineUp className="h-4 w-4" />
             Top
           </Button>
         </div>

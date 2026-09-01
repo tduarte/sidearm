@@ -104,7 +104,8 @@ Constraints:
   category's default costume, and it made a tool people trust with a live match look like a
   skin. The commitment now is *the category standard, played straight*: a quiet neutral
   admin dashboard, both themes real, a high-contrast neutral primary, and colour spent only
-  where it carries state — with the Vercel dashboard as the craft bar. Semantic tokens
+  where it carries state — with the Vercel dashboard as the craft bar. This is the
+  standing exit, taken over the assigned direction at seed key `1acf5420`. Semantic tokens
   (`--ok`, `--warn`, `--danger`, `--info`, `--pending`, `--unknown`, `--team-ct`,
   `--team-t`) exist so "running" is one green everywhere instead of a hand-picked emerald
   per component. Geist Sans for everything; Geist Mono only for machine text — commands,
