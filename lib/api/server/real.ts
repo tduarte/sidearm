@@ -130,6 +130,7 @@ global.__cs2Cache ??= {
     score: { ct: 0, t: 0 },
     round: 0,
     maxRounds: null,
+    overtime: null,
     pause: "unknown",
     demo: { state: "unknown", name: null },
     knifeSetupApplied: false,
@@ -482,7 +483,7 @@ function applyMatchZyState(get5: Get5Status | null): void {
 export function updateCache(
   status: ServerStatus,
   players: Player[] | null,
-  cvars?: { maxRounds: number | null },
+  cvars?: { maxRounds: number | null; overtime?: boolean | null },
   get5?: Get5Status | null,
   /**
    * The demo GOTV says it is writing, from `status`. Omitted by callers that
@@ -498,6 +499,7 @@ export function updateCache(
   // Only overwrite when the server actually answered: a dropped RCON tick must
   // not wipe a known match length back to unknown.
   if (cvars?.maxRounds != null) cache().match.maxRounds = cvars.maxRounds;
+  if (cvars?.overtime != null) cache().match.overtime = cvars.overtime;
 
   /*
     The demo, read rather than remembered.

@@ -374,7 +374,7 @@ export function parseGameMode(text: string): GameMode {
 export async function fetchStatus(): Promise<{
   status: ServerStatus;
   /** Cvars read alongside the status poll; see `lib/cs2/cvars.ts`. */
-  cvars: { maxRounds: number | null };
+  cvars: { maxRounds: number | null; overtime: boolean | null };
   /**
    * The container's `StartedAt`. A change means the game server is a NEW
    * process, which has lost every piece of state the panel set on it.
@@ -406,7 +406,7 @@ export async function fetchStatus(): Promise<{
       // Batched into the round-trip the poll already spends on game mode, so
       // reading mp_maxrounds costs nothing. It was previously the hardcoded
       // constant 24 in the match cache.
-      rconExec("game_type; game_mode; mp_maxrounds"),
+      rconExec("game_type; game_mode; mp_maxrounds; mp_overtime_enable"),
       containerStats("cs2"),
       inspectContainer("cs2"),
       getPublicIp(),
@@ -529,11 +529,20 @@ export async function fetchStatus(): Promise<{
   };
 
   const cvarText = gameModeOut.status === "fulfilled" ? gameModeOut.value : "";
-  const maxRounds = asInt(parseCvarEcho(cvarText).values.get("mp_maxrounds"));
+  const cvarValues = parseCvarEcho(cvarText).values;
+  const maxRounds = asInt(cvarValues.get("mp_maxrounds"));
+  /*
+    `null` when the echo did not come back, never `false`. The dashboard offers
+    overtime as an editable value, and an unread cvar rendered as "off" would
+    invite someone to turn on something that was already on — and, worse, make
+    a save look like it did nothing.
+  */
+  const raw = cvarValues.get("mp_overtime_enable");
+  const overtime = raw === undefined || raw === null ? null : raw === "1" || raw === "true";
 
   return {
     status,
-    cvars: { maxRounds },
+    cvars: { maxRounds, overtime },
     startedAt: containerState?.StartedAt ?? null,
     // `null` when RCON did not answer at all, so callers can tell "not
     // recording" from "did not ask".

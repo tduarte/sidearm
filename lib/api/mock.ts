@@ -110,6 +110,7 @@ const initialMockState = {
     score: { ct: 7, t: 5 },
     round: 13,
     maxRounds: 24,
+    overtime: true,
     pause: "running",
     demo: { state: "recording", name: "sidearm_de_mirage_mock" },
     knifeSetupApplied: false,

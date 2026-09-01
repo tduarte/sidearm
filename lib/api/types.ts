@@ -219,6 +219,13 @@ export interface MatchState {
    */
   maxRounds: number | null;
   /**
+   * From `mp_overtime_enable`, read on the same poll. `null` when the echo did
+   * not come back — never `false`, because the dashboard offers this as an
+   * editable value and an unread cvar shown as "off" invites someone to turn
+   * on what is already on and then wonder why saving changed nothing.
+   */
+  overtime: boolean | null;
+  /**
    * CS2 has no `mp_paused` cvar and `status` carries no pause column, so this
    * cannot be read back. It is also not instantaneous: `mp_pause_match` takes
    * effect at the END of the current round, so even an optimistic flip is
