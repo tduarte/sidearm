@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { SidebarNav } from "@/components/sidebar-nav";
 import { TopBar } from "@/components/top-bar";
@@ -8,6 +9,17 @@ import { CommandPalette } from "@/components/command-palette";
 import { ActionBar } from "@/components/action-bar";
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  /*
+   * The design explorations under `/design` render without the shell.
+   *
+   * Their whole point is that each one is a different world — a different
+   * navigation model, type ramp and colour system. Framing all five in this
+   * sidebar would make them five themes of the same page, which is exactly the
+   * thing they exist to get past.
+   */
+  const pathname = usePathname();
+  if (pathname?.startsWith("/design")) return <>{children}</>;
+
   return (
     <SidebarProvider>
       <SidebarNav />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
 import { Crosshair, Lock, SpinnerGap, UserPlus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,10 +22,15 @@ type Screen = "checking" | "ready" | "register" | "login";
  * it lasts longest.
  */
 export function AuthGate({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+  // The design explorations read fixture data and touch no API, so gating them
+  // behind a login would only ever stop someone looking at a picture.
+  const isDesign = pathname?.startsWith("/design") ?? false;
   const [screen, setScreen] = useState<Screen>("checking");
   const [tokenConfigured, setTokenConfigured] = useState(false);
 
   useEffect(() => {
+    if (isDesign) return;
     let cancelled = false;
     (async () => {
       try {
@@ -49,8 +55,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [isDesign]);
 
+  if (isDesign) return <>{children}</>;
   if (screen === "checking") return <GateSplash />;
   if (screen === "ready") return <>{children}</>;
 
