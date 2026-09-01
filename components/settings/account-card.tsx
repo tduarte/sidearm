@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { SignOut, UserCircle } from "@phosphor-icons/react";
+import { SignIn, SignOut, UserCircle } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,6 +19,8 @@ export function AccountCard() {
   const { user, role, source } = useSession();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
 
   const logout = useMutation({
     mutationFn: () => api.logout(),
@@ -27,6 +29,23 @@ export function AccountCard() {
       toast.success("Signed out");
       // A full reload is the honest way back to the gate: AuthGate decides at
       // mount, so re-rendering in place would leave the panel open.
+      window.location.reload();
+    },
+  });
+
+  /**
+   * Signing in from inside the panel.
+   *
+   * `AuthGate` only offers a login form to a browser with no identity at all,
+   * so a device inside `PANEL_TRUSTED_CIDRS` gets viewer access and no way to
+   * become anything else — it is already "in", and every route that needed
+   * more just answered 403 with no explanation. This is that missing door.
+   */
+  const login = useMutation({
+    mutationFn: () => api.login(username.trim(), password),
+    meta: { action: "Signing in" },
+    onSuccess: () => {
+      // Same reason as signing out: the gate and the nav both decide at mount.
       window.location.reload();
     },
   });
@@ -82,6 +101,47 @@ export function AccountCard() {
             the break-glass credential. It has no account, so there is no password to
             change here.
           </p>
+        )}
+
+        {!user && (
+          <form
+            className="space-y-3 border-t pt-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              login.mutate();
+            }}
+          >
+            <p className="font-medium">Sign in</p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <Label htmlFor="signin-username">Username</Label>
+                <Input
+                  id="signin-username"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="signin-password">Password</Label>
+                <Input
+                  id="signin-password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                />
+              </div>
+            </div>
+            <Button
+              type="submit"
+              size="sm"
+              disabled={login.isPending || !username.trim() || !password}
+            >
+              <SignIn className="h-4 w-4" />
+              {login.isPending ? "Signing in…" : "Sign in"}
+            </Button>
+          </form>
         )}
 
         {user && (
