@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import {
   ArrowClockwise,
   Play,
+  Prohibit,
   Trash,
   Warning,
 } from "@phosphor-icons/react";
@@ -37,8 +38,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DangerConfirm } from "@/components/danger-confirm";
-import { TeamBuilder, type TeamEntry } from "@/components/match/team-builder";
+import { TeamBuilder } from "@/components/match/team-builder";
+import { CaptainDraft } from "@/components/match/captain-draft";
+import { MapVeto } from "@/components/match/map-veto";
+import {
+  assignPlayer,
+  emptyDraft,
+  releasePlayer,
+  teamMembers,
+  undrafted,
+  type DraftState,
+} from "@/lib/match/draft";
+import { startVeto, type VetoState } from "@/lib/match/veto";
 import { api } from "@/lib/api/client";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
@@ -46,9 +59,6 @@ import { isConvertibleSteamId } from "@/lib/cs2/steamid";
 import { MapPoolPicker } from "@/components/match/map-pool-picker";
 import type { MatchDefinition } from "@/lib/cs2/match-config";
 import type { StoredMatchConfig } from "@/lib/db/match-configs";
-
-/** A player on a roster, before we know whether they are on the server now. */
-type RosterMember = { id: string; name: string };
 
 export function MatchSetup() {
   const qc = useQueryClient();
@@ -68,12 +78,23 @@ export function MatchSetup() {
   const [name, setName] = useState("");
   const [team1, setTeam1] = useState("Team A");
   const [team2, setTeam2] = useState("Team B");
-  const [roster1, setRoster1] = useState<RosterMember[]>([]);
-  const [roster2, setRoster2] = useState<RosterMember[]>([]);
+  /**
+   * One roster state, two ways to fill it.
+   *
+   * The draft and the manual arrows both write here — see
+   * `lib/match/draft.ts`. Keeping a separate list per surface would mean two
+   * rosters to hold in step, and the one that lost the race is the one MatchZy
+   * would be handed.
+   */
+  const [draft, setDraft] = useState<DraftState>(emptyDraft());
+  /** Names for players who are not connected, which a saved setup carries. */
+  const [savedNames, setSavedNames] = useState<Record<string, string>>({});
+  const [teamMode, setTeamMode] = useState<"draft" | "manual">("draft");
   const [maps, setMaps] = useState<string[]>([]);
   const [numMaps, setNumMaps] = useState(1);
   const [skipVeto, setSkipVeto] = useState(true);
   const [clinch, setClinch] = useState(true);
+  const [veto, setVeto] = useState<VetoState | null>(null);
 
   const mapList = useQuery({
     queryKey: ["maps"],
@@ -82,6 +103,10 @@ export function MatchSetup() {
   });
 
   const allMaps = useMemo(() => mapList.data?.all ?? [], [mapList.data]);
+  const mapEntries = useMemo(
+    () => new Map(allMaps.map((m) => [m.name, m])),
+    [allMaps],
+  );
 
   // Newest first — the one you ran last is the one you most likely want again.
   const templates = useMemo(
@@ -97,8 +122,22 @@ export function MatchSetup() {
     setName(d.id);
     setTeam1(d.team1.name);
     setTeam2(d.team2.name);
-    setRoster1(d.team1.players.map((p) => ({ id: p.steamId, name: p.name })));
-    setRoster2(d.team2.players.map((p) => ({ id: p.steamId, name: p.name })));
+    // Rebuilt through `assignPlayer`, so the first name on each side becomes
+    // that side's captain and the draft can carry straight on from a template.
+    let next = emptyDraft();
+    const names: Record<string, string> = {};
+    for (const [side, team] of [
+      ["team1", d.team1],
+      ["team2", d.team2],
+    ] as const) {
+      for (const p of team.players) {
+        next = assignPlayer(next, p.steamId, side);
+        names[p.steamId] = p.name;
+      }
+    }
+    setDraft(next);
+    setSavedNames(names);
+    setVeto(null);
     setMaps(d.maps);
     setNumMaps(d.numMaps);
     setSkipVeto(d.skipVeto);
@@ -129,30 +168,28 @@ export function MatchSetup() {
     () => new Set(eligible.map((p) => p.steamId)),
     [eligible],
   );
-  const rostered = useMemo(
-    () => new Set([...roster1, ...roster2].map((p) => p.id)),
-    [roster1, roster2],
-  );
+
+  // A connected player's current name wins over the one a template stored:
+  // people rename themselves, and the roster should say who is on the server.
+  const nameOf = useMemo(() => {
+    const index: Record<string, string> = { ...savedNames };
+    for (const p of eligible) index[p.steamId] = p.name;
+    return (id: string) => index[id] ?? id;
+  }, [savedNames, eligible]);
+
+  const roster1 = useMemo(() => teamMembers(draft, "team1"), [draft]);
+  const roster2 = useMemo(() => teamMembers(draft, "team2"), [draft]);
   const pool = useMemo(
-    () =>
-      eligible
-        .filter((p) => !rostered.has(p.steamId))
-        .map((p) => ({ id: p.steamId, name: p.name })),
-    [eligible, rostered],
+    () => undrafted(draft, eligible.map((p) => p.steamId)),
+    [draft, eligible],
   );
 
-  const withPresence = (r: RosterMember[]): TeamEntry[] =>
-    r.map((p) => ({ ...p, connected: connectedIds.has(p.id) }));
+  const withPresence = (ids: string[]) =>
+    ids.map((id) => ({ id, name: nameOf(id), connected: connectedIds.has(id) }));
 
-  const assign = (id: string, side: "team1" | "team2") => {
-    const member = pool.find((p) => p.id === id);
-    if (!member) return;
-    (side === "team1" ? setRoster1 : setRoster2)((prev) => [...prev, member]);
-  };
-  const unassign = (id: string) => {
-    setRoster1((prev) => prev.filter((p) => p.id !== id));
-    setRoster2((prev) => prev.filter((p) => p.id !== id));
-  };
+  const assign = (id: string, side: "team1" | "team2") =>
+    setDraft((d) => assignPlayer(d, id, side));
+  const unassign = (id: string) => setDraft((d) => releasePlayer(d, id));
 
   const definition = (): MatchDefinition => ({
     id: name.trim(),
@@ -161,11 +198,11 @@ export function MatchSetup() {
     matchNumber: 0,
     team1: {
       name: team1,
-      players: roster1.map((p) => ({ steamId: p.id, name: p.name })),
+      players: roster1.map((id) => ({ steamId: id, name: nameOf(id) })),
     },
     team2: {
       name: team2,
-      players: roster2.map((p) => ({ steamId: p.id, name: p.name })),
+      players: roster2.map((id) => ({ steamId: id, name: nameOf(id) })),
     },
     maps,
     numMaps,
@@ -263,6 +300,7 @@ export function MatchSetup() {
   }
 
   const startable = name.trim() !== "" && maps.length > 0;
+  const canVeto = maps.length > numMaps;
   const vetoIsPointless =
     !skipVeto && maps.length === numMaps && maps.length > 0;
 
@@ -348,13 +386,25 @@ export function MatchSetup() {
         </div>
 
         <div className="space-y-2">
-          <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="flex flex-wrap items-center justify-between gap-2">
             <Label className="text-xs uppercase tracking-wide text-muted-foreground">
               Teams
             </Label>
-            <p className="text-xs text-muted-foreground">
-              Arrows put a player on a team; click a name to take them off.
-            </p>
+            {/*
+              Two ways to fill the same roster. Drafting is how a night with
+              ten people actually starts; assigning by hand is how you fix it
+              afterwards, or set up teams that are already decided.
+            */}
+            <ToggleGroup
+              type="single"
+              size="sm"
+              variant="outline"
+              value={teamMode}
+              onValueChange={(v) => v && setTeamMode(v as "draft" | "manual")}
+            >
+              <ToggleGroupItem value="draft">Draft</ToggleGroupItem>
+              <ToggleGroupItem value="manual">Assign</ToggleGroupItem>
+            </ToggleGroup>
           </div>
           {players.length === 0 && roster1.length + roster2.length === 0 ? (
             <p className="border border-dashed px-3 py-4 text-sm text-muted-foreground">
@@ -363,9 +413,20 @@ export function MatchSetup() {
               its roster, and MatchZy puts each player on their team as they
               join.
             </p>
+          ) : teamMode === "draft" ? (
+            <CaptainDraft
+              state={draft}
+              onChange={setDraft}
+              pool={pool}
+              nameOf={nameOf}
+              team1Name={team1}
+              team2Name={team2}
+              onTeam1Name={setTeam1}
+              onTeam2Name={setTeam2}
+            />
           ) : (
             <TeamBuilder
-              pool={pool}
+              pool={pool.map((id) => ({ id, name: nameOf(id) }))}
               team1={withPresence(roster1)}
               team2={withPresence(roster2)}
               team1Name={team1}
@@ -385,14 +446,41 @@ export function MatchSetup() {
           )}
         </div>
 
-        <MapPoolPicker
-          maps={allMaps}
-          picked={maps}
-          onChange={setMaps}
-          skipVeto={skipVeto}
-          onSkipVetoChange={setSkipVeto}
-          numMaps={numMaps}
-        />
+        {/*
+          The pool and the veto are the same area, never both at once: a veto
+          runs against a snapshot of the pool, and letting the pool be edited
+          underneath it is how you end up banning a map that is no longer in
+          the list.
+        */}
+        {veto ? (
+          <MapVeto
+            state={veto}
+            onChange={setVeto}
+            entries={mapEntries}
+            team1Name={team1}
+            team2Name={team2}
+            onCancel={() => setVeto(null)}
+            onCommit={(result) => {
+              setMaps(result);
+              // The veto has already chosen the order, so MatchZy must not
+              // hold a second one — it would ban maps out of a three-map pool.
+              setSkipVeto(true);
+              setVeto(null);
+              toast.success("Veto done", {
+                description: result.join(" → "),
+              });
+            }}
+          />
+        ) : (
+          <MapPoolPicker
+            maps={allMaps}
+            picked={maps}
+            onChange={setMaps}
+            skipVeto={skipVeto}
+            onSkipVetoChange={setSkipVeto}
+            numMaps={numMaps}
+          />
+        )}
 
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="space-y-1.5">
@@ -444,6 +532,28 @@ export function MatchSetup() {
             {numMaps} leaves nothing to veto, so MatchZy will skip it anyway.
             Add more maps to hold a veto.
           </p>
+        )}
+
+        {/*
+          Running the veto here rather than in chat. MatchZy's own veto works,
+          but it happens in the in-game console where only the captains can act
+          and nobody can see the state — and the result of this one is handed
+          over as a finished ordered list, so the plugin does not hold a second.
+        */}
+        {!veto && canVeto && (
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setVeto(startVeto(maps, numMaps))}
+            >
+              <Prohibit className="h-4 w-4" />
+              Run the veto here
+            </Button>
+            <p className="text-xs text-muted-foreground">
+              {maps.length} maps down to {numMaps}, captains taking turns. The
+              result replaces the pool, in order.
+            </p>
+          </div>
         )}
 
         <div className="flex flex-wrap items-center gap-2">
