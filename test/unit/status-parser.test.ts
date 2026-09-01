@@ -534,13 +534,58 @@ describe("updateCache — pause across a map change", () => {
     assert.equal(getMatchState().pause, "running");
   });
 
-  it("drops demo state to unknown rather than asserting it", () => {
-    // GOTV stops recording at a level change, but whether it restarted is not
-    // something the panel can see — so it says so instead of guessing.
-    updateCache(at("de_dust2"), []);
-    updateMatchState({ demo: { state: "recording", name: "x" } });
+  it("reads the demo from status instead of inferring it", () => {
+    /*
+     * This used to drop to "unknown" at a level change, because the panel only
+     * knew what it had asked for itself. `status` prints `Now recording to
+     * "<file>"` the whole time GOTV is writing one, so there is nothing to
+     * infer — which is what makes a demo MatchZy started visible at all.
+     */
+    updateCache(at("de_dust2"), [], undefined, undefined, "MatchZy/live.dem");
+    assert.deepEqual(getMatchState().demo, {
+      state: "recording",
+      name: "MatchZy/live.dem",
+    });
+
+    updateCache(at("de_nuke"), [], undefined, undefined, null);
+    assert.deepEqual(getMatchState().demo, { state: "idle", name: null });
+  });
+
+  it("leaves the demo alone when nobody looked", () => {
+    // `undefined` is "did not ask", which is not evidence that it stopped.
+    updateCache(at("de_nuke"), [], undefined, undefined, "MatchZy/live.dem");
     updateCache(at("de_nuke"), []);
-    assert.equal(getMatchState().demo.state, "unknown");
+    assert.equal(getMatchState().demo.state, "recording");
+  });
+
+  it("resets the score and round when the level changes", () => {
+    // The phantom match: score and round only ever accumulate from the log
+    // stream, so they survived a map change and the dashboard announced a live
+    // 2-3 in round 5 on a map nobody had played a round on.
+    updateCache(at("de_nuke"), []);
+    updateMatchState({ score: { ct: 2, t: 3 }, round: 5, phase: "live" });
+    updateCache(at("de_ancient"), []);
+    const m = getMatchState();
+    assert.deepEqual(m.score, { ct: 0, t: 0 });
+    assert.equal(m.round, 0);
+    assert.equal(m.phase, "warmup");
+  });
+
+  it("resets to 0-0 once the server is observed empty", () => {
+    // A match is the state of the map you are on, so an empty server is 0-0.
+    updateCache(at("de_ancient"), []);
+    updateMatchState({ score: { ct: 7, t: 5 }, round: 12, phase: "live" });
+    updateCache(at("de_ancient"), []);
+    assert.deepEqual(getMatchState().score, { ct: 0, t: 0 });
+  });
+
+  it("never reads a silent RCON tick as an empty server", () => {
+    // `players: null` means the poll failed. Treating that as "everyone left"
+    // would wipe the score of a match still being played.
+    updateCache(at("de_ancient"), []);
+    updateMatchState({ score: { ct: 9, t: 4 }, round: 13, phase: "live" });
+    updateCache(at("de_ancient"), null);
+    assert.deepEqual(getMatchState().score, { ct: 9, t: 4 });
   });
 
   it("leaves state alone while the map is unchanged", () => {

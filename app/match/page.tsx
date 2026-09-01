@@ -14,32 +14,9 @@ import { ModeSections } from "@/components/match/mode-sections";
 import { RoundBackups } from "@/components/match/round-backups";
 import { ScoreboardHero, StatusStrip } from "@/components/match/scoreboard";
 import { useMatchState } from "@/lib/hooks/use-match-state";
-import type { MatchState } from "@/lib/api/types";
+import { useServerStatus } from "@/lib/hooks/use-server-status";
+import { matchUnderway } from "@/lib/match/underway";
 
-/**
- * Is a match actually being played right now?
- *
- * Deliberately NOT `phase === "live"`. This server is up essentially all the
- * time and vanilla `phase` reports live with nobody connected, so treating it
- * as evidence would hide the setup form almost permanently.
- *
- * MatchZy's own gamestate is the only trustworthy signal, and only past the
- * point where the teams have readied up: a loaded config sitting in
- * `warmup` or `waiting_for_players` is the setup still resolving, and that is
- * exactly when you are most likely to want to change it.
- */
-function matchUnderway(match: MatchState): boolean {
-  switch (match.matchzyState) {
-    case "knife":
-    case "waiting_for_knife_decision":
-    case "going_live":
-    case "live":
-    case "pending_restore":
-      return true;
-    default:
-      return false;
-  }
-}
 
 /**
  * Match Control, split by the two jobs it serves.
@@ -58,6 +35,9 @@ function matchUnderway(match: MatchState): boolean {
  */
 export default function MatchPage() {
   const { data: match, isPending, error, refetch } = useMatchState();
+  // Only for the tab default: a pug has no MatchZy state, so "is anyone
+  // actually playing" is what separates a live match from a stale phase.
+  const { data: status } = useServerStatus();
   const [tab, setTab] = useState<string | null>(null);
 
   if (error && !match) {
@@ -83,7 +63,7 @@ export default function MatchPage() {
     );
   }
 
-  const underway = matchUnderway(match);
+  const underway = matchUnderway(match, status?.players ?? null);
   // MatchZy owns the map cycle, the gameplay cvars and demo recording from the
   // moment a config is loaded — including its warmup, where the server already
   // refuses `tv_record` from the panel. That is a wider window than `underway`.

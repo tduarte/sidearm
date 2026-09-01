@@ -103,41 +103,30 @@ export default function DashboardPage() {
       {/*
         Hero.
 
-        From `sm` up the top bar already carries the status pill, the hostname
-        and the map, forty pixels above this card. Repeating them here spent
-        the entire first viewport saying "Running / sidearm / de_mirage" twice
-        and reaching no telemetry at all. So the identity strip renders only
-        below `sm`, where the top bar drops it, and from `sm` up this card is
-        the one thing the header cannot hold: the address you paste to join.
+        The map is the headline at every size. A previous pass moved it to
+        mobile-only because the top bar also carries it, which was the wrong
+        trade: the top bar is a sticky context strip and repeating the map
+        there is what a breadcrumb is for, while "what are we on" is the single
+        most-asked question about a server and belongs in the largest type on
+        the page. What that pass got right — telemetry above the roster — is
+        kept below.
       */}
       <Card>
         <CardContent className="p-6 max-sm:pr-8">
           <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3 sm:hidden">
-              <div className="flex flex-wrap items-center gap-3">
-                <StatusPill state={status.state} />
-                <Badge variant="secondary">{status.gameMode}</Badge>
-                <VacBadge secure={status.vacSecure} />
-              </div>
-              <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-3">
+              <StatusPill state={status.state} />
+              <Badge variant="secondary">{status.gameMode}</Badge>
+              <VacBadge secure={status.vacSecure} />
+            </div>
+            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
+              <div className="min-w-0 shrink">
                 <p className="truncate text-sm text-muted-foreground" title={status.hostname}>
                   {status.hostname}
                 </p>
                 <h1 className="min-w-0 truncate font-mono text-2xl font-semibold tracking-tight">
                   {status.map}
                 </h1>
-              </div>
-            </div>
-            <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-              {/*
-                Only one of the two headings is ever in the accessibility tree:
-                `hidden` is display:none, so the map above is the h1 on a phone
-                and this is the h1 everywhere else.
-              */}
-              <div className="hidden min-w-0 shrink flex-wrap items-center gap-2 sm:flex">
-                <h1 className="text-sm font-medium">Connect</h1>
-                <Badge variant="secondary">{status.gameMode}</Badge>
-                <VacBadge secure={status.vacSecure} />
               </div>
               <div className="flex w-full min-w-0 justify-stretch sm:w-auto sm:shrink-0 sm:justify-end">
                 <InputGroup className="h-9 w-full min-w-0 max-w-full sm:w-max">

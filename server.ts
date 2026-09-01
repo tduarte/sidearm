@@ -54,7 +54,9 @@ app.prepare().then(async () => {
 
   const { rconConnect, rconExec, rconDisconnect } = await import("./lib/cs2/rcon");
   const { fetchStatus, isServerReboot } = await import("./lib/cs2/status");
-  const { updateCache, realAdapter } = await import("./lib/api/server/real");
+  const { updateCache, realAdapter, reconcileDemoPolicy } = await import(
+    "./lib/api/server/real"
+  );
   const { bus } = await import("./lib/ws/bus");
   const { getDb } = await import("./lib/db/index");
   const { beginMatch, endMatch, findOpenMatch, insertRound, reapStaleMatches } =
@@ -198,8 +200,13 @@ app.prepare().then(async () => {
 
   const poll = async () => {
     try {
-      const { status, players, cvars, startedAt, get5 } = await fetchStatus();
-      updateCache(status, players, cvars, get5);
+      const { status, players, cvars, startedAt, get5, recordingTo } =
+        await fetchStatus();
+      updateCache(status, players, cvars, get5, recordingTo);
+      // Stops a demo that should not be running — including one MatchZy
+      // started and abandoned, which is how a 709 MB file accumulated over
+      // twenty-six hours on an empty server.
+      await reconcileDemoPolicy();
 
       // A changed StartedAt means a different container process, so everything
       // the panel configured on the old one is gone. Only acted on once RCON
