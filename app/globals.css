@@ -10,14 +10,20 @@
   THESIS: an ops dashboard a stranger trusts at a glance. Neutral surfaces,
   hairline borders, and colour spent only where it carries state — the opposite
   of the dark-with-one-neon-accent look the game-server category defaults to.
-  The panel is read in a bright room before a session and in a dark one at 2am,
-  so both themes are real and the system follows the operating system.
+
+  ONE THEME, DARK. This file used to describe two, following the operating
+  system: read in a bright room before a session and in a dark one at 2am. The
+  panel is now a stage first — `app/broadcast.css` — and a stage is a lit thing
+  in a dark room. `forcedTheme="dark"` in `components/providers.tsx` is what
+  makes that true; the light tokens below are kept because the shadcn surfaces
+  in Settings and History are still built out of them, not because anything can
+  reach them.
 
   Colour strategy: Restrained. A near-neutral ground, a high-contrast neutral
-  primary (black on white, white on black), and one blue reserved for focus,
-  links and information. Every other colour in the panel means something: see
-  the state tokens below, which exist so that "running" is not a hand-picked
-  emerald in one component and a different emerald in the next.
+  primary (white on black), and one blue reserved for focus, links and
+  information. Every other colour in the panel means something: see the state
+  tokens below, which exist so that "running" is not a hand-picked emerald in
+  one component and a different emerald in the next.
 
   FORM: the category standard, played straight — the standing exit, taken over
   the assigned direction at seed key 1acf5420. Craft bar: the Vercel dashboard.
@@ -247,4 +253,43 @@
   .tabular {
     font-variant-numeric: tabular-nums;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   Surfaces that render outside the stage.
+
+   `app/broadcast.css` scopes the whole Broadcast world under `.bc`, which is
+   exactly right for anything inside the page — and exactly wrong for the three
+   things that portal to `document.body`: sonner's toaster, Radix's Sheet, and
+   the AlertDialog behind `DangerConfirm`. They land as siblings of the stage
+   rather than inside it, so none of the world's variables reach them, and the
+   result was a panel whose confirmations looked like they came from a
+   different product than the thing they were confirming.
+
+   Handled here, in globals, because that is the only stylesheet they are in
+   scope for. The values are the dock's: the same near-black at 94%, the same
+   backdrop blur, the same hairline. Radius is already 0 everywhere.
+   --------------------------------------------------------------------------- */
+
+[data-slot="sheet-content"],
+[data-slot="alert-dialog-content"] {
+  background: rgba(12, 14, 19, 0.94);
+  border-color: rgba(255, 255, 255, 0.2);
+  backdrop-filter: blur(12px);
+}
+
+/* The toaster's own colours come from variables set inline on its root, which
+   no stylesheet can outrank — so those live in `components/ui/sonner.tsx`.
+   This is the one part of the treatment that is not expressible there. */
+[data-sonner-toast] {
+  backdrop-filter: blur(12px);
+}
+
+/* The scrim. The stage uses a heavy one because what is behind it is bright
+   and busy, and a dialog floating over an unchanged background is the reason
+   people click straight through a confirmation. */
+[data-slot="sheet-overlay"],
+[data-slot="alert-dialog-overlay"] {
+  background: rgba(3, 4, 6, 0.72);
+  backdrop-filter: blur(2px);
 }

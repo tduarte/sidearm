@@ -2,8 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import {
   ArrowLeft,
   ArrowLineUp,
@@ -32,6 +31,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { DESTINATIONS } from "@/components/nav";
 import { useSession } from "@/components/session-provider";
 import { api } from "@/lib/api/client";
+import { useServerActions } from "@/lib/hooks/use-server-actions";
 import { useConsolePrefs } from "@/lib/hooks/use-console-prefs";
 import { useConsoleStream } from "@/lib/hooks/use-console-stream";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
@@ -93,7 +93,6 @@ export function CommandPalette() {
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("nav");
   const router = useRouter();
-  const qc = useQueryClient();
   const { can } = useSession();
 
   const { data: status } = useServerStatus();
@@ -130,46 +129,14 @@ export function CommandPalette() {
     };
   }, []);
 
-  const kick = useMutation({
-    mutationFn: (steamId: string) => api.kick(steamId),
-    meta: { action: "Kick" },
-    onSuccess: () => {
-      toast.success("Player kicked");
-      qc.invalidateQueries({ queryKey: ["players"] });
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-  });
-
-  const changeMap = useMutation({
-    mutationFn: (name: string) => api.changeMap(name),
-    meta: { action: "Map change" },
-    onSuccess: (_r, name) => {
-      toast(`Asked the server to load ${name}`, {
-        description: "Workshop maps download first; this can take a minute.",
-      });
-      qc.invalidateQueries({ queryKey: ["status"] });
-      qc.invalidateQueries({ queryKey: ["maps"] });
-    },
-  });
-
-  const pause = useMutation({
-    mutationFn: (action: "pause" | "unpause") => api.setPause(action),
-    meta: { action: "Pause" },
-    onSuccess: (_r, action) => {
-      toast(action === "pause" ? "Pause requested" : "Match resumed");
-      qc.invalidateQueries({ queryKey: ["match"] });
-    },
-  });
-
-  const restart = useMutation({
-    mutationFn: () => api.restart(),
-    meta: { action: "Restart" },
-    onSuccess: () => {
-      toast.success("Server restarting");
-      qc.invalidateQueries({ queryKey: ["status"] });
-      qc.invalidateQueries({ queryKey: ["maps"] });
-    },
-  });
+  /*
+    Shared with the mobile action bar. Both surfaces do the same four things to
+    the same server, and having written them out twice is how they ended up
+    invalidating different queries for the same change — see
+    `lib/hooks/use-server-actions.ts`. The palette closes itself in `act`
+    before anything fires, so it needs no `onDone`.
+  */
+  const { pause, kick, changeMap, restart } = useServerActions();
 
   const act = (fn: () => void) => {
     setOpen(false);

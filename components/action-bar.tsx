@@ -18,7 +18,7 @@
  */
 
 import { useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import {
   Pause,
   Play,
@@ -28,7 +28,6 @@ import {
   ArrowClockwise,
   CircleNotch,
 } from "@phosphor-icons/react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
@@ -41,6 +40,7 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DangerConfirm } from "@/components/danger-confirm";
 import { useCan } from "@/components/session-provider";
+import { useServerActions } from "@/lib/hooks/use-server-actions";
 import { useMatchState } from "@/lib/hooks/use-match-state";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
@@ -101,60 +101,21 @@ export function ActionBar() {
    * cost the move this whole bar exists to save.
    */
   const [armed, setArmed] = useState<string | null>(null);
-  const qc = useQueryClient();
 
   const { data: match } = useMatchState();
   const { data: status } = useServerStatus();
   const { data: players } = useLivePlayers();
 
-  const pause = useMutation({
-    mutationFn: (action: "pause" | "unpause") => api.setPause(action),
-    meta: { action: "Pause" },
-    onSuccess: (next) => {
-      // CS2 applies mp_pause_match at the end of the round, so the honest
-      // report is what was asked for, not what is true yet.
-      toast.success(
-        next.pause === "pause_requested"
-          ? "Pause requested — it lands at the end of this round"
-          : next.pause === "paused"
-            ? "Match paused"
-            : "Match resumed",
-      );
-      qc.invalidateQueries({ queryKey: ["match"] });
-    },
-  });
-
-  const changeMap = useMutation({
-    mutationFn: (name: string) => api.changeMap(name),
-    meta: { action: "Change map" },
-    onSuccess: (_r, name) => {
-      toast.success(`Loading ${name}`, {
-        description: "Workshop maps download first — allow about a minute.",
-      });
-      setSheet(null);
-      qc.invalidateQueries({ queryKey: ["status"] });
-      qc.invalidateQueries({ queryKey: ["maps"] });
-    },
-  });
-
-  const kick = useMutation({
-    mutationFn: (steamId: string) => api.kick(steamId),
-    meta: { action: "Kick" },
-    onSuccess: () => {
-      toast.success("Player kicked");
+  /*
+    One definition of each, shared with the ⌘K palette. They used to be written
+    out here and there with different toasts and different invalidation sets —
+    see `lib/hooks/use-server-actions.ts`. `onDone` is the only thing this
+    surface adds: closing the sheet and disarming the confirmation.
+  */
+  const { pause, kick, changeMap, restart } = useServerActions({
+    onDone: () => {
       setSheet(null);
       setArmed(null);
-      qc.invalidateQueries({ queryKey: ["players"] });
-      qc.invalidateQueries({ queryKey: ["status"] });
-    },
-  });
-
-  const restart = useMutation({
-    mutationFn: () => api.restart(),
-    meta: { action: "Restart" },
-    onSuccess: () => {
-      toast.success("Restarting the server");
-      qc.invalidateQueries({ queryKey: ["status"] });
     },
   });
 
