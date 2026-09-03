@@ -648,7 +648,7 @@
 }
 .bc__move:hover { background: #fff; color: #06070a; border-color: #fff; }
 .bc__move:active { transform: translateY(1px); }
-.bc__move--now { border-color: rgba(255,120,120,0.5); color: #ff9a9a; background: rgba(255,90,90,0.1); }
+.bc__move--now { border-color: rgba(255,90,90,0.5); color: #ff9a9a; background: rgba(255,90,90,0.1); }
 .bc__move--now:hover { background: var(--bad); color: #14070a; border-color: var(--bad); }
 /* The staged / conflicted marker rides the name's edge, so it lands beside the
    player it marks and recolours rather than across the row from it. */
@@ -810,7 +810,7 @@
 .bc__nowPill:has(.bc__act:hover) .bc__nowSay,
 .bc__nowPill:has(.bc__act:focus-visible) .bc__nowSay { opacity: 0; }
 .bc__act--danger { color: #ff9a9a; }
-.bc__act--danger:hover { background: rgba(255,90,90,0.16); color: #ffb3b3; }
+.bc__act--danger:hover { background: rgba(255,90,90,0.16); color: #ffb4b4; }
 .bc__more { display: none; }
 
 .bc__commitCopy { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 10px; min-width: 0; max-width: 34ch; }
