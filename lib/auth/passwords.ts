@@ -37,10 +37,20 @@ function b64(buf: Buffer): string {
   return buf.toString("base64url");
 }
 
-/** Hashes a password for storage. */
+/**
+ * Hashes a password for storage.
+ *
+ * NFKC normalisation makes a password typed as a composed character and one
+ * typed as a base letter plus a combining accent the same password. It is a
+ * named binding rather than an inline call because secret scanners read
+ * `password.normalize("NFKC")` as a password hardcoded to the value "NFKC" —
+ * GitGuardian flagged exactly this line. Inlining it again re-opens that
+ * false positive on every pull request that touches the file.
+ */
 export async function hashPassword(password: string): Promise<string> {
+  const normalized = password.normalize("NFKC");
   const salt = randomBytes(16);
-  const key = await scrypt(password.normalize("NFKC"), salt, KEYLEN, {
+  const key = await scrypt(normalized, salt, KEYLEN, {
     N,
     r: R,
     p: P,
@@ -76,9 +86,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
   }
   if (salt.length === 0 || expected.length === 0) return false;
 
+  const normalized = password.normalize("NFKC");
   let actual: Buffer;
   try {
-    actual = await scrypt(password.normalize("NFKC"), salt, expected.length, {
+    actual = await scrypt(normalized, salt, expected.length, {
       N: n,
       r,
       p,
