@@ -22,24 +22,42 @@
  *    save step in front of them would be the wrong kind of consistency. They
  *    fire on confirm.
  *
- * What is deliberately *not* here yet: captains, side moves and team names.
- * Those are a MatchZy match config, not a live RCON write, so they belong to
- * the draft flow on `/match` until that is ported too. Rendering them here
- * would mean drawing controls that stage something nothing can apply.
+ * Staged edits come in two tiers, because the server takes them two ways:
+ *
+ *  - **cvars and the server config**, written over RCON one at a time.
+ *    `lib/dashboard/panel.ts` owns that diff.
+ *  - **a MatchZy match config** — team names, rosters, captains, series length,
+ *    veto and clinch — saved and loaded whole. `lib/dashboard/match-draft.ts`
+ *    owns that one.
+ *
+ * They share the dock and the Apply button because from the operator's side
+ * there is one question, "what have I changed", and one answer. Underneath,
+ * the order is not arbitrary: cvars and config first, then the match config,
+ * then the map. The map goes last because loading one takes a minute and there
+ * is no reason to make every other change wait behind it.
+ *
+ * The second tier needs MatchZy. Vanilla CS2 has no idea what a named team is,
+ * so when the plugin is absent the team fields, captain badges and series
+ * controls are **not drawn at all** — with the reason said once, near the
+ * scoreboard — rather than drawn and dead.
  */
 
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
+  ArrowCounterClockwise,
   CaretDown,
   DotsThree,
+  FlagCheckered,
   Pause,
+  PencilSimple,
   Play,
   Knife,
   ArrowsLeftRight,
   Record,
   Stop,
+  UsersThree,
   X,
 } from "@phosphor-icons/react";
 import { useCan } from "@/components/session-provider";
@@ -61,7 +79,23 @@ import {
   type FieldKey,
   type PanelValues,
 } from "@/lib/dashboard/panel";
+import {
+  buildDefinition,
+  currentSetup,
+  pickTurn,
+  resolveSetup,
+  setupChanges,
+  setupId,
+  setupProblems,
+  withCaptain,
+  type SetupChangeKey,
+  type SetupDraft,
+  type SetupSide,
+} from "@/lib/dashboard/match-draft";
+import { PracticeStrip } from "@/components/broadcast/practice-strip";
+import { ACTIVE_DUTY_AS_OF, activeDutyPool, RESERVE } from "@/lib/cs2/map-pools";
 import { PRESETS } from "@/lib/presets";
+import type { RoundBackup } from "@/lib/cs2/round-backups";
 import type { MapEntry, MatchState, Player, ServerStatus } from "@/lib/api/types";
 
 /* ---------------- shape ---------------- */
@@ -93,11 +127,33 @@ type NowAction = {
 
 type Sheet =
   | { kind: "pool" }
+  | { kind: "series" }
+  | { kind: "lineups" }
+  | { kind: "backups" }
+  | { kind: "apply" }
   | { kind: "more" }
   | { kind: "now"; action: NowAction }
   | { kind: "kick"; player: Player }
   | { kind: "ban"; player: Player }
   | { kind: "end" };
+
+/** Series lengths MatchZy accepts. Not a free number: `numMaps` is 1, 3 or 5. */
+const SERIES_LENGTHS = [1, 3, 5];
+
+/**
+ * How the staged match config is put back when its chip is dismissed.
+ *
+ * One chip can stand for several draft fields — "Roster" is every side move at
+ * once — so dropping it has to clear all of them, or the chip disappears and
+ * the change stays.
+ */
+function dropSetupKey(draft: SetupDraft, key: SetupChangeKey): SetupDraft {
+  const next = { ...draft };
+  if (key === "roster") delete next.sides;
+  else if (key === "captains") delete next.captains;
+  else delete next[key];
+  return next;
+}
 
 /**
  * Offered ban lengths. `null` — no expiry — is a real option rather than the
@@ -161,6 +217,27 @@ function Head({
   );
 }
 
+/**
+ * The parts of a row that only exist when a match config can be staged.
+ *
+ * Absent, not disabled: without MatchZy there is nothing to write a captain or
+ * a side move to, and a greyed button that would never be pressable is worse
+ * than no button.
+ */
+type RowSetup = {
+  isCaptain: boolean;
+  /** Staged this session, as opposed to already true on the server. */
+  captainStaged: boolean;
+  /** This player is somewhere the server has not put them yet. */
+  moved: boolean;
+  /** What the cross-move button says, e.g. `T \u25b8`. */
+  crossLabel: string;
+  crossTitle: string;
+  onCaptain: () => void;
+  onBench: () => void;
+  onCross: () => void;
+};
+
 function Row({
   p,
   /** Longest bar on the board, so the meter is relative to the night's top fragger. */
@@ -169,6 +246,7 @@ function Row({
   canKick,
   onKick,
   nameRight,
+  setup,
 }: {
   p: Player;
   topKills: number;
@@ -176,9 +254,12 @@ function Row({
   canKick: boolean;
   onKick: (p: Player) => void;
   nameRight?: boolean;
+  setup?: RowSetup;
 }) {
   return (
-    <div className={`bc__row bc__row--${nameRight ? "r" : "l"}`}>
+    <div
+      className={`bc__row bc__row--${nameRight ? "r" : "l"}${setup?.moved ? " bc__row--moved" : ""}`}
+    >
       {/*
         There is no ADR in `status` — CS2 does not report it over RCON — so the
         meter is kills against the top fragger rather than a damage number the
@@ -192,9 +273,54 @@ function Row({
       <span className="bc__who">
         {rank !== undefined && <span className="bc__rank">{rank}</span>}
         <span className="bc__player">{p.name}</span>
+        {setup && (
+          /*
+            The C is a drafting device, and the tooltip says so. MatchZy has no
+            captain field: what survives into the config is list position, so
+            this marks who goes first on their side and nothing more.
+          */
+          <button
+            type="button"
+            className={`bc__cap${setup.isCaptain ? " bc__cap--on" : ""}${setup.captainStaged ? " bc__cap--staged" : ""}`}
+            aria-pressed={setup.isCaptain}
+            aria-label={
+              setup.isCaptain
+                ? `${p.name} leads this side — remove`
+                : `Make ${p.name} lead this side`
+            }
+            title={
+              setup.isCaptain
+                ? "Listed first in the roster. MatchZy has no captain of its own."
+                : `Make ${p.name} lead this side`
+            }
+            onClick={setup.onCaptain}
+          >
+            C
+          </button>
+        )}
       </span>
       <Stats p={p} />
       <span className="bc__moves">
+        {setup && (
+          <>
+            <button
+              className="bc__move"
+              type="button"
+              onClick={setup.onBench}
+              title={`Bench ${p.name}`}
+            >
+              Bench
+            </button>
+            <button
+              className="bc__move"
+              type="button"
+              onClick={setup.onCross}
+              title={setup.crossTitle}
+            >
+              {setup.crossLabel}
+            </button>
+          </>
+        )}
         {canKick && (
           <button
             className="bc__move bc__move--now"
@@ -212,28 +338,65 @@ function Row({
 /**
  * One half of the band.
  *
- * Read, not written: renaming a side means loading a MatchZy match config, so
- * an editable field here would promise something nothing can apply.
+ * The name is an input when a match config can be staged and plain text when
+ * it cannot, because renaming a side *is* loading a config — there is no cvar
+ * for it. A field that silently did nothing on a plugin-less server would be
+ * the worst of the three options.
+ *
+ * The captain line sits in the tag rather than beside the badge on the row: it
+ * is the answer to "who is leading this side", which is a question about the
+ * team, not about a player.
  */
 function Side({
   side,
   count,
   score,
   name,
+  captain,
+  edit,
 }: {
   side: "ct" | "t";
   count: number;
   score: number;
   name: string;
+  /** `undefined` when captains are not a concept here (no MatchZy). */
+  captain?: string | null;
+  edit?: { staged: boolean; onChange: (value: string) => void };
 }) {
+  const label = side === "ct" ? "Counter-Terrorists" : "Terrorists";
   return (
     <div className={`bc__side${side === "t" ? " bc__side--t bc__t" : " bc__ct"}`}>
       <span className="bc__sideMark" aria-hidden />
       <span className="bc__team">
         <span className="bc__tag">
-          {side === "ct" ? "Counter-Terrorists" : "Terrorists"} · {count}
+          {label} · {count}
+          {captain !== undefined &&
+            (captain ? (
+              <span className="bc__capName"> · c {captain}</span>
+            ) : (
+              <span className="bc__tagWarn"> · no captain</span>
+            ))}
         </span>
-        <span className="bc__nameRead">{name}</span>
+        {edit ? (
+          <span className="bc__nameWrap">
+            <input
+              className={`bc__nameField${edit.staged ? " bc__nameField--staged" : ""}${name.trim() ? "" : " bc__nameField--bad"}`}
+              value={name}
+              maxLength={24}
+              onChange={(e) => edit.onChange(e.target.value)}
+              // Trimmed on the way out, not on every keystroke: trimming as you
+              // type makes the space bar appear broken between two words.
+              onBlur={(e) => edit.onChange(e.target.value.trim())}
+              aria-label={`${label} team name`}
+              spellCheck={false}
+            />
+            <span className="bc__pencil" aria-hidden>
+              <PencilSimple size={14} />
+            </span>
+          </span>
+        ) : (
+          <span className="bc__nameRead">{name}</span>
+        )}
       </span>
       <span className="bc__score">{score}</span>
     </div>
@@ -254,6 +417,12 @@ export function MatchStage({
   const qc = useQueryClient();
 
   const [draft, setDraft] = useState<Draft>({});
+  /**
+   * The second tier, kept separate from `draft` because it is applied
+   * differently: `draft` becomes a list of RCON writes, this becomes one saved
+   * config and one load.
+   */
+  const [setupDraft, setSetupDraft] = useState<SetupDraft>({});
   const [sheet, setSheet] = useState<Sheet | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const [banMinutes, setBanMinutes] = useState<BanDuration>(60);
@@ -278,10 +447,18 @@ export function MatchStage({
   const { op: pendingOp, elapsedSec } = usePendingOp();
 
   const roster = useMemo(() => players ?? [], [players]);
-  const ct = roster.filter((p) => p.team === "CT");
-  const t = roster.filter((p) => p.team === "T");
-  const spec = roster.filter((p) => p.team === "SPEC");
   const topKills = Math.max(0, ...roster.map((p) => p.k));
+
+  /**
+   * MatchZy's round backups, read only while the sheet that shows them is
+   * open. They are a file listing on the server and nobody needs them on a
+   * quiet dashboard.
+   */
+  const backups = useQuery<RoundBackup[]>({
+    queryKey: ["round-backups"],
+    queryFn: () => api.getRoundBackups(),
+    enabled: sheet?.kind === "backups",
+  });
 
   /**
    * What the server says right now — derived every render, never copied into
@@ -344,26 +521,82 @@ export function MatchStage({
       // Sequential on purpose: the order `planApply` returns is the point, and
       // a parallel burst of RCON writes is the half-applied state this staging
       // model exists to prevent.
+      //
+      // Three phases, in this order. Cvars and config first, because they are
+      // cheap and a mode change wants to be in place before anything reads it.
+      // The match config next, since loading one restarts the match and would
+      // otherwise wipe writes made after it. The map last, because it takes a
+      // minute and nothing should wait behind it.
       for (const step of steps) {
         if (step.kind === "cvar") await api.setCvar(step.name, step.value);
         else if (step.kind === "config") await api.putConfig(step.config);
-        else await api.changeMap(step.name);
       }
+
+      if (setupChips.length > 0) {
+        const definition = buildDefinition(setup, {
+          id: setupId(setup),
+          order,
+          nameOf,
+          wingman: mode === "wingman",
+        });
+        const { warnings } = await api.saveMatch(definition);
+        await api.loadMatch(definition.id);
+        // Separate toasts, and long ones: a warning means something the
+        // operator asked for will not happen, and it is the only chance to say
+        // so before the match is already running.
+        for (const w of warnings) toast.warning(w, { duration: 10_000 });
+      }
+
+      const mapStep = steps.find((step) => step.kind === "map");
+      if (mapStep) await api.changeMap(mapStep.name);
     },
     meta: { action: "Apply" },
     onSuccess: () => {
       const changedMap = steps.some((s) => s.kind === "map");
-      toast.success(
-        `Applied ${steps.length} change${steps.length === 1 ? "" : "s"}`,
-        {
-          description: changedMap
-            ? "A map the server has not cached downloads first — allow about a minute."
-            : undefined,
-        },
-      );
+      const count = steps.length + setupChips.length;
+      toast.success(`Applied ${count} change${count === 1 ? "" : "s"}`, {
+        description: changedMap
+          ? "A map the server has not cached downloads first — allow about a minute."
+          : undefined,
+      });
       setDraft({});
+      setSetupDraft({});
+      setSheet(null);
       qc.invalidateQueries({ queryKey: ["status"] });
       qc.invalidateQueries({ queryKey: ["config"] });
+      qc.invalidateQueries({ queryKey: ["match"] });
+      qc.invalidateQueries({ queryKey: ["matches"] });
+      qc.invalidateQueries({ queryKey: ["players"] });
+    },
+  });
+
+  /**
+   * The saved setups, which are also the thing every apply writes: loading a
+   * config saves it first, so last Friday's teams are still there next Friday
+   * without anyone having pressed Save.
+   */
+  const saved = useQuery({
+    queryKey: ["matches"],
+    queryFn: () => api.getMatchConfigs(),
+    enabled: canModerate && sheet?.kind === "lineups",
+  });
+
+  const restore = useMutation({
+    mutationFn: (round: number) => api.restoreRound(round),
+    meta: { action: "Restoring the round" },
+    onSuccess: (_r, round) => {
+      setSheet(null);
+      setSaid(`Restoring round ${round}.`);
+      setTimeout(() => setSaid(null), 3200);
+      qc.invalidateQueries({ queryKey: ["match"] });
+    },
+  });
+
+  const phase = useMutation({
+    mutationFn: (next: MatchState["phase"]) => api.setMatchPhase(next),
+    meta: { action: "Match phase" },
+    onSuccess: () => {
+      setSheet(null);
       qc.invalidateQueries({ queryKey: ["match"] });
     },
   });
@@ -385,6 +618,8 @@ export function MatchStage({
           return void (await api.setDemo(
             match?.demo.state === "recording" ? "stop" : "start",
           ));
+        case "start":
+          return void (await api.forceStartMatch());
       }
     },
     meta: { action: "Match control" },
@@ -450,7 +685,118 @@ export function MatchStage({
   const shown = new Set<FieldKey>(fieldsForMode(mode));
   const paused = match?.pause === "paused";
 
+  /* ---------------- the match-config tier ---------------- */
+
+  /**
+   * Everything below this line needs MatchZy. `status.plugins.matchzy` is
+   * three-valued — `null` is "not probed yet", and the whole object is null
+   * before the first probe lands — so only a definite `true` earns the
+   * controls. Drawing them on a maybe means drawing them on a server that will
+   * refuse them.
+   */
+  const matchzy = status.plugins?.matchzy === true;
+  const canSetup = canModerate && matchzy && sided;
+
+  const setupCurrent = useMemo(
+    () => currentSetup(match, roster, status.map),
+    [match, roster, status.map],
+  );
+  const order = roster.map((p) => p.steamId);
+  const nameOf = (id: string) =>
+    roster.find((p) => p.steamId === id)?.name ?? id;
+  const setup = resolveSetup(setupCurrent, setupDraft);
+  const setupChips = canSetup
+    ? setupChanges(setupCurrent, setupDraft, nameOf, label)
+    : [];
+  const setupIssues = setupChips.length ? setupProblems(setup, order) : [];
+  const turn = pickTurn(setup, order);
+
+  /**
+   * Which team is on which side, right now.
+   *
+   * Team 1 starts on CT and swaps at the half. Binding a name to a column
+   * instead of to `side` is how a scoreboard ends up confidently wrong for a
+   * whole half, so every name, every count and every staged move is routed
+   * through here.
+   */
+  const team1IsCt = match?.series?.team1.side !== "T";
+  const teamOn = (column: "ct" | "t") =>
+    ((column === "ct") === team1IsCt ? "team1" : "team2") as "team1" | "team2";
+  const columnOf = (steamId: string): "ct" | "t" | "bench" => {
+    const side = setup.sides[steamId] ?? "bench";
+    if (side === "bench") return "bench";
+    return (side === "team1") === team1IsCt ? "ct" : "t";
+  };
+
+  const ct = roster.filter((p) => columnOf(p.steamId) === "ct");
+  const t = roster.filter((p) => columnOf(p.steamId) === "t");
+  const spec = roster.filter((p) => columnOf(p.steamId) === "bench");
+
+  const nameFor = (column: "ct" | "t") =>
+    teamOn(column) === "team1" ? setup.team1Name : setup.team2Name;
+  const captainFor = (column: "ct" | "t") => {
+    const id = setup.captains[teamOn(column)];
+    return id ? nameOf(id) : null;
+  };
+
+  const stageSide = (steamId: string, side: SetupSide) =>
+    setSetupDraft((d) => ({ ...d, sides: { ...d.sides, [steamId]: side } }));
+
+  const stageCaptain = (steamId: string, column: "ct" | "t") => {
+    const team = teamOn(column);
+    setSetupDraft((d) =>
+      withCaptain(
+        d,
+        team,
+        resolveSetup(setupCurrent, d).captains[team] === steamId ? null : steamId,
+      ),
+    );
+  };
+
+  const rowSetup = (p: Player, column: "ct" | "t"): RowSetup | undefined => {
+    if (!canSetup) return undefined;
+    const team = teamOn(column);
+    const other: "ct" | "t" = column === "ct" ? "t" : "ct";
+    return {
+      isCaptain: setup.captains[team] === p.steamId,
+      captainStaged:
+        setup.captains[team] === p.steamId &&
+        setupCurrent.captains[team] !== p.steamId,
+      moved: setup.sides[p.steamId] !== setupCurrent.sides[p.steamId],
+      crossLabel: column === "ct" ? "T \u25b8" : "\u25c2 CT",
+      crossTitle: `Move ${p.name} to ${nameFor(other) || (other === "ct" ? "Counter-Terrorists" : "Terrorists")}`,
+      onCaptain: () => stageCaptain(p.steamId, column),
+      onBench: () => stageSide(p.steamId, "bench"),
+      onCross: () => stageSide(p.steamId, teamOn(other)),
+    };
+  };
+
+  /**
+   * MatchZy holds a loaded match at the ready-up until every roster slot has
+   * typed `.ready`, which on a Friday is the one thing nobody does. Offered
+   * only in the states where it is the answer — in `live` it does nothing, and
+   * an always-present button that sometimes does nothing teaches people to
+   * distrust the row.
+   */
+  const canForceStart =
+    matchzy &&
+    (match?.matchzyState === "warmup" ||
+      match?.matchzyState === "waiting_for_players");
+
   const NOW_ACTIONS: NowAction[] = [
+    ...(canForceStart
+      ? [
+          {
+            id: "start",
+            label: "Force start",
+            hint: "skip the ready-ups",
+            rcon: ".forcestart",
+            Icon: FlagCheckered,
+            consequence: (c: { players: number; map: string; score: string }) =>
+              `Starts the loaded match on ${c.map} without waiting for the remaining ready-ups. All ${c.players} connected stay where they are.`,
+          } satisfies NowAction,
+        ]
+      : []),
     {
       id: "pause",
       label: paused ? "Resume" : "Pause",
@@ -542,7 +888,24 @@ export function MatchStage({
     };
   });
 
+  /**
+   * One dock, two tiers. The chips are tagged by where they came from only so
+   * their keys cannot collide — the operator is looking at one list of pending
+   * changes, which is the whole reason both tiers share an Apply.
+   */
+  const allChips = [
+    ...chips,
+    ...setupChips.map((c) => ({
+      key: `setup:${c.key}`,
+      label: c.label,
+      to: c.to,
+      note: c.note,
+      onDismiss: () => setSetupDraft((d) => dropSetupKey(d, c.key)),
+    })),
+  ];
+
   const heavy = chips.some((c) => c.key === "map");
+  const blocked = setupIssues.length > 0;
 
   /* ---------------- render ---------------- */
 
@@ -555,7 +918,17 @@ export function MatchStage({
             side="ct"
             count={ct.length}
             score={match?.score.ct ?? 0}
-            name={match?.series?.team1.name ?? "Counter-Terrorists"}
+            name={nameFor("ct")}
+            captain={canSetup ? captainFor("ct") : undefined}
+            edit={
+              canSetup
+                ? {
+                    staged: setup[`${teamOn("ct")}Name`] !== setupCurrent[`${teamOn("ct")}Name`],
+                    onChange: (value) =>
+                      setSetupDraft((d) => ({ ...d, [`${teamOn("ct")}Name`]: value })),
+                  }
+                : undefined
+            }
           />
         )}
 
@@ -570,7 +943,7 @@ export function MatchStage({
                 ? match.phase === "live"
                   ? paused
                     ? "Live · paused"
-                    : dirty.length
+                    : allChips.length
                       ? "Live · staged"
                       : "Live"
                   : match.phase === "warmup"
@@ -743,6 +1116,73 @@ export function MatchStage({
               </span>
             )}
 
+          {/*
+            The series. `numMaps` is not a cvar and never was — it is a field
+            of the match config — so this stages into the other draft and rides
+            the same Apply. The pips above it are the series MatchZy is
+            actually running, which is why they can disagree with the segments
+            while something is staged: one is the programme, the other is the
+            proposal.
+          */}
+          {match?.series && match.series.maps.length > 1 && (
+            <span
+              className="bc__pips"
+              aria-label={`Series score ${match.series.team1.seriesScore}-${match.series.team2.seriesScore}, map ${match.series.mapNumber + 1} of ${match.series.maps.length}`}
+            >
+              {match.series.maps.map((m, i) => {
+                const decided =
+                  match.series!.team1.seriesScore + match.series!.team2.seriesScore;
+                const state =
+                  i < match.series!.team1.seriesScore
+                    ? team1IsCt
+                      ? "ct"
+                      : "t"
+                    : i < decided
+                      ? team1IsCt
+                        ? "t"
+                        : "ct"
+                      : i === match.series!.mapNumber
+                        ? "now"
+                        : "";
+                return (
+                  <span
+                    key={`${m}-${i}`}
+                    className={`bc__pip${state ? ` bc__pip--${state}` : ""}`}
+                  />
+                );
+              })}
+            </span>
+          )}
+
+          {canSetup && (
+            <div className="bc__seg" role="group" aria-label="Series length">
+              {SERIES_LENGTHS.map((n) => {
+                const on = setup.numMaps === n;
+                const staged = on && n !== setupCurrent.numMaps;
+                return (
+                  <button
+                    key={n}
+                    type="button"
+                    aria-pressed={on}
+                    className={`bc__segBtn${on ? (staged ? " bc__segBtn--staged" : " bc__segBtn--on") : ""}`}
+                    onClick={() =>
+                      setSetupDraft((d) => ({ ...d, numMaps: n }))
+                    }
+                  >
+                    Bo{n}
+                  </button>
+                );
+              })}
+              <button
+                type="button"
+                className="bc__segBtn"
+                onClick={() => setSheet({ kind: "series" })}
+              >
+                Maps…
+              </button>
+            </div>
+          )}
+
           {shown.has("overtime") && canEdit && !matchzyOwns && current?.overtime !== null && (
             <button
               type="button"
@@ -769,16 +1209,95 @@ export function MatchStage({
             side="t"
             count={t.length}
             score={match?.score.t ?? 0}
-            name={match?.series?.team2.name ?? "Terrorists"}
+            name={nameFor("t")}
+            captain={canSetup ? captainFor("t") : undefined}
+            edit={
+              canSetup
+                ? {
+                    staged: setup[`${teamOn("t")}Name`] !== setupCurrent[`${teamOn("t")}Name`],
+                    onChange: (value) =>
+                      setSetupDraft((d) => ({ ...d, [`${teamOn("t")}Name`]: value })),
+                  }
+                : undefined
+            }
           />
         )}
       </div>
+
+      {/*
+        The rundown is the series the server is running, not the one being
+        staged: a cued map marks its tile rather than rewriting the strip, so
+        the thing on air stays readable while you plan the change.
+      */}
+      {match?.series && match.series.maps.length > 1 && (
+        <div className="bc__rundown">
+          <span className="bc__rdLabel">
+            Rundown · Bo{match.series.maps.length}
+          </span>
+          <div className="bc__rdMaps">
+            {match.series.maps.map((m, i) => {
+              const state =
+                i === match.series!.mapNumber
+                  ? "live"
+                  : i < match.series!.mapNumber
+                    ? "done"
+                    : i === match.series!.mapNumber + 1
+                      ? "next"
+                      : "";
+              const cued = m === stagedMap;
+              const art = getOfficialMapArtPath(m);
+              return (
+                <div
+                  key={`${m}-${i}`}
+                  className={`bc__rd${state ? ` bc__rd--${state}` : ""}${cued ? " bc__rd--cued" : ""}`}
+                >
+                  {art && (
+                    <span
+                      className="bc__rdArt"
+                      style={{ backgroundImage: `url(${art})` }}
+                      aria-hidden
+                    />
+                  )}
+                  <span className="bc__rdName">{label(m)}</span>
+                  <span className="bc__rdNote">
+                    {cued
+                      ? "Cued"
+                      : state === "live"
+                        ? "On air"
+                        : state === "done"
+                          ? "Played"
+                          : state === "next"
+                            ? "Next"
+                            : "Later"}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          {canSetup && (
+            <button
+              className="bc__poolBtn"
+              type="button"
+              onClick={() => setSheet({ kind: "series" })}
+            >
+              Edit series
+              <span className="bc__caret" aria-hidden>
+                <CaretDown size={14} weight="bold" />
+              </span>
+            </button>
+          )}
+        </div>
+      )}
 
       <div className={`bc__grid${sided ? "" : " bc__grid--solo"}`}>
         {sided ? (
           <>
             <div className="bc__col bc__ctcol">
-              <Head name="Counter-Terrorists" count={ct.length} nameRight />
+              <Head
+                name={nameFor("ct") || "Counter-Terrorists"}
+                count={ct.length}
+                nameRight
+              />
               {ct.map((p) => (
                 <Row
                   key={p.steamId}
@@ -786,33 +1305,102 @@ export function MatchStage({
                   topKills={topKills}
                   canKick={canModerate}
                   onKick={(pl) => setSheet({ kind: "kick", player: pl })}
+                  setup={rowSetup(p, "ct")}
                   nameRight
                 />
               ))}
-              {!ct.length && <p className="bc__sbEmpty">Nobody on this side.</p>}
+              {!ct.length && (
+                <p className="bc__sbEmpty">
+                  {canSetup
+                    ? "Nobody on this side. Move someone across, or off the bench."
+                    : "Nobody on this side."}
+                </p>
+              )}
             </div>
 
             <div className="bc__standby">
-              <div className="bc__sbHead">Spectating · {spec.length}</div>
+              <div className="bc__sbHead">
+                <span>
+                  {canSetup ? "Bench" : "Spectating"} · {spec.length}
+                </span>
+                {canSetup && (
+                  <button
+                    className="bc__move"
+                    type="button"
+                    onClick={() => setSheet({ kind: "lineups" })}
+                  >
+                    Lineups
+                  </button>
+                )}
+              </div>
+              {turn && spec.length > 0 && (
+                /*
+                  Whose pick it is, derived from the two roster sizes rather
+                  than counted. Someone leaves, someone joins late, someone is
+                  moved by hand — a stored turn pointer would go on pointing at
+                  the side that is already a player up.
+                */
+                <p className="bc__turn">
+                  {nameFor(teamOn("ct") === turn ? "ct" : "t") || "Team"} picks
+                  next
+                </p>
+              )}
               {spec.map((p) => (
-                <div key={p.steamId} className="bc__sbRow">
-                  <span className="bc__sbName">{p.name}</span>
-                  {canModerate && (
-                    <button
-                      className="bc__move bc__move--now"
-                      type="button"
-                      onClick={() => setSheet({ kind: "kick", player: p })}
-                    >
-                      Kick
-                    </button>
+                <div
+                  key={p.steamId}
+                  className={`bc__sbRow${
+                    canSetup && setup.sides[p.steamId] !== setupCurrent.sides[p.steamId]
+                      ? " bc__row--moved"
+                      : ""
+                  }`}
+                >
+                  {canSetup && (
+                    <span className="bc__moves">
+                      <button
+                        className="bc__move"
+                        type="button"
+                        onClick={() => stageSide(p.steamId, teamOn("ct"))}
+                        title={`Move ${p.name} to ${nameFor("ct") || "Counter-Terrorists"}`}
+                      >
+                        {"\u25c2 CT"}
+                      </button>
+                    </span>
                   )}
+                  <span className="bc__sbName">{p.name}</span>
+                  <span className="bc__moves">
+                    {canSetup && (
+                      <button
+                        className="bc__move"
+                        type="button"
+                        onClick={() => stageSide(p.steamId, teamOn("t"))}
+                        title={`Move ${p.name} to ${nameFor("t") || "Terrorists"}`}
+                      >
+                        {"T \u25b8"}
+                      </button>
+                    )}
+                    {canModerate && (
+                      <button
+                        className="bc__move bc__move--now"
+                        type="button"
+                        onClick={() => setSheet({ kind: "kick", player: p })}
+                      >
+                        Kick
+                      </button>
+                    )}
+                  </span>
                 </div>
               ))}
-              {!spec.length && <p className="bc__sbEmpty">Nobody spectating.</p>}
+              {!spec.length && (
+                <p className="bc__sbEmpty">
+                  {canSetup
+                    ? "Everyone connected is on a side. Bench someone with the button on their row."
+                    : "Nobody spectating."}
+                </p>
+              )}
             </div>
 
             <div className="bc__col bc__tcol">
-              <Head name="Terrorists" count={t.length} />
+              <Head name={nameFor("t") || "Terrorists"} count={t.length} />
               {t.map((p) => (
                 <Row
                   key={p.steamId}
@@ -820,9 +1408,16 @@ export function MatchStage({
                   topKills={topKills}
                   canKick={canModerate}
                   onKick={(pl) => setSheet({ kind: "kick", player: pl })}
+                  setup={rowSetup(p, "t")}
                 />
               ))}
-              {!t.length && <p className="bc__sbEmpty">Nobody on this side.</p>}
+              {!t.length && (
+                <p className="bc__sbEmpty">
+                  {canSetup
+                    ? "Nobody on this side. Move someone across, or off the bench."
+                    : "Nobody on this side."}
+                </p>
+              )}
             </div>
           </>
         ) : (
@@ -844,6 +1439,25 @@ export function MatchStage({
           </div>
         )}
       </div>
+
+      {/*
+        Said once, and only to someone who could otherwise have used them.
+        Naming the plugin matters: "teams are unavailable" sends people looking
+        for a setting, and there is no setting — there is an install.
+      */}
+      {canModerate && sided && !matchzy && (
+        <p className="bc__absent">
+          Team names, rosters and series length need MatchZy, which this server
+          is not running. Everything else on this page works without it.
+        </p>
+      )}
+
+      {/*
+        Practice has a set of controls no other mode has any use for, so they
+        appear with the mode and leave with it. Mounted conditionally rather
+        than hidden: the hook behind them polls the server every few seconds.
+      */}
+      {canModerate && <PracticeStrip enabled={status.gameMode === "practice"} />}
 
       {/*
         Health, under the roster. See `.bc__health` for why it is a strip and
@@ -920,9 +1534,9 @@ export function MatchStage({
           </span>
         )}
 
-        {chips.length > 0 && !apply.isPending && (
+        {allChips.length > 0 && !apply.isPending && (
           <div className="bc__chips">
-            {chips.map((c) => (
+            {allChips.map((c) => (
               <span
                 key={c.key}
                 className={`bc__chip${c.note ? " bc__chip--heavy" : ""}`}
@@ -993,8 +1607,8 @@ export function MatchStage({
                 </button>
               </div>
               <span className="bc__nowSay">
-                {chips.length
-                  ? `${chips.length} change${chips.length === 1 ? "" : "s"} staged · nothing has reached the server`
+                {allChips.length
+                  ? `${allChips.length} change${allChips.length === 1 ? "" : "s"} staged · nothing has reached the server`
                   : matchzyOwns
                     ? "MatchZy is running this match — it owns the mode, the round limit and overtime."
                     : "Point at anything to see what it does."}
@@ -1007,52 +1621,75 @@ export function MatchStage({
               <span className="bc__pillTag">Applying</span>
               <span className="bc__commitCopy">
                 <span className="bc__commitLine">
-                  Sending {steps.length} change{steps.length === 1 ? "" : "s"} to
-                  the server…
+                  Sending {steps.length + setupChips.length} change
+                  {steps.length + setupChips.length === 1 ? "" : "s"} to the
+                  server…
                 </span>
                 <span className="bc__commitSub">
-                  {heavy
-                    ? "The map is reloading — this takes about a minute."
-                    : "Waiting for RCON to acknowledge."}
+                  {setupChips.length
+                    ? "Loading the match config — MatchZy restarts the match."
+                    : heavy
+                      ? "The map is reloading — this takes about a minute."
+                      : "Waiting for RCON to acknowledge."}
                 </span>
               </span>
               <span className="bc__prog" aria-hidden />
             </div>
           )}
 
-          {chips.length > 0 && !apply.isPending && (
+          {allChips.length > 0 && !apply.isPending && (
             <div className="bc__pill bc__pill--commit">
               <span className="bc__pillTag">Staged</span>
               <span className="bc__commitCopy">
                 <span className="bc__commitLine">
-                  Nothing has reached the server yet.
+                  {blocked
+                    ? setupIssues[0]
+                    : "Nothing has reached the server yet."}
                 </span>
                 <span className="bc__commitSub">
-                  {needsReload
-                    ? "The mode is read when a map loads — pick a map too, or it lands on the next one."
-                    : "Edits sit here until you apply them."}
+                  {blocked
+                    ? "Fix that and the match config can be loaded."
+                    : needsReload
+                      ? "The mode is read when a map loads — pick a map too, or it lands on the next one."
+                      : "Edits sit here until you apply them."}
                 </span>
               </span>
               <button
                 className="bc__discard"
                 type="button"
-                onClick={() => setDraft({})}
+                onClick={() => {
+                  setDraft({});
+                  setSetupDraft({});
+                }}
               >
                 Discard
               </button>
               <button
                 className="bc__apply"
                 type="button"
-                onClick={() => apply.mutate()}
-                disabled={!steps.length}
+                /*
+                  A match config is not one more cvar: loading it restarts the
+                  match, runs MatchZy's own knife round and rewrites the
+                  hostname. So that tier goes through a confirmation and the
+                  cvar tier does not — the asymmetry is the point.
+                */
+                onClick={() =>
+                  setupChips.length
+                    ? setSheet({ kind: "apply" })
+                    : apply.mutate()
+                }
+                disabled={(!steps.length && !setupChips.length) || blocked}
               >
                 <span className="bc__applyLabel">
-                  Apply {chips.length} change{chips.length === 1 ? "" : "s"}
+                  Apply {allChips.length} change
+                  {allChips.length === 1 ? "" : "s"}
                 </span>
                 <span className="bc__applyHint">
-                  {heavy
-                    ? "reloads the level, nobody is dropped"
-                    : "applies immediately, nobody is dropped"}
+                  {setupChips.length
+                    ? "restarts the match — asks first"
+                    : heavy
+                      ? "reloads the level, nobody is dropped"
+                      : "applies immediately, nobody is dropped"}
                 </span>
               </button>
             </div>
@@ -1120,6 +1757,395 @@ export function MatchStage({
         </div>
       )}
 
+      {sheet?.kind === "series" && (
+        <div
+          className="bc__sheet"
+          role="dialog"
+          aria-modal
+          aria-label="The series"
+        >
+          <div className="bc__sheetHead">
+            <div className="bc__sheetTitle">The series</div>
+            <p className="bc__sheetSub">
+              Which maps, in what order, and how the series ends. Staged like
+              everything else — none of it reaches the server until you apply.
+            </p>
+          </div>
+          <div className="bc__sheetBody">
+            <div className="bc__field">
+              <span className="bc__fieldLabel">Pool</span>
+              <div className="bc__poolRow">
+                <button
+                  className="bc__btn"
+                  type="button"
+                  onClick={() =>
+                    setSetupDraft((d) => ({
+                      ...d,
+                      maps: activeDutyPool(mapList.map((m) => m.name)).present,
+                    }))
+                  }
+                >
+                  Active Duty
+                </button>
+                <button
+                  className="bc__btn"
+                  type="button"
+                  onClick={() =>
+                    setSetupDraft((d) => ({
+                      ...d,
+                      maps: RESERVE.filter((m) =>
+                        mapList.some((entry) => entry.name === m),
+                      ),
+                    }))
+                  }
+                >
+                  Reserve
+                </button>
+                <button
+                  className="bc__btn"
+                  type="button"
+                  onClick={() => setSetupDraft((d) => ({ ...d, maps: [] }))}
+                >
+                  Clear
+                </button>
+              </div>
+              {/*
+                A dated snapshot, printed rather than hidden: nothing the
+                server reports says which maps Valve currently calls Active
+                Duty, so a stale list should be visible instead of quietly
+                wrong.
+              */}
+              <span className="bc__limitHint">
+                Active Duty as of {ACTIVE_DUTY_AS_OF}
+                {(() => {
+                  const missing = activeDutyPool(mapList.map((m) => m.name))
+                    .missing.length;
+                  return missing
+                    ? ` · this server is missing ${missing} of the pool`
+                    : "";
+                })()}
+              </span>
+            </div>
+
+            <div className="bc__field">
+              <span className="bc__fieldLabel">
+                Maps · {setup.maps.length} picked, best of {setup.numMaps}
+              </span>
+              <div className="bc__poolGrid">
+                {mapList.map((m) => {
+                  const at = setup.maps.indexOf(m.name);
+                  const art = getOfficialMapArtPath(m.name) ?? m.thumbnailUrl;
+                  return (
+                    <button
+                      key={m.name}
+                      type="button"
+                      className={`bc__poolMap${at >= 0 ? " bc__poolMap--cued" : ""}`}
+                      onClick={() =>
+                        setSetupDraft((d) => {
+                          const maps = resolveSetup(setupCurrent, d).maps;
+                          return {
+                            ...d,
+                            maps:
+                              at >= 0
+                                ? maps.filter((x) => x !== m.name)
+                                : [...maps, m.name],
+                          };
+                        })
+                      }
+                    >
+                      {art && (
+                        <span
+                          className="bc__rdArt"
+                          style={{ backgroundImage: `url(${art})` }}
+                          aria-hidden
+                        />
+                      )}
+                      <span className="bc__rdName">{m.displayName}</span>
+                      <span className="bc__rdNote">
+                        {at >= 0 ? `Pick ${at + 1}` : m.type}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="bc__field">
+              <span className="bc__fieldLabel">How it runs</span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={setup.skipVeto}
+                className={`bc__switch${setup.skipVeto ? " bc__switch--on" : ""}${setup.skipVeto !== setupCurrent.skipVeto ? " bc__switch--staged" : ""}`}
+                onClick={() =>
+                  setSetupDraft((d) => ({ ...d, skipVeto: !setup.skipVeto }))
+                }
+              >
+                <span className="bc__track" aria-hidden>
+                  <span className="bc__knob" />
+                </span>
+                Skip the veto
+              </button>
+              <span className="bc__limitHint">
+                {setup.skipVeto
+                  ? "The maps above are played in the order they are picked."
+                  : "MatchZy runs the veto in game, with the captains typing .ban and .pick."}
+              </span>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={setup.clinchSeries}
+                className={`bc__switch${setup.clinchSeries ? " bc__switch--on" : ""}${setup.clinchSeries !== setupCurrent.clinchSeries ? " bc__switch--staged" : ""}`}
+                onClick={() =>
+                  setSetupDraft((d) => ({
+                    ...d,
+                    clinchSeries: !setup.clinchSeries,
+                  }))
+                }
+              >
+                <span className="bc__track" aria-hidden>
+                  <span className="bc__knob" />
+                </span>
+                Stop when decided
+              </button>
+              <span className="bc__limitHint">
+                {setup.clinchSeries
+                  ? "A best-of-3 ends at 2-0 instead of playing a dead third map."
+                  : "Every map is played, even once the series is decided."}
+              </span>
+            </div>
+
+            {setupIssues.length > 0 && (
+              <ul className="bc__issues">
+                {setupIssues.map((issue) => (
+                  <li key={issue}>{issue}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <div className="bc__sheetFoot">
+            <span className="bc__sheetSpacer" />
+            <button
+              className="bc__btn"
+              type="button"
+              onClick={() => setSheet(null)}
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sheet?.kind === "lineups" && (
+        <div
+          className="bc__sheet"
+          role="dialog"
+          aria-modal
+          aria-label="Saved lineups"
+        >
+          <div className="bc__sheetHead">
+            <div className="bc__sheetTitle">Lineups</div>
+            <p className="bc__sheetSub">
+              The same twelve people most Fridays. Every apply saves what it
+              loaded, so these accumulate on their own. Picking one stages the
+              whole thing — names, sides, captains and the series — as one
+              change you can still review.
+            </p>
+          </div>
+          <div className="bc__sheetBody">
+            {saved.isPending && <p className="bc__sbEmpty">Loading…</p>}
+            {!saved.isPending && !saved.data?.length && (
+              <p className="bc__sbEmpty">
+                Nothing saved yet. Set up a match and apply it, and it lands
+                here.
+              </p>
+            )}
+            {saved.data?.map((entry) => {
+              const def = entry.definition;
+              /*
+                Only people who are actually connected can be staged: the
+                config is built from the live roster, and a name in a saved
+                lineup who is not here tonight would be a roster slot MatchZy
+                waits forever for.
+              */
+              const here = (ids: string[]) =>
+                ids.filter((id) => roster.some((p) => p.steamId === id));
+              const ids1 = here(def.team1.players.map((p) => p.steamId));
+              const ids2 = here(def.team2.players.map((p) => p.steamId));
+              const absent =
+                def.team1.players.length +
+                def.team2.players.length -
+                ids1.length -
+                ids2.length;
+              return (
+                <button
+                  key={entry.id}
+                  className="bc__lineup"
+                  type="button"
+                  onClick={() => {
+                    const sides: Record<string, SetupSide> = {};
+                    for (const p of roster) sides[p.steamId] = "bench";
+                    for (const id of ids1) sides[id] = "team1";
+                    for (const id of ids2) sides[id] = "team2";
+                    setSetupDraft({
+                      team1Name: def.team1.name,
+                      team2Name: def.team2.name,
+                      sides,
+                      captains: {
+                        team1: ids1[0] ?? null,
+                        team2: ids2[0] ?? null,
+                      },
+                      numMaps: def.numMaps,
+                      maps: def.maps,
+                      skipVeto: def.skipVeto,
+                      clinchSeries: def.clinchSeries,
+                    });
+                    setSheet(null);
+                  }}
+                >
+                  <span>
+                    <span className="bc__lineupName">
+                      {def.team1.name} vs {def.team2.name}
+                    </span>
+                    <br />
+                    <span className="bc__lineupNote">
+                      Best of {def.numMaps} ·{" "}
+                      {ids1.length + ids2.length} of{" "}
+                      {def.team1.players.length + def.team2.players.length}{" "}
+                      here
+                      {absent ? ` · ${absent} not connected` : ""}
+                      {entry.loadedAt
+                        ? ` · last run ${new Date(entry.loadedAt).toLocaleDateString()}`
+                        : " · never run"}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          <div className="bc__sheetFoot">
+            <span className="bc__sheetSpacer" />
+            <button
+              className="bc__btn"
+              type="button"
+              onClick={() => setSheet(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sheet?.kind === "backups" && (
+        <div
+          className="bc__sheet"
+          role="dialog"
+          aria-modal
+          aria-label="Round backups"
+        >
+          <div className="bc__sheetHead">
+            <div className="bc__sheetTitle">Round backups</div>
+            <p className="bc__sheetSub">
+              MatchZy saves one at the start of every round. Restoring puts the
+              match back to that round for everyone — score, sides and money go
+              with it, and the rounds played since are undone. It happens the
+              moment you press it.
+            </p>
+          </div>
+          <div className="bc__sheetBody" style={{ padding: 0 }}>
+            {backups.isPending && <p className="bc__sbEmpty">Loading…</p>}
+            {!backups.isPending && !backups.data?.length && (
+              <p className="bc__sbEmpty">
+                No backups yet. MatchZy writes them once a match is live.
+              </p>
+            )}
+            {backups.data?.map((b) => (
+              <button
+                key={b.fileName}
+                className="bc__moreRow"
+                type="button"
+                disabled={restore.isPending}
+                onClick={() => restore.mutate(b.round)}
+              >
+                <span className="bc__actGlyph" aria-hidden>
+                  <ArrowCounterClockwise size={16} weight="bold" />
+                </span>
+                <span>
+                  <span className="bc__actLabel">Round {b.round}</span>
+                  <br />
+                  <span className="bc__actHint">
+                    saved {new Date(b.savedAt).toLocaleTimeString()}
+                  </span>
+                </span>
+                <span className="bc__moreMeta">css_restore {b.round}</span>
+              </button>
+            ))}
+          </div>
+          <div className="bc__sheetFoot">
+            <span className="bc__sheetSpacer" />
+            <button
+              className="bc__btn"
+              type="button"
+              onClick={() => setSheet(null)}
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      )}
+
+      {sheet?.kind === "apply" && (
+        <div
+          className="bc__sheet"
+          role="dialog"
+          aria-modal
+          aria-label="Load the match config"
+        >
+          <div className="bc__sheetHead">
+            <div className="bc__sheetTitle">Load this match?</div>
+            <p className="bc__sheetSub">
+              Teams, rosters and the series are one config, and MatchZy takes it
+              whole. Loading it restarts the match on {label(status.map)}
+              {match && match.phase === "live"
+                ? `, ending the one at ${match.score.ct}-${match.score.t}`
+                : ""}
+              , runs its own knife round, and rewrites the server name from
+              MatchZy&apos;s hostname format. Nobody is disconnected.
+            </p>
+            <code className="bc__rcon">
+              matchzy_loadmatch_url · {setupId(setup)}
+            </code>
+          </div>
+          <div className="bc__sheetBody">
+            <div className="bc__chips">
+              {allChips.map((c) => (
+                <span key={c.key} className="bc__chip">
+                  {c.label} <em>{c.to}</em>
+                </span>
+              ))}
+            </div>
+          </div>
+          <div className="bc__sheetFoot">
+            <button
+              className="bc__btn"
+              type="button"
+              onClick={() => setSheet(null)}
+            >
+              Keep staging
+            </button>
+            <span className="bc__sheetSpacer" />
+            <button
+              className="bc__btn bc__btn--danger"
+              type="button"
+              disabled={apply.isPending || blocked}
+              onClick={() => apply.mutate()}
+            >
+              Load the match
+            </button>
+          </div>
+        </div>
+      )}
+
       {sheet?.kind === "more" && (
         <div className="bc__sheet" role="dialog" aria-modal aria-label="Match actions">
           <div className="bc__sheetHead">
@@ -1148,6 +2174,65 @@ export function MatchStage({
                 <span className="bc__moreMeta">{a.rcon}</span>
               </button>
             ))}
+            {/*
+              The phase commands, which are not a staged setting and not a
+              MatchZy concept — `mp_warmup_start` and `mp_warmup_end` are
+              vanilla, and they are how a night without the plugin gets from
+              milling about to playing.
+            */}
+            <button
+              className="bc__moreRow"
+              type="button"
+              disabled={phase.isPending}
+              onClick={() => phase.mutate("warmup")}
+            >
+              <span className="bc__actGlyph" aria-hidden>
+                <UsersThree size={16} weight="bold" />
+              </span>
+              <span>
+                <span className="bc__actLabel">Back to warmup</span>
+                <br />
+                <span className="bc__actHint">open the server up again</span>
+              </span>
+              <span className="bc__moreMeta">mp_warmup_start</span>
+            </button>
+            <button
+              className="bc__moreRow"
+              type="button"
+              disabled={phase.isPending}
+              onClick={() => phase.mutate("live")}
+            >
+              <span className="bc__actGlyph" aria-hidden>
+                <FlagCheckered size={16} weight="bold" />
+              </span>
+              <span>
+                <span className="bc__actLabel">Go live</span>
+                <br />
+                <span className="bc__actHint">
+                  ends warmup and restarts in 3
+                </span>
+              </span>
+              <span className="bc__moreMeta">mp_warmup_end</span>
+            </button>
+            {matchzy && (
+              <button
+                className="bc__moreRow"
+                type="button"
+                onClick={() => setSheet({ kind: "backups" })}
+              >
+                <span className="bc__actGlyph" aria-hidden>
+                  <ArrowCounterClockwise size={16} weight="bold" />
+                </span>
+                <span>
+                  <span className="bc__actLabel">Round backups</span>
+                  <br />
+                  <span className="bc__actHint">
+                    put the match back to an earlier round
+                  </span>
+                </span>
+                <span className="bc__moreMeta">css_restore</span>
+              </button>
+            )}
             <button
               className="bc__moreRow bc__moreRow--danger"
               type="button"
