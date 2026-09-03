@@ -24,6 +24,7 @@ import {
   MatchActionGrid,
   MatchActionTile,
 } from "@/components/match/match-action-tile";
+import { useCan } from "@/components/session-provider";
 import { api } from "@/lib/api/client";
 import { useMatchState } from "@/lib/hooks/use-match-state";
 import { useServerStatus } from "@/lib/hooks/use-server-status";
@@ -48,6 +49,11 @@ export function LiveActionsCard({
   const qc = useQueryClient();
   const { data: match } = useMatchState();
   const { data: status } = useServerStatus();
+  // Restart round is the one tile here that goes through `/api/rcon` rather
+  // than a purpose-built match route, so it is admin while its neighbours are
+  // moderator. Drawn only for an admin, because a tile that always 403s
+  // teaches you to distrust the ones beside it.
+  const canRcon = useCan("admin");
 
   const pause = useMutation({
     mutationFn: (action: "pause" | "unpause") => api.setPause(action),
@@ -166,15 +172,17 @@ export function LiveActionsCard({
             pending={pause.isPending}
             onClick={() => pause.mutate("unpause")}
           />
-          <MatchActionTile
-            icon={ArrowCounterClockwise}
-            label="Restart round"
-            description="mp_restartgame 1"
-            variant="outline"
-            disabled={restart.isPending}
-            pending={restart.isPending}
-            onClick={() => restart.mutate()}
-          />
+          {canRcon && (
+            <MatchActionTile
+              icon={ArrowCounterClockwise}
+              label="Restart round"
+              description="mp_restartgame 1"
+              variant="outline"
+              disabled={restart.isPending}
+              pending={restart.isPending}
+              onClick={() => restart.mutate()}
+            />
+          )}
           {takeover ? (
             <>
               <MatchActionTile

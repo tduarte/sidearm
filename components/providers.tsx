@@ -67,15 +67,19 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={client}>
       {/*
-        The panel is read on a bright screen before a session and in a dark
-        room mid-match, so it follows the operating system rather than picking
-        for the operator. `ui/sonner.tsx` has always called `useTheme()`; until
-        now there was no provider under it to answer.
+        Dark, and not negotiable.
+
+        This used to follow the operating system, which was right when the
+        panel was a neutral shadcn dashboard. The Broadcast shell is not:
+        `app/broadcast.css` builds the stage out of a near-black field, white
+        type and two team colours, and a light theme would put light cards
+        inside it rather than lighten it. So the provider stays — `ui/sonner.tsx`
+        and the shadcn primitives still ask it what mode they are in — and it
+        answers the same thing every time.
       */}
       <ThemeProvider
         attribute="class"
-        defaultTheme="system"
-        enableSystem
+        forcedTheme="dark"
         disableTransitionOnChange
       >
         <TooltipProvider delayDuration={200}>

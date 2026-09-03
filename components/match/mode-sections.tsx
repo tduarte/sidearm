@@ -26,6 +26,7 @@ import {
   MatchActionTile,
 } from "@/components/match/match-action-tile";
 import { CvarTile } from "@/components/match/cvar-tile";
+import { useCan } from "@/components/session-provider";
 import { api } from "@/lib/api/client";
 import { useCvarGroup } from "@/lib/hooks/use-cvar-group";
 import { asBool } from "@/lib/cs2/cvars";
@@ -88,11 +89,20 @@ function SectionCard({
  * and because the practice cvars are only polled while their section is open
  * (RCON is one serialised socket; reading values nobody is looking at starves
  * the status poll).
+ *
+ * Two routes underneath, and they need different roles. The `CvarTile`s go
+ * through `/api/match/cvars`, which a moderator may call; the tiles that send a
+ * raw command go through `/api/rcon`, which is admin — "an arbitrary-command
+ * escape hatch; it is not a moderator tool". They looked identical, so a
+ * moderator got a grid where half the tiles worked and the other half returned
+ * 403 with no way to tell which was which beforehand. The raw-command tiles are
+ * now drawn only for an admin, and their absence is stated.
  */
 export function ModeSections() {
   const [casualOpen, setCasualOpen] = useState(false);
   const [practiceOpen, setPracticeOpen] = useState(false);
   const cvars = useCvarGroup("practice", practiceOpen);
+  const canRcon = useCan("admin");
 
   const rcon = useMutation({
     mutationFn: (cmd: string) => api.rcon(cmd),
@@ -115,10 +125,23 @@ export function ModeSections() {
       <SectionCard
         id="casual-section"
         title="Casual / Deathmatch"
-        description="Switch the server out of competitive for a warmup DM or a casual evening."
+        description={
+          canRcon
+            ? "Switch the server out of competitive for a warmup DM or a casual evening."
+            : "Switching modes sends a raw command, which needs an admin account."
+        }
         open={casualOpen}
         onToggle={() => setCasualOpen((v) => !v)}
       >
+        {!canRcon && (
+          <p className="text-xs/relaxed text-muted-foreground">
+            These three tiles write <span className="font-mono">game_type</span>{" "}
+            and <span className="font-mono">game_mode</span> over raw RCON, so
+            they are admin-only. The mode is also a staged edit on the dashboard,
+            which a moderator can see but not apply.
+          </p>
+        )}
+        {canRcon && (
         <MatchActionGrid layout="casual">
           <MatchActionTile
             icon={GameController}
@@ -148,6 +171,7 @@ export function ModeSections() {
             onClick={() => rcon.mutate("mp_restartgame 1")}
           />
         </MatchActionGrid>
+        )}
       </SectionCard>
 
       <SectionCard
@@ -183,40 +207,49 @@ export function ModeSections() {
         </div>
 
         <MatchActionGrid layout="practice">
-          <MatchActionTile
-            icon={FastForward}
-            label="End warmup"
-            description="mp_warmup_end"
-            variant="outline"
-            disabled={rcon.isPending}
-            pending={rcon.isPending}
-            onClick={() => rcon.mutate("mp_warmup_end")}
-          />
-          <MatchActionTile
-            icon={Shield}
-            label="Add CT bot"
-            variant="outline"
-            disabled={rcon.isPending}
-            pending={rcon.isPending}
-            onClick={() => rcon.mutate("bot_add_ct")}
-          />
-          <MatchActionTile
-            icon={Fire}
-            label="Add T bot"
-            variant="outline"
-            disabled={rcon.isPending}
-            pending={rcon.isPending}
-            onClick={() => rcon.mutate("bot_add_t")}
-          />
-          <MatchActionTile
-            icon={Prohibit}
-            label="Kick all bots"
-            description="bot_kick"
-            variant="outline"
-            disabled={rcon.isPending}
-            pending={rcon.isPending}
-            onClick={() => rcon.mutate("bot_kick")}
-          />
+          {/*
+            Warmup and the bot commands are raw RCON (admin); everything after
+            them is a cvar write (moderator). Same grid, same tiles, different
+            route — so the four that a moderator cannot send are not drawn.
+          */}
+          {canRcon && (
+            <>
+              <MatchActionTile
+                icon={FastForward}
+                label="End warmup"
+                description="mp_warmup_end"
+                variant="outline"
+                disabled={rcon.isPending}
+                pending={rcon.isPending}
+                onClick={() => rcon.mutate("mp_warmup_end")}
+              />
+              <MatchActionTile
+                icon={Shield}
+                label="Add CT bot"
+                variant="outline"
+                disabled={rcon.isPending}
+                pending={rcon.isPending}
+                onClick={() => rcon.mutate("bot_add_ct")}
+              />
+              <MatchActionTile
+                icon={Fire}
+                label="Add T bot"
+                variant="outline"
+                disabled={rcon.isPending}
+                pending={rcon.isPending}
+                onClick={() => rcon.mutate("bot_add_t")}
+              />
+              <MatchActionTile
+                icon={Prohibit}
+                label="Kick all bots"
+                description="bot_kick"
+                variant="outline"
+                disabled={rcon.isPending}
+                pending={rcon.isPending}
+                onClick={() => rcon.mutate("bot_kick")}
+              />
+            </>
+          )}
           <CvarTile
             spec={specOf("sv_infinite_ammo")}
             state={cvars.byName.get("sv_infinite_ammo")}

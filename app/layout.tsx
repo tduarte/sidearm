@@ -3,7 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { cn } from "@/lib/utils";
 import { Providers } from "@/components/providers";
-import { AppShell } from "@/components/app-shell";
+import { BroadcastShell } from "@/components/broadcast/shell";
 import { PanelInfoProvider } from "@/components/panel-info";
 import pkg from "../package.json";
 
@@ -62,7 +62,7 @@ export default function RootLayout({
           }}
         >
           <Providers>
-            <AppShell>{children}</AppShell>
+            <BroadcastShell>{children}</BroadcastShell>
           </Providers>
         </PanelInfoProvider>
       </body>

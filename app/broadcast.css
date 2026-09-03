@@ -1,0 +1,1004 @@
+/*
+ * The Broadcast world.
+ *
+ * Ported from the accepted exploration at `/design/broadcast`, which stays in
+ * the tree as the frozen comp: it renders fixture data through DialKit so the
+ * proportions can still be argued about, and this file is what the product
+ * actually ships. They will drift, and that is the point — the comp records the
+ * decision, this records the build.
+ *
+ * Everything is scoped under `.bc`, so it cannot leak into the shadcn
+ * primitives (dialogs, sheets, toasts) that still render in portals outside it.
+ * The five tokens the world is built from are declared once, here, instead of
+ * arriving as inline styles from a tuning panel.
+ */
+.bc {
+  --ct: #3d8bfd;
+  --t: #ff9422;
+  --live: #ff4d4d;
+  --take: #ffd166;
+  --bad: #ff5a5a;
+  --veil: 0.92;
+  --artOpacity: 0.28;
+  --bandPad: 26px;
+  --teamSize: 28;
+  --scoreSize: 11;
+  --rowPad: 11px;
+  --barOpacity: 0.13;
+  --applyMs: 1600ms;
+  /* How wide a player name is allowed to get before it ellipsises. It is a
+     fixed lane rather than "whatever is left" on purpose: the header labels
+     and the row values only stay locked to each other if the track between
+     the numbers and the column edge is the same width in both, and content
+     cannot guarantee that. Everything past the lane becomes slack on the
+     outer edge, which is what keeps the numbers next to the names they
+     belong to instead of pinned to the far side of the column. */
+  --nameLane: 15rem;
+  --line: rgba(255,255,255,0.09);
+  --stage: #06070a;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  min-height: 100svh;
+  background: var(--stage);
+  color: #fff;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+  display: flex; flex-direction: column; position: relative; overflow: hidden;
+}
+/* only the surface that carries the dock pays for it */
+.bc--docked { padding-bottom: 184px; }
+.bc__art {
+  position: absolute; inset: 0; background-size: cover; background-position: center 35%;
+  filter: saturate(0.5) contrast(1.1);
+  transition: opacity 240ms var(--ease);
+}
+.bc__veil {
+  position: absolute; inset: 0;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(0,0,0,0.15), rgba(6,7,10,var(--veil)) 70%),
+    linear-gradient(180deg, rgba(6,7,10,0.4) 0%, rgba(6,7,10,0.98) 62%);
+}
+.bc__body { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.bc__body[inert] { opacity: 0.94; }
+
+/* every control on this page shares one focus treatment, so the keyboard path
+   is never the one that got forgotten */
+.bc button:focus-visible, .bc input:focus-visible {
+  outline: 2px solid #fff; outline-offset: 2px;
+}
+
+/* ---- top rail ---- */
+.bc__rail {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 9px 16px; border-bottom: 1px solid var(--line);
+  background: rgba(0,0,0,0.42);
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: rgba(255,255,255,0.62);
+}
+.bc__bus {
+  display: inline-flex; align-items: center; gap: 7px; padding: 4px 9px;
+  font-weight: 800; letter-spacing: 0.16em; color: #fff;
+  background: var(--live); box-shadow: 0 0 22px -4px var(--live);
+  transition: background 180ms var(--ease), color 180ms var(--ease);
+}
+.bc__bus--pvw { background: var(--take); box-shadow: 0 0 22px -4px var(--take); color: #0a0a0a; }
+.bc__bus--wait { background: rgba(255,255,255,0.22); box-shadow: none; color: #fff; }
+.bc__bus--bad { background: var(--bad); box-shadow: 0 0 22px -4px var(--bad); color: #14070a; }
+.bc__bus--unknown { background: rgba(255,255,255,0.14); box-shadow: none; color: rgba(255,255,255,0.85); }
+.bc__rail b { color: #fff; font-weight: 700; letter-spacing: 0.06em; }
+.bc__rec { color: var(--live); }
+.bc__rec--off { color: rgba(255,255,255,0.45); }
+.bc__meta { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-left: auto; }
+.bc__meta span { white-space: nowrap; }
+
+/* the connect string is the single most handed-around fact in the product, so
+   it is a control rather than text you have to select by hand */
+.bc__copy {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  color: #fff; font: inherit; font-size: 11px; letter-spacing: 0.08em; padding: 4px 9px;
+  transition: background 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__copy:hover { background: rgba(255,255,255,0.13); }
+.bc__copy:active { transform: translateY(1px); }
+.bc__copy b { font-family: var(--font-geist-mono), ui-monospace, monospace; letter-spacing: 0; }
+
+/* The palette's only visible door. A keyboard shortcut nobody has been told
+   about is a feature that does not exist, and on a phone there is no ⌘ at all —
+   so the shortcut is printed on the control that replaces it, and the printed
+   key is hidden at the width where it would be a lie. */
+.bc__k {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.72); font: inherit; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase; padding: 4px 9px;
+  transition: background 120ms var(--ease), color 120ms var(--ease),
+    border-color 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__k:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.4); color: #fff; }
+.bc__k:active { transform: translateY(1px); }
+.bc__kKeys {
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 10px; letter-spacing: 0; color: rgba(255,255,255,0.5);
+  border: 1px solid rgba(255,255,255,0.16); padding: 0 4px; line-height: 1.5;
+}
+@media (max-width: 700px) {
+  .bc__kKeys { display: none; }
+  .bc__kLabel { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+}
+
+/* segmented control: a real one, with a surface, a hover state and a press */
+.bc__seg { display: flex; flex-wrap: wrap; border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.04); }
+.bc__segBtn {
+  position: relative; background: transparent; border: 0; cursor: pointer;
+  padding: 7px 13px; font: inherit; font-size: 11px; letter-spacing: 0.12em;
+  text-transform: uppercase; color: rgba(255,255,255,0.72);
+  border-right: 1px solid rgba(255,255,255,0.12);
+  transition: background 120ms var(--ease), color 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__segBtn:last-child { border-right: 0; }
+.bc__segBtn::after {
+  content: ""; position: absolute; left: 50%; right: 50%; bottom: 0; height: 2px;
+  background: #fff; transition: left 140ms var(--ease), right 140ms var(--ease);
+}
+.bc__segBtn:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.bc__segBtn:hover::after { left: 18%; right: 18%; }
+.bc__segBtn:active { transform: translateY(1px); }
+.bc__segBtn--on { background: #fff; color: #06070a; font-weight: 800; }
+.bc__segBtn--on::after { left: 0; right: 0; background: transparent; }
+.bc__segBtn--staged { background: var(--take); color: #0a0a0a; font-weight: 800; }
+.bc__segBtn--staged::after { left: 0; right: 0; background: transparent; }
+.bc__segBtn--conflict { background: var(--bad); color: #14070a; font-weight: 800; }
+
+/* Lifecycle, in the rail. Start / Stop / Restart are whole-server operations,
+   so they belong beside the bus that reports the server's condition and
+   nowhere else — but they are also the rarest thing in this strip, so they are
+   outlines rather than fills and never compete with the score. */
+.bc__life { display: inline-flex; align-items: center; gap: 4px; }
+.bc__updating { color: var(--take); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; }
+.bc__railBtn {
+  display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  color: rgba(255,255,255,0.82); font: inherit; font-size: 11px; font-weight: 600;
+  letter-spacing: 0.12em; text-transform: uppercase; padding: 4px 9px;
+  transition: background 120ms var(--ease), color 120ms var(--ease),
+    border-color 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__railBtn:hover:not(:disabled) { background: rgba(255,255,255,0.13); color: #fff; }
+.bc__railBtn:active:not(:disabled) { transform: translateY(1px); }
+.bc__railBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.bc__railBtn--danger { color: var(--bad); border-color: rgba(255,90,90,0.4); }
+.bc__railBtn--danger:hover:not(:disabled) { background: rgba(255,90,90,0.16); color: var(--bad); }
+.bc__railBtn--info { color: var(--take); border-color: rgba(255,209,102,0.45); }
+.bc__railBtn--info:hover:not(:disabled) { background: rgba(255,209,102,0.16); color: var(--take); }
+
+/* ---- shell: the rail's navigation ---- */
+
+/* The world has no sidebar. Every other surface in the panel is a place you go
+   to and come back from, so they live as a row in the rail — the same strip
+   that already carries what server you are looking at — and the match itself
+   is the one thing that has no link, because it is what you are already on.
+
+   `aria-current` rather than a class does the active state: the link is the
+   fact, the underline is the rendering of it. */
+.bc__nav { display: flex; align-items: center; gap: 2px; flex-wrap: wrap; }
+.bc__navLink {
+  position: relative; display: inline-flex; align-items: center; gap: 7px;
+  padding: 6px 10px; text-decoration: none;
+  color: rgba(255,255,255,0.62); font-size: 11px; letter-spacing: 0.14em;
+  text-transform: uppercase; font-weight: 600;
+  transition: color 120ms var(--ease), background 120ms var(--ease);
+}
+.bc__navLink::after {
+  content: ""; position: absolute; left: 50%; right: 50%; bottom: 0; height: 2px;
+  background: #fff; transition: left 160ms var(--ease), right 160ms var(--ease);
+}
+.bc__navLink:hover { color: #fff; background: rgba(255,255,255,0.07); }
+.bc__navLink:hover::after { left: 10px; right: 10px; }
+.bc__navLink[aria-current="page"] { color: #fff; }
+.bc__navLink[aria-current="page"]::after { left: 10px; right: 10px; }
+.bc__navLink svg { opacity: 0.8; }
+
+/* Who you are signed in as, and the way out. Deliberately the quietest thing
+   in the rail: it is answered once a session and then never looked at again. */
+.bc__me {
+  display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+  color: rgba(255,255,255,0.5); font-size: 11px; letter-spacing: 0.12em;
+  padding: 4px 2px; transition: color 120ms var(--ease);
+}
+.bc__me b { color: rgba(255,255,255,0.86); }
+.bc__me:hover { color: rgba(255,255,255,0.86); }
+
+/* Every route that is not the match renders here: one column, capped for
+   reading, and it owns its own scrolling so the rail stays put. */
+.bc__stage { position: relative; flex: 1; min-height: 0; overflow: auto; }
+/* The bottom padding is what keeps the last row of any page above the fixed
+   ActionBar; without it the final control on every scrollable page sits
+   underneath the bar and cannot be tapped. */
+.bc__stageIn {
+  padding: 20px 16px calc(4.5rem + env(safe-area-inset-bottom));
+  margin: 0 auto; width: 100%; max-width: 1180px;
+}
+@media (min-width: 768px) { .bc__stageIn { padding-bottom: 40px; } }
+
+/* On a phone the rail has four rows' worth of things to say and one row's
+   worth of width. The nav scrolls sideways rather than wrapping — a nav that
+   reflows every time the hostname changes length is a nav you cannot aim at —
+   and the demo indicator goes, because the dock's Record button already
+   carries that state where it matters. */
+@media (max-width: 700px) {
+  .bc__rail { gap: 8px; padding: 8px 12px; }
+  .bc__rec { display: none; }
+  .bc__meta { margin-left: 0; width: 100%; gap: 8px; }
+  .bc__nav {
+    gap: 0; flex-wrap: nowrap; overflow-x: auto; min-width: 0; flex: 1;
+    scrollbar-width: none;
+  }
+  .bc__nav::-webkit-scrollbar { display: none; }
+  .bc__navLink { padding: 6px 8px; letter-spacing: 0.08em; flex: 0 0 auto; }
+}
+
+/* ---- the band ---- */
+.bc__band { display: grid; grid-template-columns: 1fr auto 1fr; border-bottom: 1px solid var(--line); position: relative; }
+.bc__band--solo { grid-template-columns: 1fr; }
+.bc__side { padding: var(--bandPad) 32px; display: flex; align-items: center; gap: 28px; }
+.bc__side--t { flex-direction: row-reverse; text-align: right; }
+.bc__sideMark { width: 6px; align-self: stretch; border-radius: 99px; }
+.bc__ct .bc__sideMark { background: var(--ct); box-shadow: 0 0 40px 2px var(--ct); }
+.bc__t .bc__sideMark { background: var(--t); box-shadow: 0 0 40px 2px var(--t); }
+.bc__team { display: flex; flex-direction: column; gap: 6px; min-width: 0; flex: 1; }
+.bc__side--t .bc__team { align-items: flex-end; }
+.bc__tag { font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase; font-weight: 600; }
+.bc__ct .bc__tag { color: var(--ct); }
+.bc__t .bc__tag { color: var(--t); }
+.bc__capName { color: rgba(255,255,255,0.62); }
+.bc__tagWarn { color: var(--bad); }
+
+/* an editable field, and it says so: a dashed rule that solidifies on hover */
+.bc__nameWrap { display: flex; align-items: center; gap: 8px; width: 100%; }
+.bc__side--t .bc__nameWrap { flex-direction: row-reverse; }
+.bc__nameField {
+  font: inherit; color: #fff; background: transparent; flex: 1; min-width: 0;
+  border: 0; border-bottom: 1px dashed rgba(255,255,255,0.42);
+  padding: 2px 2px 3px;
+  font-size: calc(var(--teamSize) * 1px); font-weight: 800;
+  letter-spacing: -0.02em; text-transform: uppercase; line-height: 1.05;
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+  cursor: text;
+}
+.bc__side--t .bc__nameField { text-align: right; }
+.bc__nameField:hover { border-bottom-color: rgba(255,255,255,0.75); }
+.bc__nameField:focus { border-bottom: 1px solid var(--take); }
+.bc__nameField--staged { border-bottom: 1px solid var(--take); color: var(--take); }
+.bc__nameField--conflict { border-bottom: 1px solid var(--bad); color: var(--bad); }
+.bc__nameField--bad { border-bottom: 1px solid var(--bad); }
+.bc__pencil { font-size: 13px; color: rgba(255,255,255,0.55); flex: 0 0 auto; }
+
+.bc__score {
+  font-size: clamp(48px, calc(var(--scoreSize) * 1vw), 132px);
+  font-weight: 800; line-height: 0.8; letter-spacing: -0.05em;
+  font-variant-numeric: tabular-nums;
+}
+
+.bc__centre {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 10px; padding: 22px; min-width: 280px; max-width: 470px;
+  border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  background: rgba(255,255,255,0.02);
+}
+.bc__live {
+  display: inline-flex; align-items: center; gap: 7px;
+  font-size: 11px; letter-spacing: 0.2em; font-weight: 700; text-transform: uppercase;
+  color: var(--live);
+}
+.bc__live--unknown { color: rgba(255,255,255,0.75); }
+.bc__dot { width: 7px; height: 7px; border-radius: 99px; background: currentColor; animation: bcpulse 1.6s ease-in-out infinite; }
+@keyframes bcpulse { 0%,100% { opacity: 1; transform: scale(1);} 50% { opacity: 0.35; transform: scale(0.82);} }
+
+/* the map is a control shaped like a control: surface, caret, press */
+.bc__mapBtn {
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.16);
+  cursor: pointer; color: #fff; font: inherit;
+  font-size: clamp(20px, 2.6vw, 34px); font-weight: 800;
+  letter-spacing: -0.02em; text-transform: uppercase; padding: 6px 14px;
+  display: inline-flex; align-items: center; gap: 11px;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__mapBtn:hover { background: rgba(255,255,255,0.13); border-color: rgba(255,255,255,0.4); }
+.bc__mapBtn:active { transform: translateY(1px); }
+.bc__mapBtn:disabled { cursor: default; opacity: 0.72; }
+.bc__mapBtn:disabled:hover { background: rgba(255,255,255,0.06); border-color: rgba(255,255,255,0.16); }
+/* Staged wears the same amber as every other pending edit, so "this is not
+   what the server is doing yet" is one colour across the whole page. */
+.bc__mapBtn--staged { border-color: var(--take); color: var(--take); }
+
+/* The round limit, beside the round it limits. A number field rather than a
+   set of presets: MR12 and MR15 are the common answers but not the only legal
+   ones, and a control that refuses the third one is a control you work around
+   in the console instead. */
+.bc__limit {
+  display: inline-flex; align-items: center; gap: 9px;
+  border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.05);
+  padding: 4px 11px 4px 9px;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: rgba(255,255,255,0.72);
+  transition: border-color 120ms var(--ease), color 120ms var(--ease);
+}
+.bc__limit:focus-within { border-color: rgba(255,255,255,0.4); color: #fff; }
+.bc__limit--staged { border-color: var(--take); color: var(--take); }
+.bc__limitLabel { cursor: pointer; }
+.bc__limitInput {
+  width: 3.4em; background: transparent; border: 0;
+  border-bottom: 1px dashed rgba(255,255,255,0.42);
+  color: #fff; font: inherit;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 13px; letter-spacing: 0; font-variant-numeric: tabular-nums;
+  padding: 1px 2px; text-align: center;
+  transition: border-color 120ms var(--ease);
+}
+.bc__limitInput:hover { border-bottom-color: rgba(255,255,255,0.75); }
+.bc__limitInput:focus { border-bottom-color: #fff; outline-offset: 3px; }
+.bc__limit--staged .bc__limitInput { color: var(--take); border-bottom-color: var(--take); }
+.bc__limitHint { color: rgba(255,255,255,0.45); letter-spacing: 0.1em; }
+.bc__caret { font-size: 13px; opacity: 0.7; }
+.bc__round { font-size: 12px; letter-spacing: 0.16em; text-transform: uppercase; color: rgba(255,255,255,0.62); font-variant-numeric: tabular-nums; text-align: center; }
+
+/* the staged map never repaints the stage — it shows up here as a cue */
+.bc__cue {
+  display: inline-flex; align-items: center; gap: 9px; padding: 5px 9px 5px 5px;
+  border: 1px solid var(--take); color: var(--take);
+  font-size: 10.5px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700;
+  animation: bcrise 200ms var(--ease);
+}
+.bc__cueArt { width: 42px; height: 26px; background-size: cover; background-position: center; flex: 0 0 auto; }
+.bc__cueX {
+  background: transparent; border: 0; color: inherit; font: inherit; cursor: pointer;
+  padding: 0 2px; opacity: 0.7;
+}
+.bc__cueX:hover { opacity: 1; }
+
+/* a switch, not a word that happens to be clickable */
+.bc__switch {
+  display: inline-flex; align-items: center; gap: 9px; cursor: pointer;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  padding: 5px 11px 5px 7px; font: inherit;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: rgba(255,255,255,0.72);
+  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__switch:hover { background: rgba(255,255,255,0.11); color: #fff; }
+.bc__switch:active { transform: translateY(1px); }
+.bc__track {
+  width: 26px; height: 14px; border-radius: 99px; background: rgba(255,255,255,0.24);
+  position: relative; flex: 0 0 auto; transition: background 160ms var(--ease);
+}
+.bc__knob {
+  position: absolute; top: 2px; left: 2px; width: 10px; height: 10px; border-radius: 99px;
+  background: #fff; transition: transform 160ms var(--ease);
+}
+.bc__switch--on { color: #fff; border-color: rgba(255,255,255,0.4); }
+.bc__switch--on .bc__track { background: rgba(255,255,255,0.6); }
+.bc__switch--on .bc__knob { transform: translateX(12px); }
+.bc__switch--staged { border-color: var(--take); color: var(--take); }
+.bc__switch--staged .bc__track { background: var(--take); }
+
+/* The mode picker shows only the mode you are on; the other four live behind
+   it. It resolves rather than arrives — scaling up out of the trigger and
+   coming out of blur — so opening it reads as bringing a decision into focus
+   rather than as a panel flying in from somewhere offscreen. */
+.bc__mode { position: relative; display: inline-block; }
+.bc__modeBtn {
+  list-style: none; cursor: pointer; position: relative; z-index: 41;
+  display: inline-flex; align-items: center; gap: 10px;
+  border: 1px solid rgba(255,255,255,0.16); background: rgba(255,255,255,0.06);
+  padding: 6px 13px; color: #fff;
+  font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.bc__modeBtn::-webkit-details-marker { display: none; }
+.bc__modeBtn:hover { background: rgba(255,255,255,0.12); border-color: rgba(255,255,255,0.34); }
+.bc__modeBtn:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+.bc__modeName { font-weight: 800; }
+.bc__modeShape { font-size: 10px; letter-spacing: 0.06em; text-transform: none; color: rgba(255,255,255,0.44); }
+.bc__modeBtn--staged { border-color: var(--take); color: var(--take); }
+.bc__modeBtn--staged .bc__modeShape { color: var(--take); opacity: 0.72; }
+.bc__modeBtn--conflict { border-color: var(--bad); color: var(--bad); }
+.bc__modeBtn--conflict .bc__modeShape { color: var(--bad); opacity: 0.72; }
+.bc__modeMenu {
+  position: absolute; top: calc(100% + 6px); left: 50%; translate: -50% 0;
+  z-index: 40; min-width: 258px; transform-origin: top center;
+  border: 1px solid rgba(255,255,255,0.28); background: #0b0d12;
+  box-shadow: 0 24px 60px -20px rgba(0,0,0,0.9);
+  display: flex; flex-direction: column;
+}
+.bc__mode[open] .bc__modeMenu { animation: bcmode 300ms var(--ease) both; }
+@keyframes bcmode {
+  from { opacity: 0; transform: scale(0.94) translateY(-5px); filter: blur(7px); }
+  to { opacity: 1; transform: none; filter: blur(0); }
+}
+.bc__modeOpt {
+  display: flex; flex-direction: column; gap: 2px; text-align: left;
+  background: transparent; border: 0; border-bottom: 1px solid rgba(255,255,255,0.08);
+  cursor: pointer; color: rgba(255,255,255,0.8); font: inherit; padding: 9px 13px;
+  transition: background 110ms var(--ease), color 110ms var(--ease);
+}
+.bc__modeOpt:last-child { border-bottom: 0; }
+.bc__modeOpt:hover { background: rgba(255,255,255,0.1); color: #fff; }
+.bc__modeOpt--on { background: rgba(255,255,255,0.16); color: #fff; box-shadow: inset 2px 0 0 #fff; }
+.bc__modeOptName { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; font-weight: 800; }
+.bc__modeOptShape { font-size: 10px; letter-spacing: 0.06em; color: rgba(255,255,255,0.44); }
+
+.bc__pips { display: flex; gap: 5px; }
+.bc__pip { width: 26px; height: 4px; background: rgba(255,255,255,0.2); }
+.bc__pip--ct { background: var(--ct); }
+.bc__pip--t { background: var(--t); }
+.bc__pip--now { background: #fff; }
+
+/* the cut: the one authored moment, fired when the server confirms */
+.bc__cut {
+  position: absolute; inset: 0; pointer-events: none; z-index: 4;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.85), transparent);
+  animation: bccut 260ms var(--ease) forwards;
+}
+@keyframes bccut {
+  from { transform: translateX(-100%); opacity: 0.9; }
+  to { transform: translateX(100%); opacity: 0; }
+}
+
+/* ---- rundown ---- */
+.bc__rundown { display: flex; align-items: stretch; border-bottom: 1px solid var(--line); background: rgba(0,0,0,0.3); flex-wrap: wrap; }
+.bc__rdLabel {
+  padding: 12px 16px; font-size: 10px; letter-spacing: 0.2em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); display: flex; align-items: center;
+  border-right: 1px solid var(--line); white-space: nowrap;
+}
+.bc__rdMaps { display: flex; flex: 1 1 320px; }
+.bc__rd {
+  position: relative; flex: 1 1 130px; min-width: 0; min-height: 62px; padding: 10px 14px;
+  border-right: 1px solid var(--line); background: transparent;
+  color: #fff; text-align: left; display: flex; flex-direction: column; justify-content: center; gap: 3px;
+  overflow: hidden;
+}
+.bc__rdArt { position: absolute; inset: 0; background-size: cover; background-position: center; opacity: 0.22; transition: opacity 160ms var(--ease); }
+.bc__rdName { position: relative; font-size: 14px; font-weight: 800; letter-spacing: 0.04em; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc__rdNote { position: relative; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.62); }
+.bc__rd--live { box-shadow: inset 3px 0 0 var(--live); }
+.bc__rd--live .bc__rdNote { color: var(--live); }
+.bc__rd--done .bc__rdName { color: rgba(255,255,255,0.62); }
+.bc__rd--done .bc__rdArt { filter: grayscale(0.8); opacity: 0.12; }
+/* the upcoming map had no rule at all in the third pass, so "next" was the one
+   series state with no treatment. Dashed means not-yet, as it does everywhere. */
+.bc__rd--next { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.14); }
+.bc__rd--next .bc__rdName { color: rgba(255,255,255,0.9); }
+.bc__rd--next .bc__rdArt { opacity: 0.12; }
+.bc__rd--next::before {
+  content: ""; position: absolute; left: 0; top: 0; bottom: 0; width: 3px;
+  background: repeating-linear-gradient(180deg, rgba(255,255,255,0.55) 0 5px, transparent 5px 10px);
+}
+.bc__rd--cued { box-shadow: inset 3px 0 0 var(--take); }
+.bc__rd--cued .bc__rdNote { color: var(--take); }
+.bc__poolBtn {
+  padding: 0 18px; background: rgba(255,255,255,0.05); border: 0; border-left: 1px solid var(--line);
+  color: rgba(255,255,255,0.85); font: inherit; font-size: 10px; letter-spacing: 0.18em;
+  text-transform: uppercase; cursor: pointer; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 8px; min-height: 44px;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+.bc__poolBtn:hover { color: #fff; background: rgba(255,255,255,0.12); }
+
+/* A side's name at the same weight as the editable one in the comp, without the
+   dashed rule that promises you can change it. Renaming a side is a MatchZy
+   match config, not a cvar, so here it states rather than offers. */
+.bc__nameRead {
+  color: #fff;
+  font-size: calc(var(--teamSize) * 1px); font-weight: 800;
+  letter-spacing: -0.02em; text-transform: uppercase; line-height: 1.05;
+  padding: 2px 2px 3px; min-width: 0;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.bc__side--t .bc__nameRead { text-align: right; }
+
+/* The one line the stage shows before it knows anything. Not a grey slab: a
+   skeleton the shape of a scoreboard would be a scoreboard-shaped lie for the
+   two seconds before RCON answers. */
+.bc__wait {
+  margin: auto; padding: 64px 16px; color: rgba(255,255,255,0.5);
+  font-size: 12px; letter-spacing: 0.18em; text-transform: uppercase;
+}
+
+/* ---- rosters ----
+
+   Two variations of one row, not one row bent out of shape by overrides.
+
+   The score band has always mirrored: .bc__side--t reverses and pushes the team
+   to the outer edge. The rosters under it did not, and the symmetry broke
+   exactly where the eye goes looking for it. Now there are two variants —
+   bc__row--l puts the name at the start of the row, bc__row--r at the end —
+   and each one places every child of the row explicitly, at every width.
+
+   The names face the centre and the numbers sit just outside them, which is
+   the opposite of the band above it. That is on purpose. The band is two teams
+   shouting across a gap; the roster is one table you read as a pair, and the
+   two name columns meeting over the bench are what make it read as one. Any
+   width left over goes past the numbers to the outer edge of the column rather
+   than opening a hole between a player and their own line.
+
+   Explicit is the whole point. The first attempt at this mirrored T by
+   re-placing three of the four children and leaving the rest to auto-placement,
+   so the header's spacer, the stats track and the hover overlay were all
+   resolving against a cursor that moved whenever any one of them did. Nothing
+   below depends on document order, which is also what lets the stacked layout
+   un-mirror both variants in a handful of lines rather than unpicking the
+   overrides one at a time.
+
+   The five stat columns keep their order on both sides. The mirror is about
+   which edge a block sits against, not about reading numbers backwards: K stays
+   the first column on both halves so the two teams compare down a line. What
+   does mirror is the alignment inside each cell: the digits hug whichever side
+   of their 46px is nearest the name, so a number leans back toward the player
+   it belongs to instead of drifting off the outside edge. */
+.bc__grid { display: grid; grid-template-columns: 1fr auto 1fr; flex: 1; min-height: 0; }
+.bc__grid--solo { grid-template-columns: 1fr; }
+.bc__col { padding: 14px 16px 20px; min-width: 0; }
+.bc__col + .bc__col { border-left: 1px solid var(--line); }
+.bc__head, .bc__row { display: grid; gap: 12px; align-items: center; }
+.bc__head {
+  padding: 0 10px 8px;
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); font-weight: 600;
+}
+.bc__headName { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc__stats { display: grid; grid-template-columns: repeat(5, 46px); gap: 8px; }
+.bc__row {
+  padding: var(--rowPad) 10px; position: relative;
+  font-variant-numeric: tabular-nums; border-top: 1px solid rgba(255,255,255,0.05);
+  transition: background 120ms var(--ease);
+}
+.bc__row:hover { background: rgba(255,255,255,0.04); }
+.bc__who { display: flex; align-items: center; gap: 9px; min-width: 0; position: relative; }
+.bc__moves { display: flex; gap: 5px; position: relative; }
+.bc__player { font-weight: 700; font-size: 15px; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bc__rank { font-size: 11px; color: rgba(255,255,255,0.5); font-weight: 700; width: 16px; flex: 0 0 auto; }
+.bc__num { font-size: 14px; font-weight: 600; position: relative; }
+.bc__num--dim { color: rgba(255,255,255,0.62); font-weight: 500; }
+
+/* captaincy is a control: exactly one per side, click a badge to move it */
+.bc__cap {
+  font-size: 9px; font-weight: 800; letter-spacing: 0.1em; padding: 5px 7px;
+  background: transparent; border: 1px solid rgba(255,255,255,0.3); color: rgba(255,255,255,0.7);
+  cursor: pointer; flex: 0 0 auto; font-family: inherit;
+  transition: background 120ms var(--ease), color 120ms var(--ease), border-color 120ms var(--ease);
+}
+.bc__cap:hover { border-color: #fff; color: #fff; }
+.bc__cap--on { background: #fff; color: #06070a; border-color: #fff; }
+.bc__cap--staged { background: var(--take); border-color: var(--take); color: #0a0a0a; }
+
+/* The row meter starts under the name and grows away from the centre, so the
+   two sides push outward rather than into each other. Only the tint is
+   per-column; the direction belongs to the variant, which is why it is a
+   custom property rather than four gradients. */
+.bc__bar {
+  position: absolute; inset: 0 auto 0 0; opacity: var(--barOpacity); pointer-events: none;
+  --barTint: rgba(255,255,255,0.5);
+  background: linear-gradient(to right, var(--barTint), transparent);
+}
+.bc__ctcol .bc__bar { --barTint: var(--ct); }
+.bc__tcol .bc__bar { --barTint: var(--t); }
+
+/* Name at the start of the row, numbers after it. This is also the shape any
+   list with no centre to mirror around falls back to: the bench, the unsided
+   roster, and both sides once the columns stack. On the board it is the T
+   side, the column whose start is the centre. */
+.bc__head--l, .bc__row--l { grid-template-columns: minmax(0,var(--nameLane)) auto minmax(0,1fr); }
+.bc__head--l .bc__headName { grid-area: 1 / 1; }
+.bc__head--l .bc__stats { grid-area: 1 / 2; text-align: left; }
+.bc__row--l .bc__who { grid-area: 1 / 1; }
+.bc__row--l .bc__stats { grid-area: 1 / 2; text-align: left; }
+.bc__row--l .bc__moves { grid-area: 1 / 3; justify-content: flex-start; }
+
+/* Name at the end of the row: the same row about a vertical axis. On the board
+   it is the CT side, the column whose end is the centre. The two flex lines
+   reverse so the captain badge and the move cluster mirror too; the DOM keeps
+   name-then-stats-then-moves on both sides, which is the order a screen reader
+   wants and the order tabbing follows. */
+.bc__head--r, .bc__row--r { grid-template-columns: minmax(0,1fr) auto minmax(0,var(--nameLane)); }
+.bc__head--r .bc__headName { grid-area: 1 / 3; text-align: right; }
+.bc__head--r .bc__stats { grid-area: 1 / 2; text-align: right; }
+.bc__row--r .bc__who { grid-area: 1 / 3; flex-direction: row-reverse; }
+.bc__row--r .bc__stats { grid-area: 1 / 2; text-align: right; }
+.bc__row--r .bc__moves { grid-area: 1 / 1; flex-direction: row-reverse; }
+.bc__row--r .bc__bar { inset: 0 0 0 auto; background: linear-gradient(to left, var(--barTint), transparent); }
+
+/* The moves sit at the end of the NAME lane instead of owning a column of
+   their own, so the stats keep their full width and their own track goes back
+   to being pure slack — the same slack the header has in that position, which
+   is what keeps K / D / A / K/D / Ping over the numbers they
+   label. The cluster resolves out of blur while the name behind it blurs
+   and dims: a depth swap rather than an arrival. It arrives from whichever end
+   of that column the name is not using, which is the only thing the two
+   variants disagree about here.
+
+   All of it is gated on a real pointer. A phone has no hover, so hiding Kick
+   and Bench there would put them somewhere nobody can reach; on touch the
+   roster keeps the layout it has always had. :focus-within is on the same rule
+   so the keyboard path reveals the cluster too. */
+@media (hover: hover) and (pointer: fine) {
+  .bc__row .bc__moves {
+    grid-row: 1; align-self: center;
+    opacity: 0; pointer-events: none;
+    transform: scale(0.92); filter: blur(5px);
+    transition: opacity 220ms var(--ease), transform 220ms var(--ease), filter 220ms var(--ease);
+  }
+  .bc__row--l .bc__moves {
+    grid-column: 1; justify-self: end; padding-left: 30px; transform-origin: right center;
+    background: linear-gradient(to right, transparent, rgba(9,11,15,0.92) 30px);
+  }
+  .bc__row--r .bc__moves {
+    grid-column: 3; justify-self: start; padding-right: 30px; transform-origin: left center;
+    background: linear-gradient(to left, transparent, rgba(9,11,15,0.92) 30px);
+  }
+  .bc__row .bc__player { transition: filter 180ms var(--ease), opacity 180ms var(--ease); }
+  .bc__row:hover .bc__player { filter: blur(2px); opacity: 0.45; }
+  .bc__row:hover .bc__moves,
+  .bc__row:focus-within .bc__moves { opacity: 1; pointer-events: auto; transform: none; filter: none; }
+}
+.bc__move {
+  background: rgba(255,255,255,0.1); border: 1px solid rgba(255,255,255,0.2); cursor: pointer; color: #fff;
+  font: inherit; font-size: 10px; font-weight: 800; letter-spacing: 0.08em; padding: 7px 9px;
+  min-height: 32px; white-space: nowrap;
+  transition: background 120ms var(--ease), color 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__move:hover { background: #fff; color: #06070a; border-color: #fff; }
+.bc__move:active { transform: translateY(1px); }
+.bc__move--now { border-color: rgba(255,120,120,0.5); color: #ff9a9a; background: rgba(255,90,90,0.1); }
+.bc__move--now:hover { background: var(--bad); color: #14070a; border-color: var(--bad); }
+/* The staged / conflicted marker rides the name's edge, so it lands beside the
+   player it marks and recolours rather than across the row from it. */
+.bc__row--moved { box-shadow: inset 3px 0 0 var(--take); }
+.bc__row--r.bc__row--moved { box-shadow: inset -3px 0 0 var(--take); }
+.bc__row--moved .bc__player { color: var(--take); }
+.bc__row--conflict { box-shadow: inset 3px 0 0 var(--bad); }
+.bc__row--r.bc__row--conflict { box-shadow: inset -3px 0 0 var(--bad); }
+.bc__row--conflict .bc__player { color: var(--bad); }
+
+.bc__standby {
+  width: 232px; border-left: 1px solid var(--line); border-right: 1px solid var(--line);
+  padding: 14px 12px; background: rgba(0,0,0,0.25);
+}
+.bc__sbHead {
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); font-weight: 600; padding: 0 4px 10px;
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+}
+.bc__sbRow { display: flex; align-items: center; gap: 8px; padding: 8px 4px; border-top: 1px solid rgba(255,255,255,0.05); }
+.bc__sbName { font-size: 14px; font-weight: 700; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__sbEmpty { padding: 10px 4px; font-size: 12px; color: rgba(255,255,255,0.55); line-height: 1.5; }
+
+/* Server health, demoted but not deleted.
+
+   "Is this machine coping" is asked about once a month; "who is on and what
+   are we playing" is asked every time. So it is a hairline strip under the
+   roster rather than three tiles above it — still one glance, no longer in the
+   way of the answer anyone came for. A meter earns its width here only where
+   the number has a ceiling, which is memory. */
+.bc__health {
+  display: flex; flex-wrap: wrap; gap: 0 28px; align-items: baseline;
+  padding: 12px 16px 0; border-top: 1px solid var(--line);
+  font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+}
+.bc__healthItem { display: inline-flex; align-items: baseline; gap: 7px; padding: 4px 0; }
+.bc__healthVal {
+  color: rgba(255,255,255,0.88); font-weight: 700; letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+}
+.bc__healthVal--bad { color: var(--bad); }
+.bc__healthBar {
+  display: inline-block; width: 54px; height: 4px; align-self: center;
+  background: rgba(255,255,255,0.14); position: relative; overflow: hidden;
+}
+.bc__healthBar > span { position: absolute; inset: 0 auto 0 0; background: rgba(255,255,255,0.7); }
+
+/* ---- the dock ---- */
+.bc__dock {
+  position: fixed; left: 50%; bottom: 20px; z-index: 30;
+  transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 8px;
+  width: min(1180px, calc(100vw - 28px));
+}
+.bc__chips {
+  display: flex; align-items: center; gap: 7px; flex-wrap: wrap; justify-content: center;
+  max-height: 96px; overflow: auto;
+  animation: bcrise 220ms var(--ease);
+}
+@keyframes bcrise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+.bc__chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 5px 6px 5px 10px; font-size: 11px; letter-spacing: 0.04em;
+  background: rgba(12,14,19,0.94); border: 1px solid rgba(255,255,255,0.2); color: #fff;
+  font-weight: 600; white-space: nowrap; backdrop-filter: blur(12px);
+}
+.bc__chip em { font-style: normal; color: var(--take); }
+.bc__chipNote { color: rgba(255,255,255,0.62); font-weight: 500; letter-spacing: 0; }
+.bc__chip--heavy { border-color: rgba(255,209,102,0.6); }
+.bc__chip--conflict { border-color: var(--bad); }
+.bc__chip--conflict em { color: var(--bad); }
+.bc__chipX {
+  background: transparent; border: 0; color: rgba(255,255,255,0.7); cursor: pointer;
+  font: inherit; font-size: 13px; line-height: 1; padding: 3px 5px;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+.bc__chipX:hover { background: rgba(255,255,255,0.15); color: #fff; }
+.bc__chipFix {
+  background: rgba(255,255,255,0.12); border: 0; color: #fff; cursor: pointer;
+  font: inherit; font-size: 10px; font-weight: 700; letter-spacing: 0.06em; padding: 4px 7px;
+}
+.bc__chipFix:hover { background: #fff; color: #0a0a0a; }
+/* The clock on a map load. It is not a spinner: these take from thirty seconds
+   to several minutes, and a spinner with no elapsed time is indistinguishable
+   from one that is stuck. */
+.bc__loading {
+  display: inline-flex; align-items: center; gap: 9px; align-self: flex-start;
+  border: 1px solid var(--take); color: var(--take);
+  padding: 5px 11px; font-size: 10.5px; letter-spacing: 0.14em;
+  text-transform: uppercase; font-weight: 700;
+  animation: bcrise 200ms var(--ease);
+}
+.bc__loading b { font-variant-numeric: tabular-nums; letter-spacing: 0.08em; }
+.bc__loadingDot {
+  width: 7px; height: 7px; border-radius: 99px; background: currentColor;
+  animation: bcpulse 1.6s ease-in-out infinite;
+}
+.bc__loadingWhy { color: rgba(255,255,255,0.5); font-weight: 600; letter-spacing: 0.1em; }
+@media (max-width: 700px) { .bc__loadingWhy { display: none; } }
+
+.bc__undo {
+  display: inline-flex; align-items: center; gap: 10px; padding: 6px 8px 6px 12px;
+  background: rgba(12,14,19,0.94); border: 1px solid rgba(255,255,255,0.2);
+  font-size: 12px; color: rgba(255,255,255,0.85); backdrop-filter: blur(12px);
+  animation: bcrise 200ms var(--ease);
+}
+
+.bc__bars { display: flex; gap: 8px; align-items: stretch; justify-content: center; width: 100%; }
+.bc__pill {
+  display: flex; align-items: stretch; gap: 4px; padding: 6px;
+  background: rgba(12,14,19,0.88); backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid rgba(255,255,255,0.16); border-radius: 15px;
+  box-shadow: 0 22px 60px -22px rgba(0,0,0,0.95), 0 1px 0 rgba(255,255,255,0.07) inset;
+  min-width: 0;
+}
+.bc__pillTag {
+  display: flex; align-items: center; padding: 0 10px 0 8px;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); white-space: nowrap;
+}
+.bc__pill--commit { border-color: rgba(255,209,102,0.45); animation: bcrise 220ms var(--ease); }
+.bc__pill--commit .bc__pillTag { color: var(--take); }
+.bc__pill--bad { border-color: var(--bad); }
+.bc__pill--bad .bc__pillTag { color: var(--bad); }
+.bc__act {
+  display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-radius: 10px;
+  background: transparent; border: 0; cursor: pointer; color: #fff; font: inherit;
+  white-space: nowrap; min-height: 44px;
+  transition: background 120ms var(--ease), transform 90ms var(--ease), color 120ms var(--ease);
+}
+.bc__act:hover { background: rgba(255,255,255,0.12); }
+.bc__act:active { transform: translateY(1px) scale(0.985); }
+.bc__actGlyph { display: inline-flex; align-items: center; opacity: 0.85; }
+.bc__actLabel { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; }
+/* the dock speaks through one line now, but the More sheet still sets a hint
+   under each row, where there is room for it */
+.bc__actHint { font-size: 11px; color: rgba(255,255,255,0.62); }
+
+/* One voice. Every control used to carry its own hint inline, and six hints
+   are what set this bar's width — which is why the dock outgrew the 184px the
+   page reserves for it and started sitting over the content. Now they share a
+   single status line, the way a pro tool's status bar works: whatever you point
+   at speaks through it, and it reports what is staged when you point at
+   nothing. Six strings, one line's worth of space. */
+.bc__nowPill { flex-direction: column; align-items: stretch; gap: 0; position: relative; padding-bottom: 26px; }
+.bc__nowRow { display: flex; align-items: stretch; gap: 4px; }
+/* a transform here would make the pressed button the containing block and the
+   line would jump inside it, so this one presses with light instead */
+.bc__nowRow .bc__act:active { transform: none; background: rgba(255,255,255,0.18); }
+.bc__actSay, .bc__nowSay {
+  position: absolute; left: 12px; right: 12px; bottom: 7px;
+  font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  transition: opacity 130ms var(--ease);
+}
+.bc__actSay { color: #fff; opacity: 0; pointer-events: none; }
+.bc__act:hover .bc__actSay, .bc__act:focus-visible .bc__actSay { opacity: 1; }
+.bc__nowSay { color: rgba(255,255,255,0.5); }
+.bc__nowPill:has(.bc__act:hover) .bc__nowSay,
+.bc__nowPill:has(.bc__act:focus-visible) .bc__nowSay { opacity: 0; }
+.bc__act--danger { color: #ff9a9a; }
+.bc__act--danger:hover { background: rgba(255,90,90,0.16); color: #ffb3b3; }
+.bc__more { display: none; }
+
+.bc__commitCopy { display: flex; flex-direction: column; justify-content: center; gap: 2px; padding: 4px 10px; min-width: 0; max-width: 34ch; }
+.bc__commitLine { font-size: 12px; font-weight: 600; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__commitSub { font-size: 11px; color: rgba(255,255,255,0.62); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bc__commitSub--bad { color: #ff9a9a; }
+.bc__apply {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px;
+  padding: 9px 18px; border-radius: 10px; min-height: 44px; justify-content: center;
+  background: var(--take); border: 0; cursor: pointer; color: #08090c; font: inherit;
+  white-space: nowrap;
+  transition: filter 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__apply:hover:not(:disabled) { filter: brightness(1.1); }
+.bc__apply:active:not(:disabled) { transform: translateY(1px) scale(0.985); }
+.bc__apply:disabled { cursor: not-allowed; background: rgba(255,255,255,0.14); color: rgba(255,255,255,0.55); }
+.bc__applyLabel { font-size: 13px; font-weight: 800; letter-spacing: 0.02em; }
+.bc__applyHint { font-size: 10.5px; font-weight: 600; opacity: 0.72; }
+.bc__kbd {
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 10px;
+  border: 1px solid currentColor; opacity: 0.6; padding: 1px 4px; margin-left: 6px;
+}
+.bc__discard {
+  padding: 11px 14px; border-radius: 10px; background: transparent; border: 0; cursor: pointer;
+  color: rgba(255,255,255,0.78); font: inherit; font-size: 13px; font-weight: 600; min-height: 44px;
+  transition: background 120ms var(--ease), color 120ms var(--ease);
+}
+.bc__discard:hover { background: rgba(255,255,255,0.1); color: #fff; }
+
+/* an apply is a request, not a fact — this is the wait, with the wire showing */
+.bc__progWrap { position: relative; overflow: hidden; border-radius: 10px; }
+.bc__prog {
+  position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--take);
+  transform-origin: left; animation: bcprog var(--applyMs) linear forwards;
+}
+@keyframes bcprog { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+/* ---- sheets: pool, more, and every confirm ---- */
+.bc__scrim { position: fixed; inset: 0; background: rgba(4,5,8,0.68); z-index: 40; animation: bcfade 140ms var(--ease); }
+@keyframes bcfade { from { opacity: 0; } to { opacity: 1; } }
+.bc__sheet {
+  position: fixed; z-index: 41; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: min(680px, calc(100vw - 24px)); max-height: min(80svh, 760px); overflow: auto;
+  background: rgba(14,16,22,0.98); border: 1px solid rgba(255,255,255,0.18); border-radius: 16px;
+  box-shadow: 0 44px 100px -34px rgba(0,0,0,0.95);
+  animation: bcsheet 180ms var(--ease);
+}
+@keyframes bcsheet { from { opacity: 0; transform: translate(-50%, calc(-50% + 12px)); } to { opacity: 1; transform: translate(-50%, -50%); } }
+.bc__sheetHead { padding: 18px 20px 14px; border-bottom: 1px solid var(--line); }
+.bc__sheetTitle { font-size: 19px; font-weight: 800; letter-spacing: -0.01em; }
+.bc__sheetSub { margin-top: 6px; font-size: 13px; line-height: 1.5; color: rgba(255,255,255,0.75); }
+.bc__sheetBody { padding: 16px 20px; }
+
+/* A labelled row inside a sheet. The sheets were pure prose plus a confirm
+   until the ban arrived — it is the first one that asks a question rather than
+   only stating a consequence. */
+.bc__field { display: flex; flex-direction: column; gap: 8px; }
+.bc__field + .bc__field { margin-top: 16px; }
+.bc__fieldLabel {
+  font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+  color: rgba(255,255,255,0.55); font-weight: 700;
+}
+.bc__input {
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.16);
+  color: #fff; font: inherit; font-size: 13px; padding: 8px 11px; width: 100%;
+  transition: border-color 120ms var(--ease), background 120ms var(--ease);
+}
+.bc__input::placeholder { color: rgba(255,255,255,0.35); }
+.bc__input:hover { border-color: rgba(255,255,255,0.28); }
+.bc__input:focus { border-color: #fff; background: rgba(255,255,255,0.08); }
+.bc__sheetFoot {
+  display: flex; align-items: center; gap: 10px; padding: 14px 20px;
+  border-top: 1px solid var(--line); background: rgba(255,255,255,0.02);
+}
+.bc__sheetSpacer { flex: 1; }
+.bc__rcon {
+  display: block; margin-top: 12px; padding: 9px 11px;
+  background: rgba(0,0,0,0.45); border: 1px solid rgba(255,255,255,0.12);
+  font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 12px;
+  color: rgba(255,255,255,0.9); white-space: pre-wrap; word-break: break-word;
+}
+.bc__btn {
+  padding: 11px 16px; border-radius: 9px; min-height: 44px; cursor: pointer; font: inherit;
+  font-size: 13px; font-weight: 700; border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.06); color: #fff;
+  transition: background 120ms var(--ease), transform 90ms var(--ease);
+}
+.bc__btn:hover { background: rgba(255,255,255,0.14); }
+.bc__btn:active { transform: translateY(1px); }
+.bc__btn--danger { background: var(--bad); border-color: var(--bad); color: #14070a; }
+.bc__btn--danger:hover { filter: brightness(1.08); background: var(--bad); }
+.bc__count { font-size: 12px; color: rgba(255,255,255,0.65); font-variant-numeric: tabular-nums; }
+
+.bc__poolGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 8px; }
+.bc__poolMap {
+  position: relative; min-height: 84px; padding: 10px 12px;
+  border: 1px solid rgba(255,255,255,0.14); background: transparent; cursor: pointer;
+  color: #fff; text-align: left; overflow: hidden;
+  display: flex; flex-direction: column; justify-content: flex-end; gap: 2px;
+  transition: transform 120ms var(--ease), border-color 120ms var(--ease);
+}
+.bc__poolMap:hover:not(:disabled) { border-color: #fff; }
+.bc__poolMap:hover:not(:disabled) .bc__rdArt { opacity: 0.45; }
+.bc__poolMap:active:not(:disabled) { transform: translateY(1px); }
+.bc__poolMap--on { border-color: var(--live); box-shadow: inset 0 0 0 1px var(--live); }
+.bc__poolMap--cued { border-color: var(--take); box-shadow: inset 0 0 0 1px var(--take); }
+.bc__poolMap--cued .bc__rdNote { color: var(--take); }
+/* banned maps looked disabled and were clickable. Now they are disabled. */
+.bc__poolMap:disabled { cursor: not-allowed; }
+.bc__poolMap:disabled .bc__rdName { color: rgba(255,255,255,0.45); text-decoration: line-through; }
+.bc__poolMap:disabled .bc__rdArt { filter: grayscale(1); opacity: 0.08; }
+
+.bc__lineup {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 12px; margin-bottom: 8px; cursor: pointer; color: #fff; font: inherit;
+  background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.14);
+  transition: background 120ms var(--ease), border-color 120ms var(--ease);
+}
+.bc__lineup:hover { background: rgba(255,255,255,0.1); border-color: rgba(255,255,255,0.4); }
+.bc__lineupName { font-size: 14px; font-weight: 700; }
+.bc__lineupNote { font-size: 12px; color: rgba(255,255,255,0.65); }
+.bc__moreRow {
+  display: flex; align-items: center; gap: 12px; width: 100%; text-align: left;
+  padding: 13px 12px; cursor: pointer; color: #fff; font: inherit; min-height: 52px;
+  background: transparent; border: 0; border-top: 1px solid var(--line);
+}
+.bc__moreRow:hover { background: rgba(255,255,255,0.07); }
+.bc__moreRow--danger { color: #ff9a9a; }
+.bc__moreMeta { margin-left: auto; font-family: var(--font-geist-mono), ui-monospace, monospace; font-size: 11px; color: rgba(255,255,255,0.55); }
+
+@media (max-width: 980px) {
+  .bc--docked { padding-bottom: 212px; }
+  .bc__chips { max-height: 64px; }
+  .bc__band, .bc__band--solo { grid-template-columns: 1fr; }
+  .bc__centre { border-left: 0; border-right: 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); order: -1; }
+  .bc__side { padding: 16px 20px; }
+  .bc__grid, .bc__grid--solo { grid-template-columns: 1fr; }
+  .bc__col + .bc__col { border-left: 0; border-top: 1px solid var(--line); }
+  .bc__standby { width: auto; border-left: 0; border-right: 0; border-top: 1px solid var(--line); }
+  /* The columns stack here, so there is no centre left to mirror around: both
+     variants collapse to name-first and CT reads like T again. The move
+     cluster also stops hiding. A stacked row is a card rather than a broadcast
+     line, and a Kick that only exists on hover is a Kick nobody finds — the
+     rule that was meant to say so used to lose to the hover block on
+     specificity, which is why it says it per variant now. */
+  .bc__head--l, .bc__head--r, .bc__row--l, .bc__row--r { grid-template-columns: minmax(0,1fr) auto auto; }
+  .bc__head--r .bc__headName { grid-area: 1 / 1; text-align: left; }
+  .bc__row--r .bc__who { grid-area: 1 / 1; flex-direction: row; }
+  .bc__head--l .bc__stats, .bc__head--r .bc__stats { grid-area: 1 / 2; text-align: right; }
+  .bc__row--l .bc__stats, .bc__row--r .bc__stats { grid-area: 1 / 2; text-align: right; }
+  .bc__row--r .bc__bar { inset: 0 auto 0 0; background: linear-gradient(to right, var(--barTint), transparent); }
+  .bc__row--r.bc__row--moved { box-shadow: inset 3px 0 0 var(--take); }
+  .bc__row--r.bc__row--conflict { box-shadow: inset 3px 0 0 var(--bad); }
+  .bc__row--l .bc__moves, .bc__row--r .bc__moves {
+    grid-area: 1 / 3; justify-self: auto; justify-content: flex-end; flex-direction: row;
+    padding-left: 0; padding-right: 0; background: none;
+    opacity: 1; pointer-events: auto; transform: none; filter: none;
+  }
+  .bc__row:hover .bc__player { filter: none; opacity: 1; }
+  .bc__meta { margin-left: 0; }
+  /* the dock stacks instead of scrolling, and the commit pill sits last so it
+     is the thing under the thumb. Nothing here is ever off-screen. */
+  .bc__dock { left: 12px; right: 12px; width: auto; transform: none; bottom: max(12px, env(safe-area-inset-bottom)); }
+  .bc__bars { flex-direction: column; }
+  .bc__pill { justify-content: space-between; }
+  .bc__act--hideSm { display: none; }
+  .bc__more { display: flex; }
+  .bc__apply { flex: 1; align-items: center; }
+}
+
+@media (max-width: 700px) {
+  .bc__head { display: none; }
+  /* Narrower still: the five numbers drop to their own line under the name and
+     grow labels, because 46px columns and a name do not both fit. */
+  .bc__row--l, .bc__row--r { grid-template-columns: minmax(0,1fr) auto; row-gap: 6px; }
+  .bc__row--l .bc__moves, .bc__row--r .bc__moves { grid-area: 1 / 2; }
+  .bc__row--l .bc__stats, .bc__row--r .bc__stats {
+    grid-area: 2 / 1 / 3 / -1; grid-template-columns: repeat(5, 1fr); text-align: left;
+  }
+  .bc__stats span::before {
+    content: attr(data-l) " "; color: rgba(255,255,255,0.55);
+    font-size: 9px; letter-spacing: 0.14em; font-weight: 600;
+  }
+  .bc__sheet { top: auto; bottom: 0; left: 0; right: 0; width: auto; transform: none; border-radius: 16px 16px 0 0; max-height: 84svh; }
+  @keyframes bcsheet { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: none; } }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bc *, .bc *::after, .bc *::before { animation: none !important; transition-duration: 1ms !important; }
+  .bc__prog { transform: scaleX(1); }
+}

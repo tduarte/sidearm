@@ -39,12 +39,20 @@ function CommandDialog({
   children,
   className,
   showCloseButton = false,
+  commandProps,
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
   description?: string
   className?: string
   showCloseButton?: boolean
+  /**
+   * Forwarded to the `cmdk` root. The console mode passes
+   * `shouldFilter: false`: its body is a log and an RCON field, not a list of
+   * items, so there is nothing for cmdk to score and its typing and arrow-key
+   * capture would only fight the input.
+   */
+  commandProps?: React.ComponentProps<typeof Command>
 }) {
   return (
     <Dialog {...props}>
@@ -59,7 +67,15 @@ function CommandDialog({
         )}
         showCloseButton={showCloseButton}
       >
-        {children}
+        {/*
+          The `cmdk` root. It was missing, and every `CommandInput`,
+          `CommandList` and `CommandItem` reads its store through context — so
+          opening the palette threw "Cannot read properties of undefined
+          (reading 'subscribe')" during render and took the page down with it.
+          Nothing caught it because nothing had opened the palette: it had no
+          trigger, and ⌘K is invisible until someone tells you about it.
+        */}
+        <Command {...commandProps}>{children}</Command>
       </DialogContent>
     </Dialog>
   )

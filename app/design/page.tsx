@@ -14,9 +14,9 @@ const DIRECTION_NOTES = [
     name: "Broadcast",
     line: "The match is the product. The scoreboard is also the control surface.",
     what:
-      "Full-bleed map art, enormous tabular scores, CT blue and T orange as whole colour fields. There is no setup screen: the scoreboard is the form. Team names, the map, the series format, overtime and who is on which side are all edited in place, and a gallery's two buses do the batching — edits land in PREVIEW, the bar at the bottom lists what is staged, TAKE cuts all of it to air at once.",
+      "Full-bleed map art, enormous tabular scores, CT blue and T orange as whole colour fields. There is no setup screen: the scoreboard is the form. Team names, captains, the map, the series format, overtime and who is on which side are all edited in place, and a gallery's two buses do the batching — edits land in PREVIEW and change nothing, the dock names exactly what is staged and what it will cost, and applying sends the lot in one cut. PROGRAM is live: when the server swaps sides underneath you, your staged edits go conflicted rather than quietly reverting it.",
     cost:
-      "Almost everything is the current match, so any screen that is not a live match has to justify itself. Nine of ten nights it is glorious; the tenth it is an empty stadium.",
+      "Almost everything is the current match, so any screen that is not a live match has to justify itself. Nine of ten nights it is glorious; the tenth it is an empty stadium. And the two loudest objects on the page — the scores — are the only ones you cannot touch.",
   },
   {
     slug: "terminal",

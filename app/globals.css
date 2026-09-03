@@ -101,7 +101,10 @@
 }
 
 :root {
-  --radius: 0.5rem;
+  /* The world has no rounded corners: every `.bc__` control is a rectangle,
+     and a rounded shadcn Button beside a square `.bc__act` is the one detail
+     that would give away that two systems are on screen. */
+  --radius: 0rem;
 
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -159,13 +162,25 @@
   --sidebar-ring: oklch(0.58 0.19 258);
 }
 
+/*
+ * The only theme, since the panel became the Broadcast world.
+ *
+ * These are not the neutral greys they were. `app/broadcast.css` builds the
+ * stage out of a blue-black field with the running map showing through it, and
+ * a card at a flat neutral grey reads as a slab dropped on top of that rather
+ * than a surface inside it. So the ground matches the stage exactly, and every
+ * surface above it is white at low alpha — the same construction the world's
+ * own controls use, which is what lets a shadcn Card and a `.bc__pill` sit on
+ * the same screen without arguing.
+ */
 .dark {
-  --background: oklch(0.145 0 0);
+  --background: #06070a;
   --foreground: oklch(0.985 0 0);
-  /* Cards lift off the ground rather than being outlined against it. */
-  --card: oklch(0.185 0 0);
+  /* Translucent on purpose: a card is a lit region of the stage, not a slab. */
+  --card: oklch(1 0 0 / 5%);
   --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
+  /* Popovers float free of the stage, so they are opaque or they are unreadable. */
+  --popover: #0b0d12;
   --popover-foreground: oklch(0.985 0 0);
 
   --primary: oklch(0.985 0 0);
@@ -177,9 +192,9 @@
   --accent: oklch(0.26 0 0);
   --accent-foreground: oklch(0.985 0 0);
   --destructive: oklch(0.68 0.19 25);
-  --border: oklch(1 0 0 / 11%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.68 0.16 258);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 16%);
+  --ring: oklch(1 0 0);
 
   /* Lifted and slightly desaturated: the same meanings, legible on near-black. */
   --ok: oklch(0.75 0.16 152);
@@ -194,8 +209,10 @@
   --pending-foreground: oklch(0.145 0 0);
   --unknown: oklch(0.708 0 0);
   --unknown-foreground: oklch(0.145 0 0);
-  --team-ct: oklch(0.72 0.13 250);
-  --team-t: oklch(0.76 0.15 58);
+  /* The same two colours the band paints the sides in, so a scoreboard
+     rendered by a chart and one rendered by `.bc__side` agree. */
+  --team-ct: #3d8bfd;
+  --team-t: #ff9422;
 
   --chart-1: oklch(0.7 0.15 258);
   --chart-2: oklch(0.72 0.14 165);
