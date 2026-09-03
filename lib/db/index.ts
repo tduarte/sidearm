@@ -143,6 +143,13 @@ function migrate(db: Database.Database): void {
   // integer matchid, so an install that saved a setup in between has the table
   // without this column.
   addColumn(db, "match_configs", "match_number", "INTEGER NOT NULL DEFAULT 1");
+  // The round limit the match was played to, recorded at the end because the
+  // status poll has certainly read `mp_maxrounds` by then. It is the only way
+  // to know where the sides swapped: the score a round record carries is
+  // per-side and goes on counting straight through half-time, so nothing in
+  // the rounds themselves marks it. Null on every match recorded before this
+  // column existed, and on anything MatchZy reported.
+  addColumn(db, "matches", "max_rounds", "INTEGER");
 }
 
 /** Adds a column when it is missing. SQLite has no `ADD COLUMN IF NOT EXISTS`. */

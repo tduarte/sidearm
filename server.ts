@@ -108,6 +108,7 @@ app.prepare().then(async () => {
           activeMatchId,
           cache?.match?.score ?? { ct: 0, t: 0 },
           cache?.players ?? [],
+          cache?.match?.maxRounds ?? null,
         );
         activeMatchId = beginMatch(
           cache?.status?.map ?? "unknown",
@@ -129,6 +130,7 @@ app.prepare().then(async () => {
         activeMatchId,
         cache?.match?.score ?? { ct: 0, t: 0 },
         cache?.players ?? [],
+        cache?.match?.maxRounds ?? null,
       );
       activeMatchId = null;
       // Panel-driven rotation: the map only advances while the panel is

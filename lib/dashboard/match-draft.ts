@@ -44,10 +44,10 @@ export interface SetupValues {
    * Who leads each side.
    *
    * **MatchZy has no captain field.** This is a drafting device: it survives
-   * into the config as list position, because `lib/match/draft.ts` encodes a
-   * roster as "everyone on a side, captain first". So the badge is real and it
-   * does something — it is just not a thing the server tracks or reports, which
-   * is why `currentSetup` always reads it back as nobody.
+   * into the config as list position, because a roster is written "everyone on
+   * a side, captain first" (see `teamRoster`). So the badge is real and it does
+   * something — it is just not a thing the server tracks or reports, which is
+   * why `currentSetup` always reads it back as nobody.
    */
   captains: { team1: string | null; team2: string | null };
   /** 1, 3 or 5. */
@@ -276,11 +276,10 @@ export function teamRoster(
 /**
  * Whose pick it is, or `null` before both captains are named.
  *
- * Size, not a counter — the rule `lib/match/draft.ts` arrived at and the reason
- * it keeps no turn pointer: someone leaves, someone joins late, someone is
- * moved by hand, and a stored counter goes on pointing at the side that is
- * already a player up. Derived from the rosters, the turn is right again the
- * moment the rosters are.
+ * Size, not a counter, and derived rather than stored: someone leaves, someone
+ * joins late, someone is moved by hand, and a turn pointer kept in state would
+ * go on pointing at the side that is already a player up. Read off the two
+ * rosters, the turn is right again the moment the rosters are.
  */
 export function pickTurn(
   values: SetupValues,

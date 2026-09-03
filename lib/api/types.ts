@@ -428,6 +428,17 @@ export interface MatchHistoryEntry {
   winner: "CT" | "T" | "DRAW";
   playerCount: number;
   /**
+   * `mp_maxrounds` as the match was played, when the panel recorded it.
+   *
+   * Kept only so the round timeline knows where the sides swapped. Nothing in
+   * the rounds themselves marks half-time — the score each round carries is
+   * per *side* and goes on counting straight through it — so without this the
+   * divider cannot be drawn, and a divider drawn in the wrong place is worse
+   * than none. Null on matches recorded before the column existed and on
+   * anything MatchZy reported.
+   */
+  maxRounds?: number | null;
+  /**
    * Who recorded this match. `matchzy` records are authoritative where both
    * exist — see `getHistory`.
    */

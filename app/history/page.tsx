@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadError } from "@/components/load-error";
+import { DemoList } from "@/components/history/demo-list";
 import { RoundTimeline } from "@/components/history/round-timeline";
 import { MatchZyScoreboard } from "@/components/history/matchzy-scoreboard";
+import { PanelScoreboard } from "@/components/history/panel-scoreboard";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -30,6 +32,32 @@ function formatDuration(startIso: string, endIso: string) {
 }
 
 type Match = Awaited<ReturnType<typeof api.getHistory>>[number];
+
+/**
+ * The round the sides swapped after, or null when it cannot be known.
+ *
+ * `mp_maxrounds` is recorded with the match precisely for this. Nothing in the
+ * rounds themselves marks half-time — each one carries a per-*side* running
+ * score that goes straight through it — so an odd or missing limit means no
+ * divider rather than a guessed one in the wrong place.
+ */
+function halfOf(m: Match): number | null {
+  return m.maxRounds != null && m.maxRounds % 2 === 0 ? m.maxRounds / 2 : null;
+}
+
+/**
+ * The best scoreboard this match has.
+ *
+ * MatchZy's where MatchZy ran it — damage, entries and clutches the log parser
+ * has no access to — and the panel's own K/D/A otherwise, which until now was
+ * fetched and then dropped on the floor.
+ */
+function Scoreboard({ m }: { m: Match }) {
+  if (m.matchzyPlayers && m.matchzyPlayers.length > 0) {
+    return <MatchZyScoreboard players={m.matchzyPlayers} />;
+  }
+  return <PanelScoreboard players={m.players ?? []} />;
+}
 
 /**
  * MatchZy tracks teams, which swap sides at half, so its scores are per-team
@@ -106,14 +134,16 @@ export default function HistoryPage() {
       <div>
         <h1 className="text-2xl font-semibold">History</h1>
         <p className="text-sm text-muted-foreground">
-          Chat and completed matches. Where MatchZy ran the match, its own
-          record is shown — real teams, real scores and a full scoreboard.
+          Completed matches, the demos of them, and everything said in chat.
+          Where MatchZy ran the match its own record is shown — real teams, real
+          scores and a full scoreboard.
         </p>
       </div>
 
       <Tabs defaultValue="matches">
         <TabsList>
           <TabsTrigger value="matches">Matches</TabsTrigger>
+          <TabsTrigger value="demos">Demos</TabsTrigger>
           <TabsTrigger value="chat">Chat</TabsTrigger>
         </TabsList>
 
@@ -180,11 +210,9 @@ export default function HistoryPage() {
                               {new Date(m.startedAt).toLocaleString()}
                             </p>
                             {m.rounds && m.rounds.length > 0 && (
-                              <RoundTimeline rounds={m.rounds} />
+                              <RoundTimeline rounds={m.rounds} halfAt={halfOf(m)} />
                             )}
-                            {m.matchzyPlayers && m.matchzyPlayers.length > 0 && (
-                              <MatchZyScoreboard players={m.matchzyPlayers} />
-                            )}
+                            <Scoreboard m={m} />
                           </li>
                         ))}
                       </ul>
@@ -234,17 +262,18 @@ export default function HistoryPage() {
                                 {m.rounds && m.rounds.length > 0 && (
                                   <TableRow className="hover:bg-transparent">
                                     <TableCell colSpan={7} className="pt-0">
-                                      <RoundTimeline rounds={m.rounds} />
+                                      <RoundTimeline
+                                        rounds={m.rounds}
+                                        halfAt={halfOf(m)}
+                                      />
                                     </TableCell>
                                   </TableRow>
                                 )}
-                                {m.matchzyPlayers && m.matchzyPlayers.length > 0 && (
-                                  <TableRow className="hover:bg-transparent">
-                                    <TableCell colSpan={7} className="pt-0">
-                                      <MatchZyScoreboard players={m.matchzyPlayers} />
-                                    </TableCell>
-                                  </TableRow>
-                                )}
+                                <TableRow className="hover:bg-transparent">
+                                  <TableCell colSpan={7} className="pt-0">
+                                    <Scoreboard m={m} />
+                                  </TableCell>
+                                </TableRow>
                               </Fragment>
                             ))}
                           </TableBody>
@@ -256,6 +285,10 @@ export default function HistoryPage() {
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="demos" className="mt-4">
+          <DemoList />
         </TabsContent>
 
         <TabsContent value="chat" className="mt-4">

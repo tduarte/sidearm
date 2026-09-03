@@ -93,6 +93,7 @@ import {
   type SetupSide,
 } from "@/lib/dashboard/match-draft";
 import { PracticeStrip } from "@/components/broadcast/practice-strip";
+import { RoundStrip } from "@/components/broadcast/round-strip";
 import { ACTIVE_DUTY_AS_OF, activeDutyPool, RESERVE } from "@/lib/cs2/map-pools";
 import { PRESETS } from "@/lib/presets";
 import type { RoundBackup } from "@/lib/cs2/round-backups";
@@ -620,6 +621,11 @@ export function MatchStage({
           ));
         case "start":
           return void (await api.forceStartMatch());
+        // Raw RCON, which is why this one is admin-only: there is no
+        // `/api/match/restart-round`, and `/api/rcon` is deliberately not a
+        // moderator route.
+        case "restart":
+          return void (await api.rcon("mp_restartgame 1"));
       }
     },
     meta: { action: "Match control" },
@@ -821,6 +827,19 @@ export function MatchStage({
           ? "Puts back the cvars the knife round overwrote, from the baseline the panel took before it."
           : `Restarts ${c.map} for a knife round. The score — ${c.score} — is lost.`,
     },
+    ...(canEdit
+      ? [
+          {
+            id: "restart",
+            label: "Restart round",
+            hint: "replay this one",
+            rcon: "mp_restartgame 1",
+            Icon: ArrowCounterClockwise,
+            consequence: (c: { players: number; map: string; score: string }) =>
+              `Restarts the current round on ${c.map} immediately. The score — ${c.score} — is kept; the round in progress is discarded.`,
+          } satisfies NowAction,
+        ]
+      : []),
     {
       id: "swap",
       label: "Swap sides",
@@ -1288,6 +1307,8 @@ export function MatchStage({
           )}
         </div>
       )}
+
+      <RoundStrip match={match} />
 
       <div className={`bc__grid${sided ? "" : " bc__grid--solo"}`}>
         {sided ? (

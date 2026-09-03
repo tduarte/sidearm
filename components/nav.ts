@@ -1,9 +1,4 @@
-import {
-  ClockCounterClockwise,
-  Gauge,
-  Gear,
-  Trophy,
-} from "@phosphor-icons/react";
+import { ClockCounterClockwise, Gauge, Gear } from "@phosphor-icons/react";
 import type { Role } from "@/lib/auth/permissions";
 
 /**
@@ -15,9 +10,10 @@ import type { Role } from "@/lib/auth/permissions";
  * fact is a nav that disagrees with itself about where the product is.
  *
  * The list is short on purpose. The console is a mode of the palette rather
- * than a page; Maps and Config folded into Settings. All three are redirects
- * for old links, and none of them is a place worth a permanent seat in the
- * rail.
+ * than a page; Maps and Config folded into Settings; Match folded into the
+ * dashboard, because setting up a match turned out to be editing the match
+ * already running. All four are redirects for old links, and none of them is a
+ * place worth a permanent seat in the rail.
  *
  * `role` is the minimum needed to reach the page at all — the same bar
  * `lib/auth/permissions.ts` enforces on the routes each page calls. A viewer
@@ -40,7 +36,6 @@ export type NavItem = {
 
 export const DESTINATIONS: NavItem[] = [
   { href: "/dashboard", label: "Dashboard", icon: Gauge, role: "viewer", rail: false },
-  { href: "/match", label: "Match", icon: Trophy, role: "moderator", rail: true },
   {
     href: "/history",
     label: "History",

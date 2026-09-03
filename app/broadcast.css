@@ -977,6 +977,39 @@
 
 .bc__poolRow { display: flex; flex-wrap: wrap; gap: 8px; }
 
+/* ---- the round strip: the story of the score above it ---- */
+.bc__rounds {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px;
+  padding: 10px 14px; border-bottom: 1px solid var(--line);
+  background: rgba(0,0,0,0.22);
+}
+.bc__roundsTag {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+  color: rgba(255,255,255,0.5); font-weight: 700; font-variant-numeric: tabular-nums;
+}
+.bc__roundsRun { font-weight: 800; }
+.bc__roundsRun--ct { color: var(--ct); }
+.bc__roundsRun--t { color: var(--t); }
+.bc__rndRow { display: flex; flex-wrap: wrap; align-items: center; gap: 3px; }
+.bc__rnd {
+  width: 20px; height: 20px; line-height: 20px; text-align: center;
+  font-size: 9px; font-weight: 700; font-variant-numeric: tabular-nums;
+  border: 1px solid; cursor: default;
+}
+.bc__rnd--ct { border-color: rgba(61,139,253,0.42); background: rgba(61,139,253,0.14); color: var(--ct); }
+.bc__rnd--t { border-color: rgba(255,148,34,0.42); background: rgba(255,148,34,0.14); color: var(--t); }
+/* The half. Two sets of five people either side of it, so the row should not
+   read as one continuous run. */
+.bc__rndGap { width: 1px; height: 20px; margin: 0 5px; background: rgba(255,255,255,0.3); }
+.bc__rndNow {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 14px;
+  margin: 0; padding: 0; list-style: none;
+  font-size: 11px; color: rgba(255,255,255,0.6);
+}
+.bc__rndNow li { display: inline-flex; align-items: center; gap: 5px; }
+.bc__rndNow b { color: #fff; font-weight: 700; }
+
 /* ---- practice, which only exists while the mode does ---- */
 .bc__prac {
   display: flex; flex-wrap: wrap; align-items: center; gap: 10px;

@@ -26,6 +26,11 @@ function mb(bytes: number): string {
  * `tv_record` writes into the CS2 volume, which the panel could not see — so
  * recording a demo produced a file with no way to get at it. The panel now
  * mounts that volume read-only and serves the files.
+ *
+ * It lives under History because that is what a demo is: the recording of a
+ * match that already happened, next to the score and the rounds of the same
+ * match. Starting and stopping one is a live decision and stayed on the
+ * dashboard, in the dock beside pause and knife.
  */
 export function DemoList() {
   const demos = useQuery<DemoFile[]>({
@@ -52,9 +57,10 @@ export function DemoList() {
           <div className="space-y-1 text-sm text-muted-foreground">
             <p>No demos recorded yet.</p>
             <p className="text-xs">
-              Use <span className="font-medium text-foreground">Record demo</span>{" "}
-              above. If you have recorded one and it is not here, the panel
-              cannot see the game volume — check that the{" "}
+              Start one from{" "}
+              <span className="font-medium text-foreground">Record demo</span> in
+              the dashboard dock. If you have recorded one and it is not here,
+              the panel cannot see the game volume — check that the{" "}
               <code className="font-mono">cs2-data</code> mount is present on
               the panel service.
             </p>
