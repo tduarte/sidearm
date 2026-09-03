@@ -33,22 +33,25 @@ const MAXMEM = 64 * 1024 * 1024;
  */
 const SCHEME = "scrypt";
 
+/**
+ * The Unicode normalisation form applied before hashing, so a secret typed as a
+ * composed character and one typed as a base letter plus a combining accent are
+ * the same secret.
+ *
+ * It is a named constant rather than an inline argument because secret scanners
+ * read a credential-shaped identifier beside a quoted string as a hardcoded
+ * value; GitGuardian raised exactly that on this file. Inlining it is the
+ * obvious tidy-up and re-opens the false positive.
+ */
+const NORMALISATION = "NFKC";
+
 function b64(buf: Buffer): string {
   return buf.toString("base64url");
 }
 
-/**
- * Hashes a password for storage.
- *
- * NFKC normalisation makes a password typed as a composed character and one
- * typed as a base letter plus a combining accent the same password. It is a
- * named binding rather than an inline call because secret scanners read
- * `password.normalize("NFKC")` as a password hardcoded to the value "NFKC" —
- * GitGuardian flagged exactly this line. Inlining it again re-opens that
- * false positive on every pull request that touches the file.
- */
+/** Hashes a password for storage. */
 export async function hashPassword(password: string): Promise<string> {
-  const normalized = password.normalize("NFKC");
+  const normalized = password.normalize(NORMALISATION);
   const salt = randomBytes(16);
   const key = await scrypt(normalized, salt, KEYLEN, {
     N,
@@ -86,7 +89,7 @@ export async function verifyPassword(password: string, stored: string): Promise<
   }
   if (salt.length === 0 || expected.length === 0) return false;
 
-  const normalized = password.normalize("NFKC");
+  const normalized = password.normalize(NORMALISATION);
   let actual: Buffer;
   try {
     actual = await scrypt(normalized, salt, expected.length, {
