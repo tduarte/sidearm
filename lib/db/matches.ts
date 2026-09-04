@@ -77,14 +77,30 @@ export function endMatch(
   matchId: string,
   score: { ct: number; t: number },
   players: Player[],
+  /**
+   * `mp_maxrounds` as last read. Written at the end rather than the start
+   * because the status poll may not have answered yet when a match begins, and
+   * a null here means the timeline simply does not draw the half — which is
+   * better than drawing it in the wrong place.
+   */
+  maxRounds: number | null = null,
 ): void {
   const winner = score.ct > score.t ? "CT" : score.t > score.ct ? "T" : "DRAW";
   const db = getDb();
   db.prepare(`
     UPDATE matches
-    SET ended_at = ?, ct_score = ?, t_score = ?, winner = ?, player_count = ?
+    SET ended_at = ?, ct_score = ?, t_score = ?, winner = ?, player_count = ?,
+        max_rounds = COALESCE(?, max_rounds)
     WHERE id = ?
-  `).run(new Date().toISOString(), score.ct, score.t, winner, players.length, matchId);
+  `).run(
+    new Date().toISOString(),
+    score.ct,
+    score.t,
+    winner,
+    players.length,
+    maxRounds,
+    matchId,
+  );
 
   const insertPlayer = db.prepare(`
     INSERT OR REPLACE INTO match_players (match_id, steam_id, name, team, k, d, a)
@@ -97,14 +113,16 @@ export function endMatch(
 
 export function getMatches(): MatchHistoryEntry[] {
   const rows = getDb().prepare(`
-    SELECT id, started_at, ended_at, map, game_mode, ct_score, t_score, winner, player_count
+    SELECT id, started_at, ended_at, map, game_mode, ct_score, t_score, winner,
+           player_count, max_rounds
     FROM matches
     WHERE ended_at IS NOT NULL
     ORDER BY started_at DESC
     LIMIT 100
   `).all() as Array<{
     id: string; started_at: string; ended_at: string; map: string;
-    game_mode: string; ct_score: number; t_score: number; winner: string; player_count: number;
+    game_mode: string; ct_score: number; t_score: number; winner: string;
+    player_count: number; max_rounds: number | null;
   }>;
   return rows.map((r) => ({
     id: r.id,
@@ -115,17 +133,20 @@ export function getMatches(): MatchHistoryEntry[] {
     finalScore: { ct: r.ct_score, t: r.t_score },
     winner: r.winner as "CT" | "T" | "DRAW",
     playerCount: r.player_count,
+    maxRounds: r.max_rounds,
   }));
 }
 
 export function getMatchDetail(id: string): MatchHistoryDetail | null {
   const db = getDb();
   const row = db.prepare(`
-    SELECT id, started_at, ended_at, map, game_mode, ct_score, t_score, winner, player_count
+    SELECT id, started_at, ended_at, map, game_mode, ct_score, t_score, winner,
+           player_count, max_rounds
     FROM matches WHERE id = ?
   `).get(id) as {
     id: string; started_at: string; ended_at: string; map: string;
-    game_mode: string; ct_score: number; t_score: number; winner: string; player_count: number;
+    game_mode: string; ct_score: number; t_score: number; winner: string;
+    player_count: number; max_rounds: number | null;
   } | undefined;
   if (!row) return null;
 
@@ -142,6 +163,7 @@ export function getMatchDetail(id: string): MatchHistoryDetail | null {
     finalScore: { ct: row.ct_score, t: row.t_score },
     winner: row.winner as "CT" | "T" | "DRAW",
     playerCount: row.player_count,
+    maxRounds: row.max_rounds,
     rounds: getRounds(id),
     players: players.map((p) => ({
       steamId: p.steam_id,

@@ -20,6 +20,14 @@ export interface ConsoleStream {
   error: string | null;
 }
 
+/**
+ * Fetches the backlog on mount, so **whoever calls it must only be mounted when
+ * the console is actually on screen**. It lives in the ⌘K palette now, which is
+ * mounted on every page of the panel; rendering its console body unconditionally
+ * would put a `/api/console` request — a moderator route, so a 403 for a viewer
+ * — on every page load. `CommandPalette` renders `ConsoleMode` only in console
+ * mode for exactly this reason.
+ */
 export function useConsoleStream(): ConsoleStream {
   const [events, setEvents] = useState<ConsoleEvent[]>([]);
   const [state, setState] = useState<ConsoleStreamState>("loading");

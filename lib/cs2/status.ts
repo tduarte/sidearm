@@ -207,6 +207,16 @@ export interface ParsedStatus {
   vacSecure: boolean | null;
   /** Present only while GOTV is actually running. */
   gotv: { address: string; delaySec: number | null } | null;
+  /**
+   * The demo GOTV is writing right now, from `status`'s own line, or `null`
+   * when it is not recording.
+   *
+   * This is a real read-back and the panel spent a long time not using it: the
+   * match card reported `demo: "unknown"` while `status` was printing the
+   * filename, which is how a recording ran for twenty-six hours after its match
+   * ended without anything noticing.
+   */
+  recordingTo: string | null;
   players: Player[];
 }
 
@@ -219,6 +229,20 @@ export interface ParsedStatus {
  * `insecure`, and getting that backwards would report a dead GSLT as healthy.
  */
 const VAC_RE = /^\s*version\s*:.*?\b(in)?secure\b/im;
+
+/**
+ * GOTV's recording line, printed inside the SourceTV block only while a demo
+ * is actually being written:
+ *
+ *   Now recording to "MatchZy/2026-08-31_04-10-31_3_de_dust2_a_vs_b.dem",
+ *   recorded length so far is 25:47:38.
+ *
+ * The name may carry a subdirectory, because MatchZy writes into
+ * `matchzy_demo_path` while the panel's own `tv_record` writes to the game
+ * directory. Both are kept whole; `lib/cs2/demos.ts` already understands the
+ * one-level prefix.
+ */
+const RECORDING_RE = /^\s*Now recording to\s+"([^"]+)"/im;
 
 /**
  * GOTV's own line in `status`, present only when it is running:
@@ -265,6 +289,8 @@ export function parseStatusText(text: string): ParsedStatus {
   const vacMatch = VAC_RE.exec(text);
   const vacSecure = vacMatch ? vacMatch[1] === undefined : null;
 
+  const recordingTo = RECORDING_RE.exec(text)?.[1]?.trim() ?? null;
+
   const tvMatch = SOURCETV_RE.exec(text);
   const gotv = tvMatch
     ? {
@@ -305,6 +331,7 @@ export function parseStatusText(text: string): ParsedStatus {
     visibleMaxPlayers,
     vacSecure,
     gotv,
+    recordingTo,
     players,
   };
 }
@@ -347,12 +374,17 @@ export function parseGameMode(text: string): GameMode {
 export async function fetchStatus(): Promise<{
   status: ServerStatus;
   /** Cvars read alongside the status poll; see `lib/cs2/cvars.ts`. */
-  cvars: { maxRounds: number | null };
+  cvars: { maxRounds: number | null; overtime: boolean | null };
   /**
    * The container's `StartedAt`. A change means the game server is a NEW
    * process, which has lost every piece of state the panel set on it.
    */
   startedAt: string | null;
+  /**
+   * The demo GOTV reports it is writing, or `null` when it is not recording —
+   * and also `null` when RCON did not answer, since there is nothing to read.
+   */
+  recordingTo: string | null;
   /**
    * `null` when RCON did not answer, meaning the roster is simply unknown for
    * this tick. That is NOT the same as "nobody is connected": treating a failed
@@ -374,7 +406,7 @@ export async function fetchStatus(): Promise<{
       // Batched into the round-trip the poll already spends on game mode, so
       // reading mp_maxrounds costs nothing. It was previously the hardcoded
       // constant 24 in the match cache.
-      rconExec("game_type; game_mode; mp_maxrounds"),
+      rconExec("game_type; game_mode; mp_maxrounds; mp_overtime_enable"),
       containerStats("cs2"),
       inspectContainer("cs2"),
       getPublicIp(),
@@ -497,12 +529,24 @@ export async function fetchStatus(): Promise<{
   };
 
   const cvarText = gameModeOut.status === "fulfilled" ? gameModeOut.value : "";
-  const maxRounds = asInt(parseCvarEcho(cvarText).values.get("mp_maxrounds"));
+  const cvarValues = parseCvarEcho(cvarText).values;
+  const maxRounds = asInt(cvarValues.get("mp_maxrounds"));
+  /*
+    `null` when the echo did not come back, never `false`. The dashboard offers
+    overtime as an editable value, and an unread cvar rendered as "off" would
+    invite someone to turn on something that was already on — and, worse, make
+    a save look like it did nothing.
+  */
+  const raw = cvarValues.get("mp_overtime_enable");
+  const overtime = raw === undefined || raw === null ? null : raw === "1" || raw === "true";
 
   return {
     status,
-    cvars: { maxRounds },
+    cvars: { maxRounds, overtime },
     startedAt: containerState?.StartedAt ?? null,
+    // `null` when RCON did not answer at all, so callers can tell "not
+    // recording" from "did not ask".
+    recordingTo: statusText === "" ? null : parsed.recordingTo,
     players: statusText === "" ? null : parsed.players,
     get5: pluginProbe?.matchzy === true ? lastGet5 : null,
   };
@@ -603,7 +647,10 @@ export function containerStateToServerState(
   s: DockerState | null,
   rconAlive = false,
 ): ServerStatus["state"] {
-  if (!s) return rconAlive ? "running" : "crashed";
+  // No Docker answer at all. If RCON is alive the server is plainly running and
+  // only the socket proxy is down. If neither answers we know nothing: saying
+  // "crashed" here reported a diagnosis the panel had not made.
+  if (!s) return rconAlive ? "running" : "unknown";
   if (s.Restarting) return "starting";
   if (s.Paused) return "stopping";
   if (s.Running) {

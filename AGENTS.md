@@ -188,6 +188,21 @@ so ad-hoc RCON has to run from inside the compose network.
 - Image ownership must be set with `COPY --chown`, never a trailing `chown -R` over `/app`: on
   overlayfs each ownership change forces a copy-up, so recursing through `node_modules` rewrites
   the whole dependency tree — measured at 607s on a ZFS-backed LXC versus 0.3s.
+- **A `"use client"` module that reaches `node:crypto` takes down every page**, not just its
+  own. `components/auth-gate.tsx` imported one constant from `lib/auth/passwords.ts`; the
+  browser then evaluated `promisify(undefined)` and threw *during hydration*, so React
+  unmounted the tree and all seven routes rendered "This page couldn't load". `tsc` and
+  `eslint` both pass and the server render is fine — it only appears in a real browser.
+  Shared constants live in `lib/auth/credentials.ts` (no node imports) for this reason, and
+  `test/unit/client-bundle.test.ts` walks the import graph transitively to keep it that way.
+- **The shadcn sidebar wrapper is `min-h-svh`, not `h-svh`**, so `h-full` anywhere inside
+  resolves to `auto` and a page cannot fill the viewport. `components/app-shell.tsx` pins
+  `SidebarInset` to `h-svh overflow-hidden` and lets `main` own the scrolling — that is what
+  lets the Console pin its RCON input to the bottom edge instead of putting it a screen
+  below the fold on a phone.
+- **Preset slot counts are written twice** — `lib/presets.ts` and `scripts/setup.sh`, which
+  cannot import TypeScript. `test/unit/presets.test.ts` asserts they agree. Every count is
+  the player count **plus one**, because GOTV holds slot 0.
 - `PANEL_TRUSTED_CIDRS` matches the **real TCP peer address**, never `X-Forwarded-For` (which is
   attacker-controlled). `server.ts` stamps `x-sidearm-peer` from the socket and deletes any inbound
   copy first — that delete is what prevents spoofing, so do not remove it. The bypass is therefore

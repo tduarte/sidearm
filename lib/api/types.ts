@@ -5,7 +5,17 @@ export type ServerState =
   /** Container is up but steamcmd is still pulling game files; srcds is not listening. */
   | "updating"
   | "stopping"
-  | "crashed";
+  | "crashed"
+  /**
+   * Both control planes are silent: the Docker socket is unreachable *and*
+   * RCON is not answering, so the panel has no evidence either way.
+   *
+   * This is not a failure state, it is the absence of one. It exists because
+   * the alternative is picking a state we cannot support — and the reassuring
+   * guess ("running") and the alarming one ("crashed") are both lies. Never
+   * render it as either.
+   */
+  | "unknown";
 
 export type GameMode =
   | "competitive"
@@ -209,6 +219,13 @@ export interface MatchState {
    */
   maxRounds: number | null;
   /**
+   * From `mp_overtime_enable`, read on the same poll. `null` when the echo did
+   * not come back — never `false`, because the dashboard offers this as an
+   * editable value and an unread cvar shown as "off" invites someone to turn
+   * on what is already on and then wonder why saving changed nothing.
+   */
+  overtime: boolean | null;
+  /**
    * CS2 has no `mp_paused` cvar and `status` carries no pause column, so this
    * cannot be read back. It is also not instantaneous: `mp_pause_match` takes
    * effect at the END of the current round, so even an optimistic flip is
@@ -410,6 +427,17 @@ export interface MatchHistoryEntry {
   finalScore: { ct: number; t: number };
   winner: "CT" | "T" | "DRAW";
   playerCount: number;
+  /**
+   * `mp_maxrounds` as the match was played, when the panel recorded it.
+   *
+   * Kept only so the round timeline knows where the sides swapped. Nothing in
+   * the rounds themselves marks half-time — the score each round carries is
+   * per *side* and goes on counting straight through it — so without this the
+   * divider cannot be drawn, and a divider drawn in the wrong place is worse
+   * than none. Null on matches recorded before the column existed and on
+   * anything MatchZy reported.
+   */
+  maxRounds?: number | null;
   /**
    * Who recorded this match. `matchzy` records are authoritative where both
    * exist — see `getHistory`.

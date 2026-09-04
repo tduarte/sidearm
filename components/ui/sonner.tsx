@@ -28,11 +28,17 @@ const Toaster = ({ ...props }: ToasterProps) => {
           <SpinnerIcon className="size-4 animate-spin" />
         ),
       }}
+      /*
+        The dock's surface, not the popover token: a toast fires over the stage
+        and reads as part of it. Same near-black at 94% and same hairline as
+        `.bc__chip`, with the blur in `app/globals.css` — sonner sets these
+        inline, so a stylesheet cannot reach them.
+      */
       style={
         {
-          "--normal-bg": "var(--popover)",
+          "--normal-bg": "rgba(12, 14, 19, 0.94)",
           "--normal-text": "var(--popover-foreground)",
-          "--normal-border": "var(--border)",
+          "--normal-border": "rgba(255, 255, 255, 0.2)",
           "--border-radius": "var(--radius)",
         } as React.CSSProperties
       }

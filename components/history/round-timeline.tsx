@@ -55,8 +55,8 @@ export function RoundTimeline({
                 className={cn(
                   "h-5 w-5 border text-center text-[0.6rem] leading-[1.15rem] tabular-nums",
                   r.winner === "CT"
-                    ? "border-blue-500/40 bg-blue-500/15 text-blue-300"
-                    : "border-amber-500/40 bg-amber-500/15 text-amber-300",
+                    ? "border-team-ct/40 bg-team-ct/12 text-team-ct"
+                    : "border-team-t/40 bg-team-t/12 text-team-t",
                 )}
               >
                 {r.round}

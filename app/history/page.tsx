@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoadError } from "@/components/load-error";
+import { DemoList } from "@/components/history/demo-list";
 import { RoundTimeline } from "@/components/history/round-timeline";
 import { MatchZyScoreboard } from "@/components/history/matchzy-scoreboard";
+import { PanelScoreboard } from "@/components/history/panel-scoreboard";
 import { api } from "@/lib/api/client";
 import { cn } from "@/lib/utils";
 
@@ -27,6 +29,83 @@ function formatDuration(startIso: string, endIso: string) {
     (new Date(endIso).getTime() - new Date(startIso).getTime()) / 60000,
   );
   return `${mins} min`;
+}
+
+type Match = Awaited<ReturnType<typeof api.getHistory>>[number];
+
+/**
+ * The round the sides swapped after, or null when it cannot be known.
+ *
+ * `mp_maxrounds` is recorded with the match precisely for this. Nothing in the
+ * rounds themselves marks half-time — each one carries a per-*side* running
+ * score that goes straight through it — so an odd or missing limit means no
+ * divider rather than a guessed one in the wrong place.
+ */
+function halfOf(m: Match): number | null {
+  return m.maxRounds != null && m.maxRounds % 2 === 0 ? m.maxRounds / 2 : null;
+}
+
+/**
+ * The best scoreboard this match has.
+ *
+ * MatchZy's where MatchZy ran it — damage, entries and clutches the log parser
+ * has no access to — and the panel's own K/D/A otherwise, which until now was
+ * fetched and then dropped on the floor.
+ */
+function Scoreboard({ m }: { m: Match }) {
+  if (m.matchzyPlayers && m.matchzyPlayers.length > 0) {
+    return <MatchZyScoreboard players={m.matchzyPlayers} />;
+  }
+  return <PanelScoreboard players={m.players ?? []} />;
+}
+
+/**
+ * MatchZy tracks teams, which swap sides at half, so its scores are per-team
+ * and cannot be coloured CT/blue and T/orange the way the log parser's are.
+ */
+function MatchScore({ m }: { m: Match }) {
+  if (m.teams) {
+    return (
+      <span className="whitespace-nowrap tabular-nums">
+        {m.teams[0].score}
+        <span className="text-muted-foreground"> : </span>
+        {m.teams[1].score}
+      </span>
+    );
+  }
+  return (
+    <span className="whitespace-nowrap tabular-nums">
+      <span className="text-team-ct">{m.finalScore.ct}</span>
+      <span className="text-muted-foreground"> : </span>
+      <span className="text-team-t">{m.finalScore.t}</span>
+    </span>
+  );
+}
+
+function WinnerBadge({ m }: { m: Match }) {
+  return (
+    <Badge
+      variant="outline"
+      className={cn(
+        "gap-1.5",
+        !m.teams && m.winner === "CT" && "text-team-ct border-team-ct/40",
+        !m.teams && m.winner === "T" && "text-team-t border-team-t/40",
+        (m.winner === "DRAW" || m.winnerLabel === "") && "text-muted-foreground",
+      )}
+    >
+      <Trophy className="h-3 w-3" />
+      {m.teams ? m.winnerLabel || "DRAW" : m.winner}
+    </Badge>
+  );
+}
+
+function NoMatches() {
+  return (
+    <div className="space-y-1 py-10 text-center text-sm text-muted-foreground">
+      <p>No completed matches yet.</p>
+      <p className="text-xs">A match is recorded once it reaches Game Over.</p>
+    </div>
+  );
 }
 
 export default function HistoryPage() {
@@ -55,14 +134,16 @@ export default function HistoryPage() {
       <div>
         <h1 className="text-2xl font-semibold">History</h1>
         <p className="text-sm text-muted-foreground">
-          Chat and completed matches. Where MatchZy ran the match, its own
-          record is shown — real teams, real scores and a full scoreboard.
+          Completed matches, the demos of them, and everything said in chat.
+          Where MatchZy ran the match its own record is shown — real teams, real
+          scores and a full scoreboard.
         </p>
       </div>
 
       <Tabs defaultValue="matches">
         <TabsList>
           <TabsTrigger value="matches">Matches</TabsTrigger>
+          <TabsTrigger value="demos">Demos</TabsTrigger>
           <TabsTrigger value="chat">Chat</TabsTrigger>
         </TabsList>
 
@@ -79,112 +160,135 @@ export default function HistoryPage() {
                   onRetry={() => matches.refetch()}
                 />
               ) : matches.isLoading ? (
-                <Skeleton className="h-64" />
+                <div className="space-y-3">
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="h-4 w-36" />
+                      <Skeleton className="h-4 w-28" />
+                      <Skeleton className="ml-auto h-4 w-16" />
+                      <Skeleton className="h-6 w-20" />
+                    </div>
+                  ))}
+                </div>
               ) : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>When</TableHead>
-                      <TableHead>Map</TableHead>
-                      <TableHead>Mode</TableHead>
-                      <TableHead className="text-right">Score</TableHead>
-                      <TableHead>Winner</TableHead>
-                      <TableHead className="text-right">Duration</TableHead>
-                      <TableHead className="text-right">Players</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {(matches.data ?? []).length === 0 && (
-                      <TableRow>
-                        <TableCell
-                          colSpan={7}
-                          className="h-24 text-center text-muted-foreground"
-                        >
-                          <div className="space-y-1">
-                            <p>No completed matches yet.</p>
-                            <p className="text-xs">
-                              A match is recorded once it reaches Game Over.
+                <>
+                  {(matches.data ?? []).length === 0 ? (
+                    <NoMatches />
+                  ) : (
+                    <>
+                      {/*
+                        Seven columns do not survive a phone. Under `md` each
+                        match becomes a card that leads with the two things you
+                        scan for — the map and the score — and demotes the rest
+                        to a single meta line.
+                      */}
+                      <ul className="space-y-4 md:hidden">
+                        {(matches.data ?? []).map((m) => (
+                          <li key={m.id} className="space-y-3 border-b pb-4 last:border-0">
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <p className="truncate font-mono font-medium">{m.map}</p>
+                                {m.teams && (
+                                  <p className="truncate text-xs text-muted-foreground">
+                                    {m.teams[0].name} vs {m.teams[1].name}
+                                  </p>
+                                )}
+                              </div>
+                              <p className="shrink-0 text-lg font-semibold">
+                                <MatchScore m={m} />
+                              </p>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 text-xs text-muted-foreground">
+                              <WinnerBadge m={m} />
+                              <span className="capitalize">{m.gameMode}</span>
+                              <span>·</span>
+                              <span>{formatDuration(m.startedAt, m.endedAt)}</span>
+                              <span>·</span>
+                              <span>{m.playerCount} players</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">
+                              {new Date(m.startedAt).toLocaleString()}
                             </p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                    {(matches.data ?? []).map((m) => (
-                      <Fragment key={m.id}>
-                      <TableRow>
-                        <TableCell className="text-muted-foreground">
-                          {new Date(m.startedAt).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="font-mono">
-                          <span>{m.map}</span>
-                          {m.teams && (
-                            <span className="ml-2 font-sans text-xs text-muted-foreground">
-                              {m.teams[0].name} vs {m.teams[1].name}
-                            </span>
-                          )}
-                        </TableCell>
-                        <TableCell className="capitalize">{m.gameMode}</TableCell>
-                        <TableCell className="text-right tabular-nums">
-                          {/*
-                            MatchZy tracks teams, which swap sides at half, so
-                            its scores are per-team and cannot be coloured
-                            CT/blue and T/amber the way the log parser's are.
-                          */}
-                          {m.teams ? (
-                            <span className="whitespace-nowrap">
-                              {m.teams[0].score}
-                              <span className="text-muted-foreground"> : </span>
-                              {m.teams[1].score}
-                            </span>
-                          ) : (
-                            <>
-                              <span className="text-blue-400">{m.finalScore.ct}</span>
-                              <span className="text-muted-foreground"> : </span>
-                              <span className="text-amber-400">{m.finalScore.t}</span>
-                            </>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "gap-1.5",
-                              !m.teams && m.winner === "CT" && "text-blue-400 border-blue-500/40",
-                              !m.teams && m.winner === "T" && "text-amber-400 border-amber-500/40",
-                              (m.winner === "DRAW" || m.winnerLabel === "") &&
-                                "text-muted-foreground",
+                            {m.rounds && m.rounds.length > 0 && (
+                              <RoundTimeline rounds={m.rounds} halfAt={halfOf(m)} />
                             )}
-                          >
-                            <Trophy className="h-3 w-3" />
-                            {m.teams ? m.winnerLabel || "DRAW" : m.winner}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {formatDuration(m.startedAt, m.endedAt)}
-                        </TableCell>
-                        <TableCell className="text-right">{m.playerCount}</TableCell>
-                      </TableRow>
-                      {m.rounds && m.rounds.length > 0 && (
-                        <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={7} className="pt-0">
-                            <RoundTimeline rounds={m.rounds} />
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      {m.matchzyPlayers && m.matchzyPlayers.length > 0 && (
-                        <TableRow className="hover:bg-transparent">
-                          <TableCell colSpan={7} className="pt-0">
-                            <MatchZyScoreboard players={m.matchzyPlayers} />
-                          </TableCell>
-                        </TableRow>
-                      )}
-                      </Fragment>
-                    ))}
-                  </TableBody>
-                </Table>
+                            <Scoreboard m={m} />
+                          </li>
+                        ))}
+                      </ul>
+
+                      <div className="hidden md:block">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>When</TableHead>
+                              <TableHead>Map</TableHead>
+                              <TableHead>Mode</TableHead>
+                              <TableHead className="text-right">Score</TableHead>
+                              <TableHead>Winner</TableHead>
+                              <TableHead className="text-right">Duration</TableHead>
+                              <TableHead className="text-right">Players</TableHead>
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {(matches.data ?? []).map((m) => (
+                              <Fragment key={m.id}>
+                                <TableRow>
+                                  <TableCell className="text-muted-foreground">
+                                    {new Date(m.startedAt).toLocaleString()}
+                                  </TableCell>
+                                  <TableCell className="font-mono">
+                                    <span>{m.map}</span>
+                                    {m.teams && (
+                                      <span className="ml-2 font-sans text-xs text-muted-foreground">
+                                        {m.teams[0].name} vs {m.teams[1].name}
+                                      </span>
+                                    )}
+                                  </TableCell>
+                                  <TableCell className="capitalize">{m.gameMode}</TableCell>
+                                  <TableCell className="text-right">
+                                    <MatchScore m={m} />
+                                  </TableCell>
+                                  <TableCell>
+                                    <WinnerBadge m={m} />
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {formatDuration(m.startedAt, m.endedAt)}
+                                  </TableCell>
+                                  <TableCell className="text-right">
+                                    {m.playerCount}
+                                  </TableCell>
+                                </TableRow>
+                                {m.rounds && m.rounds.length > 0 && (
+                                  <TableRow className="hover:bg-transparent">
+                                    <TableCell colSpan={7} className="pt-0">
+                                      <RoundTimeline
+                                        rounds={m.rounds}
+                                        halfAt={halfOf(m)}
+                                      />
+                                    </TableCell>
+                                  </TableRow>
+                                )}
+                                <TableRow className="hover:bg-transparent">
+                                  <TableCell colSpan={7} className="pt-0">
+                                    <Scoreboard m={m} />
+                                  </TableCell>
+                                </TableRow>
+                              </Fragment>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
+                    </>
+                  )}
+                </>
               )}
             </CardContent>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="demos" className="mt-4">
+          <DemoList />
         </TabsContent>
 
         <TabsContent value="chat" className="mt-4">
@@ -203,11 +307,35 @@ export default function HistoryPage() {
             </CardHeader>
             <CardContent>
               {chat.isLoading ? (
-                <Skeleton className="h-64" />
+                <div className="space-y-3">
+                  {Array.from({ length: 5 }, (_, i) => (
+                    <div key={i} className="flex items-center gap-4">
+                      <Skeleton className="h-4 w-36" />
+                      <Skeleton className="h-4 w-28" />
+                      <Skeleton className="ml-auto h-4 w-16" />
+                      <Skeleton className="h-6 w-20" />
+                    </div>
+                  ))}
+                </div>
               ) : filteredChat.length === 0 ? (
-                <p className="py-8 text-center text-sm text-muted-foreground">
-                  No chat messages match.
-                </p>
+                <div className="space-y-1 py-8 text-center text-sm text-muted-foreground">
+                  {search ? (
+                    <>
+                      <p>No message matches \u201C{search}\u201D.</p>
+                      <p className="text-xs">
+                        {chat.data?.length ?? 0} message
+                        {(chat.data?.length ?? 0) === 1 ? "" : "s"} logged.
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <p>Nothing has been said yet.</p>
+                      <p className="text-xs">
+                        In-game chat is recorded here as it happens.
+                      </p>
+                    </>
+                  )}
+                </div>
               ) : (
                 <div className="divide-y">
                   {filteredChat
@@ -225,8 +353,8 @@ export default function HistoryPage() {
                           variant="outline"
                           className={cn(
                             "shrink-0",
-                            m.team === "CT" && "text-blue-400 border-blue-500/40",
-                            m.team === "T" && "text-amber-400 border-amber-500/40",
+                            m.team === "CT" && "text-team-ct border-team-ct/40",
+                            m.team === "T" && "text-team-t border-team-t/40",
                           )}
                         >
                           {m.team}

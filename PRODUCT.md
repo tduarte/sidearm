@@ -17,8 +17,13 @@ Two confirmed audiences, one panel:
   GitHub, ran `docker compose up`, and reach a fresh panel with no tour of the codebase
   behind them. They know CS2 and RCON; they do not know sidearm's conventions.
 
-Both are admins with full authority — the panel has no non-admin role. Access is a single
-optional bearer token (`PANEL_ADMIN_TOKEN`), not per-user accounts.
+Neither is necessarily alone any more. **Superseded 2026-08-31:** the panel has real
+accounts with three roles — `admin`, `moderator`, `viewer` — created on first run and stored
+in the panel's own SQLite. The owner-operator is the admin; friends who help run a match are
+moderators; people who only want to watch and pull their own demos are viewers. That last
+role is why the change was asked for. `PANEL_ADMIN_TOKEN` survives as a break-glass
+credential and as the setup token that gates registering the first account, not as the
+login.
 
 ## Product Purpose
 
@@ -74,16 +79,17 @@ Confirmed capabilities (all wired to a real backend unless noted):
 Constraints:
 
 - Next.js 16 + React 19, Tailwind v4, shadcn/ui components, Phosphor icons, TanStack Query
-  v5, custom `server.ts` with a `ws` server. Dark theme only today (`<html class="dark">`).
+  v5, custom `server.ts` with a `ws` server. Light and dark themes, following the operating
+  system (`next-themes`); the hardcoded `<html class="dark">` is gone.
 - The panel's authority ends at RCON and the Docker API. It **cannot** recreate the `cs2`
   container, so anything that is a launch argument (GSLT, workshop collection, maxplayers)
   cannot be changed from the UI at runtime.
 - Docker-in-LXC is required; without the Docker socket the resource tiles and all lifecycle
   buttons fail while RCON keeps working — a half-broken panel, not an obviously dead one.
 - RCON is deliberately unpublished outside the compose network.
-- Explicitly undecided: whether Settings becomes real. `app/settings/page.tsx` is currently
-  an unwired mock (admin username/password, notifications, autoscroll) that does not reflect
-  how access actually works — the real mechanism is a single `PANEL_ADMIN_TOKEN` env var.
+- **Settled 2026-08-31:** Settings is real. It holds the signed-in account (change password,
+  sign out), admin-only user management, appearance, and the console preferences that were
+  previously mocked.
 
 ## Brand Commitments
 
@@ -94,10 +100,25 @@ Constraints:
   command under each action (`mp_restartgame 1`) and states consequences before they happen
   ("Restarts the server immediately, players connected or not — you asked for it"). Keep it.
 - No logo asset beyond a Phosphor `Crosshair` mark.
-- **The incumbent visual identity is pinned by the user** (stated 2026-08-25): dark-only
-  shadcn/ui on Tailwind v4, the amber/gold `--primary`, Geist Sans + Geist Mono, Phosphor
-  icons, sidebar-plus-top-bar shell. Work improves structure, interaction, states and copy
-  *inside* that identity; it is not a candidate for replacement.
+- **Unpinned and replaced, 2026-08-31.** The amber-on-black identity was the game-server
+  category's default costume, and it made a tool people trust with a live match look like a
+  skin. What replaced it is *the category standard, played straight*: a quiet neutral admin
+  dashboard, a high-contrast neutral primary, and colour spent only where it carries state —
+  with the Vercel dashboard as the craft bar. This is the standing exit, taken over the
+  assigned direction at seed key `1acf5420`. Semantic tokens (`--ok`, `--warn`, `--danger`,
+  `--info`, `--pending`, `--unknown`, `--team-ct`, `--team-t`) exist so "running" is one
+  green everywhere instead of a hand-picked emerald per component. Geist Sans for everything;
+  Geist Mono only for machine text — commands, ids, telemetry. Phosphor icons stay.
+- **Narrowed to one world, 2026-09-03 — the Broadcast direction.** The dashboard is a
+  scoreboard at stadium scale that you *change*: the mode, the map, the teams, the round
+  limit and the series are edited in the band, in place, at the size they are worth. Two
+  consequences worth writing down, because they are commitments and not styling:
+  - **One theme, dark.** Both themes used to be real and the default followed the operating
+    system. A stage is a lit thing in a dark room, so the panel forces dark. The light
+    tokens remain because Settings and History are still built from them.
+  - **The sidebar-plus-top-bar shell is gone.** A wordmark, a two-item rail and a ⌘K chip.
+    The panel is three destinations now — the dashboard, History, Settings — because
+    everything else turned out to be a way of editing the match already running.
 
 ## Evidence on Hand
 
@@ -119,12 +140,25 @@ Constraints:
 3. **A stranger's first install must be legible.** The panel is distributed software; a
    fresh, empty, still-downloading server is a first-class screen, not an edge case.
 4. **Reach for the thing you need in one move.** The mid-match moments — kick, map, pause,
-   restart — must not be several navigations deep.
-5. **The console command is part of the interface.** Admins trust the panel because it shows
+   restart — must not be several navigations deep. Taken to its conclusion in the Broadcast
+   redesign: they are not on another screen at all, they are on the scoreboard.
+5. **The server is always running something.** There is no "start from scratch" — every
+   setup is a modification of what is live. So picking teams, naming them and choosing a
+   series length are edits to the thing already on screen, staged in the same dock as the
+   mode and the map, and applied together.
+6. **The console command is part of the interface.** Admins trust the panel because it shows
    the RCON it sends; never hide the mechanism to look tidier.
 
 ## Accessibility & Inclusion
 
 No user-specific requirement was established. The panel is used one-handed on a phone
-mid-match, so touch targets and thumb reach are a real constraint, and it is read on a
-bright screen in a dark room, which the dark-only theme already assumes.
+mid-match, so touch targets and thumb reach are a real constraint — the reason for the
+fixed bottom action bar under `md`, and for the dock pinning itself above the home indicator
+rather than under it.
+
+It used to follow the operating system's theme, on the reasoning that it is read on a bright
+screen before a session and in a dark room at 2am. That was given up deliberately when the
+panel became a stage: one world, dark, so the state colours mean the same thing at every hour
+instead of two. The cost is real and is accepted — the light-room reading is now a dark
+surface at full brightness, and every state colour is held to contrast against `--stage`
+rather than against two grounds at once.

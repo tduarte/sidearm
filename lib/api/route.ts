@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { requireRouteAccess } from "@/lib/auth/guard";
 
 /**
  * Turns a thrown adapter error into something an admin can act on.
@@ -33,18 +34,32 @@ export function describeServerError(err: unknown): string {
 }
 
 /**
- * Wraps a route handler so a thrown error becomes `{ error }` with a real
- * reason instead of Next's generic 500.
+ * Wraps a route handler with the two things every endpoint needs: the role
+ * check, and an error that names a real reason.
  *
- * The client reads `error` off the body (`lib/api/client.ts`), and the global
- * mutation handler in `components/providers.tsx` puts it in front of the user.
- * Without this the chain has nothing to show but the status line.
+ * **Authorisation.** `proxy.ts` already checked this, but Next's own
+ * documentation says not to treat the proxy as the security boundary, so the
+ * check runs again here against the same table in `lib/auth/permissions.ts`.
+ * Doing it in the wrapper rather than in each handler is deliberate: every
+ * protected route in the app is already wrapped, so there is no list to keep in
+ * sync and a new endpoint cannot ship unguarded by forgetting a line. The three
+ * routes that are not wrapped — `/api/auth`, and the two machine callbacks CS2
+ * itself hits — are exactly the routes that authenticate by other means.
+ *
+ * **Errors.** The client reads `error` off the body (`lib/api/client.ts`), and
+ * the global mutation handler in `components/providers.tsx` puts it in front of
+ * the user. Without this the chain has nothing to show but the status line.
  */
 export function route<A extends unknown[]>(
   handler: (...args: A) => Promise<Response>,
 ): (...args: A) => Promise<Response> {
   return async (...args: A) => {
     try {
+      const req = args[0];
+      if (req instanceof Request) {
+        const denied = requireRouteAccess(req);
+        if (denied) return denied;
+      }
       return await handler(...args);
     } catch (err) {
       return NextResponse.json(

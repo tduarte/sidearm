@@ -4,11 +4,11 @@ Self-hosted Counter-Strike 2 dedicated server with a web admin panel — shipped
 
 ## Features
 
-- **Live dashboard** — server state, CPU/RAM, FPS, player list, all pushed over WebSocket
-- **Match control** — start/stop warmup, pause, switch maps, record demos
-- **Player management** — kick players from the UI
-- **RCON console** — run raw commands from the browser
-- **Chat & history** — live in-game chat feed and per-match history
+- **A scoreboard you change** — the mode, the map, the teams, the round limit and the series are edited in place, staged, and applied together
+- **Match control** — warmup, pause, knife round, swap, demos, round backups
+- **Player management** — kick and ban from the scoreboard
+- **RCON console** — a mode of the ⌘K palette, so it is one keystroke from anywhere
+- **Chat, history & demos** — live chat, per-match history with round-by-round detail, and the recordings
 - **Competitive plugins built in** — Metamod, CounterStrikeSharp and MatchZy, pinned and installed on boot
 - **One-command stack** — CS2 + panel + socket proxy in a single compose file
 
@@ -110,10 +110,90 @@ Leave RCON (`27015/**tcp**`) closed. It is deliberately not published outside
 the compose network, and exposing it hands out full server control.
 
 The panel on `3000/tcp` should stay on your LAN, or behind a reverse proxy with
-`PANEL_ADMIN_TOKEN` set and `PANEL_HTTPS=1`.
+`PANEL_HTTPS=1` so the session cookie is marked `Secure`.
 
 Then connect with `steam://connect/<your-public-ip>:27015`, or copy the connect
 string straight off the dashboard.
+
+---
+
+## Accounts and roles
+
+The first time you open the panel it asks you to create an account. That account
+is an admin, and from then on every request needs a session — there is no
+"open panel" mode.
+
+If `PANEL_ADMIN_TOKEN` is set, registration also asks for it. That is the
+upgrade path: a deployment that was protected by a token cannot be claimed by
+whoever reaches it first after a redeploy.
+
+Three roles, each a superset of the one before it:
+
+| | viewer | moderator | admin |
+|---|---|---|---|
+| Dashboard, scoreboard, match history | ✅ | ✅ | ✅ |
+| **Download demos** | ✅ | ✅ | ✅ |
+| Kick and ban players | | ✅ | ✅ |
+| Change map, pause, run a match | | ✅ | ✅ |
+| Read the server log | | ✅ | ✅ |
+| Start / stop / restart the server | | | ✅ |
+| Config, presets, workshop, rotation | | | ✅ |
+| Run raw RCON commands | | | ✅ |
+| Manage accounts | | | ✅ |
+
+Admins create the other accounts in **Settings → Users**. Changing someone's
+role or disabling them signs them out everywhere immediately, including their
+open WebSocket.
+
+The panel never shows a link to a page the account cannot use, and the server
+enforces the same table independently — the navigation is a convenience, not
+the boundary.
+
+Accounts live in the panel's SQLite database on the `panel-data` volume, so
+they survive a redeploy. Passwords are scrypt-hashed.
+
+### Where things are
+
+Three destinations, and a keystroke:
+
+| | |
+|---|---|
+| **Dashboard** | The live product. The scoreboard is the control surface: the mode, the map, the round limit, and — with MatchZy — the team names, the rosters, the captains and the series are all edited there. Edits are staged and applied together from the dock at the bottom; interventions that cannot wait (pause, knife, swap, demo, kick, end) fire on confirm instead. |
+| **History** | What already happened: completed matches with round-by-round detail and a scoreboard, the chat log, and the demos. |
+| **Settings** | Administration — the server preset and advertised slots, the map library and rotation, the ban list, accounts, and what version is running. |
+| **⌘K** | Navigation, jump-to-map, jump-to-player, and the RCON console. The console is a mode of this palette rather than a page. |
+
+`/match`, `/maps`, `/config`, `/console` and `/players` were pages once and are
+redirects now — old links and bookmarks still land somewhere useful.
+
+---
+
+## Picking a preset
+
+Slots, game type and game mode are not three independent decisions: choosing
+Wingman settles all three. Both `scripts/setup.sh` and the panel's **Settings →
+Presets** card offer the same set, with the same numbers:
+
+| Preset | Players | `CS2_MAXPLAYERS` |
+|---|---|---|
+| Competitive 5v5 | 10 | `11` |
+| Wingman 2v2 | 4 | `5` |
+| Deathmatch | 24 | `25` |
+| Casual 10v10 | 20 | `21` |
+| Practice | up to 10 | `11` |
+
+Every count is one higher than the number of humans, because GOTV occupies a
+slot. Getting this wrong is the classic new-server failure: ten slots looks
+right for a 5v5 and only nine people can join.
+
+The cvar half of a preset (mode, advertised slots, bots) applies over RCON
+while people are playing. The slot ceiling is a launch argument, so the panel
+cannot change it — the Presets card prints the exact `.env` lines and the one
+command instead:
+
+```bash
+docker compose up -d --force-recreate cs2   # drops everyone connected
+```
 
 ---
 
@@ -130,15 +210,15 @@ Copy `.env.example` to `.env` and fill in:
 | `SERVER_NAME` | No | Server browser name (default: `sidearm`) |
 | `CS2_MAXPLAYERS` | No | Hard slot ceiling, i.e. `-maxplayers` (default: `11`). Set once to the largest roster you will ever host; the advertised count varies per game mode underneath it. GOTV takes one slot, so budget an extra — 11 fits a 5v5, 33 fits 32 players. |
 | `CS2_STARTMAP` | No | Starting map (default: `de_mirage`) |
-| `PANEL_ADMIN_TOKEN` | No | Bearer token for `/api/*` and `/ws`. Blank = open panel. When set, the UI prompts once and keeps an HttpOnly session cookie. |
+| `PANEL_ADMIN_TOKEN` | No | **Not the login** — the panel uses accounts (see [Accounts and roles](#accounts-and-roles)). This is a break-glass bearer token for `/api/*` and `/ws` that always resolves to `admin`, for scripts and for getting back in if you lock yourself out. When set it is also required as a setup token to register the first account, so a redeployed panel cannot be claimed by a stranger. |
 | `PANEL_HTTPS` | No | Set to `1` when serving over HTTPS so the session cookie is marked `Secure`. |
 | `SERVER_IP` | No | Public address for the connect URL. Set it to avoid an outbound lookup to api.ipify.org each poll. |
 | `BIND_HOST` | No | Interface to bind (default `0.0.0.0`). Deliberately not `HOSTNAME`, which shells and Docker both set. |
 | `CS2_AUTO_UPDATE` | No | `1` lets the panel restart the CS2 container by itself when a game update is pending **and** nobody is connected. Unset = surface the badge only. |
 | `CS2_UPDATE_CHECK_MS` | No | How often to check for a CS2 update (default `900000`, 15 min). `0` disables the check. |
-| `CS2_GAMETYPE` / `CS2_GAMEMODE` | No | Starting game mode as Valve's two numbers (default `0` / `1` — competitive). The panel's Config page changes this at runtime; these only set what the server boots into. |
+| `CS2_GAMETYPE` / `CS2_GAMEMODE` | No | Starting game mode as Valve's two numbers (default `0` / `1` — competitive). The panel's dashboard changes this at runtime; these only set what the server boots into. |
 | `CS2_MAPGROUP` | No | Map group for the boot map cycle (default `mg_active`). |
-| `PANEL_TRUSTED_CIDRS` | No | Comma-separated CIDRs whose clients skip `PANEL_ADMIN_TOKEN` — e.g. `192.168.1.0/24`. Matched against the **real TCP peer**, never `X-Forwarded-For`, so it does nothing behind a reverse proxy — and listing the proxy's own address would exempt the entire internet. |
+| `PANEL_TRUSTED_CIDRS` | No | Comma-separated CIDRs whose clients get **`viewer`** without signing in — e.g. `192.168.1.0/24` for a scoreboard on a wall display. This is no longer a full bypass: reads work, every mutation still needs an account. Matched against the **real TCP peer**, never `X-Forwarded-For`, so it does nothing behind a reverse proxy — and listing the proxy's own address would exempt the entire internet. |
 | `MATCHZY_CONFIG_SECRET` | No | Secret CS2 presents when fetching a match config. Falls back to `LOG_INGEST_SECRET`, so leaving it blank is fine. |
 | `TV_ENABLE` | No | GOTV on/off (default `1`). Required for demo recording — `tv_record` needs it. |
 | `TV_DELAY` | No | GOTV broadcast delay in seconds (default `30`). `0` lets spectators watch live and call positions. |
@@ -166,7 +246,7 @@ and passes that to Steam's public
 [`ISteamApps/UpToDateCheck`](https://api.steampowered.com/ISteamApps/UpToDateCheck/v1/?appid=730&version=1)
 endpoint — no API key, no GSLT. When a newer build exists:
 
-- An **Update available** button appears in the top bar. Clicking it restarts the
+- An **Update available** button appears in the panel header. Clicking it restarts the
   container immediately, players connected or not — you asked for it.
 - With `CS2_AUTO_UPDATE=1`, the panel also restarts on its own, but **only** when
   the server is empty. Every other outcome (players connected, roster unknown,
@@ -237,9 +317,9 @@ delay, anyone connecting to GOTV watches the game live and can call positions.
 
 `CS2_MAXPLAYERS` is the **ceiling**: `-maxplayers` on the launch line, allocated by the engine at boot. No cvar moves it, so the panel cannot change it — raising it needs `docker compose up -d --force-recreate cs2` on the host.
 
-`sv_visiblemaxplayers` is the **advertised count**: what the server browser shows and what "server full" is measured against. It is a cvar, so it changes live, and the panel's Config page sets it per game mode.
+`sv_visiblemaxplayers` is the **advertised count**: what the server browser shows and what "server full" is measured against. It is a cvar, so it changes live, and the panel sets it per game mode.
 
-A 32-player server is both: `CS2_MAXPLAYERS=33` once, then let the advertised count follow the mode. Picking a game mode on the Config page moves it for you:
+A 32-player server is both: `CS2_MAXPLAYERS=33` once, then let the advertised count follow the mode. Picking a game mode on the dashboard moves it for you:
 
 | Mode | Advertised |
 |---|---|
@@ -262,7 +342,7 @@ Every `TV_*` variable is a launch argument, so changing one needs
 Turn GOTV off with `TV_ENABLE=0` in `.env` if you don't want it.
 
 Recorded demos land in the CS2 volume. The panel mounts that volume **read-only**
-at `/cs2` so it can list them and hand them to you from Match Control; without
+at `/cs2` so it can list them and hand them to you from History; without
 the mount, recording still works but the files stay out of reach.
 
 ---
@@ -339,16 +419,18 @@ Verify from inside the container over RCON with `meta list` and `css_plugins lis
 
 ### Running a match
 
-With MatchZy loaded, **Match Control → Run a match** sets one up: team names, players picked off the live roster, a map pool and a series length. Saving stores the definition; loading it makes CS2 fetch the config over HTTP and start warmup.
+With MatchZy loaded, the **dashboard** is where a match is set up — not a separate screen, because the server is always running something and there is no such thing as starting from scratch. Rename the sides in the band, move people between them on the scoreboard, mark a captain, pick a series length and a map pool. Nothing is sent while you do it: the dock names every pending change and applies them together.
 
-Loading a match changes the map and restarts the game for everyone, so it confirms first with a live headcount.
+Applying saves the definition and makes CS2 fetch it over HTTP. That restarts the match, runs MatchZy's own knife round and rewrites the server name from `matchzy_hostname_format`, so unlike the cvar edits beside it, this one confirms first.
+
+The captain badge is a drafting device and the panel says so: MatchZy has no captain field, and what survives into the config is roster position — the captain is listed first.
 
 Two things the panel handles for you because the server will not tell you about them:
 
 - **Bots are filtered out of the roster.** They have no Steam identity, so MatchZy never recognises them and the match sits in warmup forever with nothing on screen explaining why.
 - **A map pool exactly as long as the series has nothing to veto**, so MatchZy silently skips the veto whatever you asked for. The form says so while you are picking, not after.
 
-While a match is loaded, **MatchZy owns the map cycle, the gameplay cvars and demo recording**, and the panel stands down from all three: rotation does not fire on Game Over, the Config page holds back the settings `live.cfg` sets (identity and password still apply), and demo recording refuses with a reason. `get5_status` also becomes readable, which is the first time the panel can *read* pause state rather than infer it — CS2 exposes no `mp_paused` cvar and no pause column in `status`.
+While a match is loaded, **MatchZy owns the map cycle, the gameplay cvars and demo recording**, and the panel stands down from all three: rotation does not fire on Game Over, the dashboard holds back the settings `live.cfg` sets (identity and password still apply), and demo recording refuses with a reason. `get5_status` also becomes readable, which is the first time the panel can *read* pause state rather than infer it — CS2 exposes no `mp_paused` cvar and no pause column in `status`.
 
 Note the panel gives MatchZy an **integer** `matchid`, assigned on save. The Get5 spec this schema follows describes it as a string; MatchZy rejects that with `matchid should be an integer!` in the server console and loads nothing.
 

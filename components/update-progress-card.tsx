@@ -90,10 +90,10 @@ export function UpdateProgressCard({
   const downloading = /download/i.test(progress?.phase ?? "");
 
   return (
-    <Card className="border-sky-500/30 bg-sky-500/5">
+    <Card className="border-info/30 bg-info/5">
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-base">
-          <CloudArrowDown className="h-5 w-5 text-sky-400" />
+          <CloudArrowDown className="h-5 w-5 text-info" />
           {downloading
             ? "Downloading Counter-Strike 2"
             : "Updating Counter-Strike 2"}

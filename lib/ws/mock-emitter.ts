@@ -101,9 +101,16 @@ export function startMockEmitter() {
     const winner: Team = Math.random() > 0.5 ? "CT" : "T";
     if (winner === "CT") state.match.score.ct++;
     else state.match.score.t++;
-    state.match.round++;
     const limit = state.match.maxRounds;
-    if (limit !== null && state.match.score.ct + state.match.score.t >= limit) {
+    /*
+      `round` is the round being *played*, so it is one past the completed
+      count — and never past the limit. Incrementing it alongside the score
+      from a seed where it already led by one drifted it out of range, and the
+      dashboard ended up printing "Ended · Round 25 of 24" in its largest type.
+    */
+    const played = state.match.score.ct + state.match.score.t;
+    state.match.round = limit === null ? played + 1 : Math.min(played + 1, limit);
+    if (limit !== null && played >= limit) {
       state.match.phase = "ended";
       bus.emit({ type: "match.phase", phase: "ended" });
     }

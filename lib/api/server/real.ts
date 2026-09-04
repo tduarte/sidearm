@@ -6,6 +6,7 @@ import type {
   CvarGroup,
   CvarSnapshot,
   CvarState,
+  GameMode,
   MatchPhase,
   MatchState,
   RoundRecord,
@@ -129,6 +130,7 @@ global.__cs2Cache ??= {
     score: { ct: 0, t: 0 },
     round: 0,
     maxRounds: null,
+    overtime: null,
     pause: "unknown",
     demo: { state: "unknown", name: null },
     knifeSetupApplied: false,
@@ -481,8 +483,14 @@ function applyMatchZyState(get5: Get5Status | null): void {
 export function updateCache(
   status: ServerStatus,
   players: Player[] | null,
-  cvars?: { maxRounds: number | null },
+  cvars?: { maxRounds: number | null; overtime?: boolean | null },
   get5?: Get5Status | null,
+  /**
+   * The demo GOTV says it is writing, from `status`. Omitted by callers that
+   * did not ask (and by most tests), which is why it is distinct from an
+   * explicit `null` meaning "asked, and it is not recording".
+   */
+  recordingTo?: string | null,
 ) {
   resolveWorkshopMapName(status.map);
   notePluginState(status);
@@ -491,17 +499,76 @@ export function updateCache(
   // Only overwrite when the server actually answered: a dropped RCON tick must
   // not wipe a known match length back to unknown.
   if (cvars?.maxRounds != null) cache().match.maxRounds = cvars.maxRounds;
+  if (cvars?.overtime != null) cache().match.overtime = cvars.overtime;
 
-  // A level change cannot carry a pause across, and GOTV stops recording at
-  // the same moment. The pause is knowable (it is gone); the recording is not,
-  // so it goes back to unknown rather than being asserted either way.
-  const previousMap = cache().status?.map;
-  if (previousMap && previousMap !== status.map) {
+  /*
+    The demo, read rather than remembered.
+
+    `status` prints `Now recording to "<file>"` for as long as GOTV is writing
+    one, so the panel never has to infer this. It used to: `demo.state` was
+    whatever the panel had last *asked* for, which meant it reported "unknown"
+    on a server that had been recording for twenty-six hours because MatchZy
+    started that demo and the panel had not.
+
+    `undefined` means the caller did not look, which is not evidence of
+    anything and leaves the last known value alone.
+  */
+  if (recordingTo !== undefined) {
     cache().match = {
       ...cache().match,
-      pause: "running",
-      demo: { state: "unknown", name: cache().match.demo.name },
+      demo: recordingTo
+        ? { state: "recording", name: recordingTo }
+        : { state: "idle", name: null },
     };
+  }
+
+  /*
+    A match is the state of the map you are on.
+
+    Score, round and phase come from the log stream, which only ever adds to
+    them — so they survived a level change and an empty server, and the
+    dashboard ended up announcing a live 2-3 in round 5 with nobody connected
+    and MatchZy reporting no match at all. Both resets below are skipped while
+    MatchZy owns the match, because a series legitimately carries its score
+    across maps and `applyMatchZyState` has already written the real one.
+  */
+  const previousMap = cache().status?.map;
+  const mapChanged = Boolean(previousMap && previousMap !== status.map);
+  if (mapChanged) {
+    // A level change cannot carry a pause across; that much is knowable.
+    cache().match = { ...cache().match, pause: "running" };
+    if (!matchzyOwnsMatch()) {
+      cache().match = {
+        ...cache().match,
+        score: { ct: 0, t: 0 },
+        round: 0,
+        phase: "warmup",
+        knifeSetupApplied: false,
+      };
+    }
+  }
+
+  /*
+    An empty server is 0-0.
+
+    `players` is `null` when RCON did not answer, which must never be read as
+    "empty" — the same rule `playerCount()` follows before restarting for an
+    update. Only a real, observed zero resets anything.
+  */
+  const observedEmpty = players !== null && players.length === 0 && status.players === 0;
+  // A null roster is not an observation, so it neither advances nor clears the
+  // streak — a single dropped RCON tick must not look like everyone left.
+  if (players !== null) emptyPollStreak = observedEmpty ? emptyPollStreak + 1 : 0;
+  if (observedEmpty && !mapChanged && !matchzyOwnsMatch()) {
+    const m = cache().match;
+    if (m.score.ct !== 0 || m.score.t !== 0 || m.round !== 0) {
+      cache().match = {
+        ...m,
+        score: { ct: 0, t: 0 },
+        round: 0,
+        phase: "warmup",
+      };
+    }
   }
 
   const op = cache().pendingOp;
@@ -515,6 +582,92 @@ export function updateCache(
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
   if (players !== null) cache().players = mergeRoster(cache().players, players);
+}
+
+/**
+ * Consecutive polls that saw a real, empty server. Reset by anyone joining.
+ */
+let emptyPollStreak = 0;
+
+/** Test seam. */
+export function __emptyPollStreak(): number {
+  return emptyPollStreak;
+}
+
+/**
+ * How long a competitive server must stay empty before its demo is stopped.
+ *
+ * Two polls rather than one: a demo is not cheap to lose, and a single tick
+ * where RCON answers with an empty player table during a map change would
+ * otherwise end the recording of a match still being played.
+ */
+export const DEMO_ABANDON_POLLS = 2;
+
+/**
+ * Whether a demo is allowed to be running right now.
+ *
+ * Only competitive play is worth recording: casual, deathmatch, practice and
+ * a wingman kickabout produce demos nobody watches, and the panel used to
+ * leave GOTV writing one indefinitely — a single abandoned match wrote a
+ * 709 MB file over twenty-six hours before anyone looked.
+ *
+ * A MatchZy-loaded match counts as competitive whatever the underlying game
+ * mode is, because loading a match config is the act of saying "this one
+ * counts", and a wingman BO3 is still a match.
+ */
+export function demoAllowed(mode: GameMode, matchLoaded: boolean): boolean {
+  return mode === "competitive" || matchLoaded;
+}
+
+/**
+ * Why a running demo should stop, or `null` when it may keep going.
+ *
+ * Pure, so the rule can be tested without a server: the impure half below only
+ * reads the cache and issues one RCON command.
+ */
+export function demoStopReason(
+  recording: boolean,
+  mode: GameMode,
+  matchLoaded: boolean,
+  emptyStreak: number,
+): "not-competitive" | "abandoned" | null {
+  if (!recording) return null;
+  if (!demoAllowed(mode, matchLoaded)) return "not-competitive";
+  if (emptyStreak >= DEMO_ABANDON_POLLS) return "abandoned";
+  return null;
+}
+
+/**
+ * Stops a demo that should not be running.
+ *
+ * Called once per poll. It acts on what `status` reported, so it also catches
+ * demos the panel never started — which is the whole point, since MatchZy
+ * starts its own and is the one that left the last one running.
+ */
+export async function reconcileDemoPolicy(): Promise<void> {
+  const status = cache().status;
+  if (!status || !status.control.rcon) return;
+
+  const reason = demoStopReason(
+    cache().match.demo.state === "recording",
+    status.gameMode,
+    matchzyOwnsMatch(),
+    emptyPollStreak,
+  );
+  if (!reason) return;
+
+  const name = cache().match.demo.name;
+  try {
+    await rconExec("tv_stoprecord");
+    cache().match = { ...cache().match, demo: { state: "idle", name: null } };
+    console.log(
+      reason === "abandoned"
+        ? `[demo] stopped ${name ?? "recording"}: the server has been empty for ${emptyPollStreak} polls`
+        : `[demo] stopped ${name ?? "recording"}: ${status.gameMode} is not a competitive match`,
+    );
+  } catch (err) {
+    console.warn("[demo] could not stop the recording:", err);
+  }
 }
 
 /** `20260826-071144`, for a demo filename that sorts and reads chronologically. */
@@ -1525,6 +1678,21 @@ export const realAdapter = {
     if (matchzyOwnsMatch()) {
       throw new Error(
         "MatchZy is running the match and records its own demo to the MatchZy folder. Starting or stopping recording here would fight it.",
+      );
+    }
+
+    /*
+      Demos are for matches. Starting one on a deathmatch or a practice server
+      writes a file nobody will ever open, and the panel is the thing that has
+      to stop it again — so it declines rather than creating the mess it would
+      then have to clean up. See `demoAllowed`.
+    */
+    if (
+      action === "start" &&
+      !demoAllowed(cache().status?.gameMode ?? "custom", matchzyOwnsMatch())
+    ) {
+      throw new Error(
+        `Demos are only recorded for competitive matches, and the server is running ${cache().status?.gameMode ?? "an unknown mode"}. Switch to competitive, or load a match, and try again.`,
       );
     }
 

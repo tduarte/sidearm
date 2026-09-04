@@ -4,6 +4,7 @@ import type { DemoFile } from "@/lib/cs2/demos";
 import type { MatchDefinition } from "@/lib/cs2/match-config";
 import type { StoredMatchConfig } from "@/lib/db/match-configs";
 import type { RoundBackup } from "@/lib/cs2/round-backups";
+import type { Role } from "@/lib/auth/permissions";
 import type {
   ChatMessage,
   CvarGroup,
@@ -20,6 +21,16 @@ import type {
   UpdateStatus,
 } from "./types";
 
+export type SessionUser = { id: string; username: string; role: Role };
+
+export type PanelUser = {
+  id: string;
+  username: string;
+  role: Role;
+  createdAt: string;
+  disabled: boolean;
+};
+
 /**
  * Browser-side API client. Every method maps to an `app/api/*` route handler;
  * the server dispatches to the mock or real adapter based on `API_MODE`.
@@ -28,11 +39,29 @@ import type {
  * are already the source of truth.
  */
 
-/** Thrown when the panel requires an admin token and we do not have one. */
+/** Thrown when nobody is signed in, so the gate should ask for credentials. */
 export class UnauthorizedError extends Error {
-  constructor() {
-    super("unauthorized");
+  /** `first-run` means the panel has no accounts yet and wants registration. */
+  readonly code: "unauthenticated" | "first-run";
+  constructor(code: "unauthenticated" | "first-run" = "unauthenticated") {
+    super(code);
     this.name = "UnauthorizedError";
+    this.code = code;
+  }
+}
+
+/**
+ * Thrown when the caller *is* signed in but their role does not reach the
+ * action.
+ *
+ * Distinct from `UnauthorizedError` on purpose: signing in again cannot fix a
+ * 403, so the gate must not react to one by throwing up a login form. The
+ * message from the server names the role required.
+ */
+export class ForbiddenError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ForbiddenError";
   }
 }
 
@@ -46,14 +75,21 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
       ...(init?.headers ?? {}),
     },
   });
-  if (res.status === 401) throw new UnauthorizedError();
   if (!res.ok) {
     let detail = "";
+    let code = "";
     try {
       const j = await res.json();
       detail = j.error ?? "";
+      code = j.code ?? "";
     } catch {
       // ignore — use status text
+    }
+    if (res.status === 401) {
+      throw new UnauthorizedError(code === "first-run" ? "first-run" : "unauthenticated");
+    }
+    if (res.status === 403) {
+      throw new ForbiddenError(detail || "You are not allowed to do that.");
     }
     throw new Error(
       detail || `${res.status} ${res.statusText} for ${path}`,
@@ -70,18 +106,52 @@ const json = (body: unknown): RequestInit => ({
 });
 
 export const api = {
-  /** Whether the panel is configured to require an admin token. */
+  /** Who this browser is, and which gate screen to show if nobody. */
   authStatus: () =>
     request<{
-      authRequired: boolean;
+      firstRun: boolean;
       tokenConfigured: boolean;
-      trustedPeer: boolean;
+      user: SessionUser | null;
+      role: Role | null;
+      source: "session" | "token" | "trusted-peer" | null;
     }>("/api/auth"),
 
   logout: () => request<{ ok: true }>("/api/auth", { method: "DELETE" }),
 
-  /** Exchanges the admin token for a session cookie. */
-  login: (token: string) => request<{ ok: true }>("/api/auth", json({ token })),
+  login: (username: string, password: string) =>
+    request<{ ok: true; user: SessionUser }>(
+      "/api/auth/login",
+      json({ username, password }),
+    ),
+
+  /** Claims an unclaimed panel. Only works while no accounts exist. */
+  register: (input: { username: string; password: string; setupToken?: string }) =>
+    request<{ ok: true; user: SessionUser }>("/api/auth/register", json(input)),
+
+  changeOwnPassword: (currentPassword: string, newPassword: string) =>
+    request<{ ok: true }>(
+      "/api/auth/password",
+      json({ currentPassword, newPassword }),
+    ),
+
+  listUsers: () => request<{ users: PanelUser[] }>("/api/users"),
+
+  createUser: (input: { username: string; password: string; role: Role }) =>
+    request<{ user: PanelUser }>("/api/users", json(input)),
+
+  updateUser: (
+    id: string,
+    patch: { role?: Role; password?: string; disabled?: boolean },
+  ) =>
+    request<{ user: PanelUser }>(`/api/users/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
+
+  deleteUser: (id: string) =>
+    request<{ ok: true }>(`/api/users/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+    }),
 
   getStatus: () => request<ServerStatus>("/api/status"),
 

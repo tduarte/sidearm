@@ -100,6 +100,35 @@ function migrate(db: Database.Database): void {
       display_name TEXT NOT NULL,
       added_at     TEXT NOT NULL DEFAULT (datetime('now'))
     );
+
+    -- Panel accounts. The panel used to hold no identities at all: access was a
+    -- single shared bearer token, so every action was equally authorised and
+    -- equally anonymous.
+    --
+    -- COLLATE NOCASE on the username is what makes "Thiago" and "thiago" the
+    -- same account rather than two, which matters because the UNIQUE index is
+    -- the only thing preventing a duplicate registration racing itself.
+    CREATE TABLE IF NOT EXISTS users (
+      id            TEXT PRIMARY KEY,
+      username      TEXT NOT NULL UNIQUE COLLATE NOCASE,
+      password_hash TEXT NOT NULL,
+      role          TEXT NOT NULL CHECK (role IN ('admin','moderator','viewer')),
+      created_at    TEXT NOT NULL DEFAULT (datetime('now')),
+      disabled      INTEGER NOT NULL DEFAULT 0
+    );
+
+    -- Only the SHA-256 of each session token is stored. A stolen database file
+    -- then yields no usable cookie, which is the whole reason not to store the
+    -- token itself.
+    CREATE TABLE IF NOT EXISTS sessions (
+      token_hash   TEXT PRIMARY KEY,
+      user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      created_at   TEXT NOT NULL DEFAULT (datetime('now')),
+      expires_at   TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS sessions_user ON sessions (user_id);
+    CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions (expires_at);
   `);
   // Columns added after the initial schema. `CREATE TABLE IF NOT EXISTS` above
   // does nothing to a table that already exists, so an existing install needs
@@ -114,6 +143,13 @@ function migrate(db: Database.Database): void {
   // integer matchid, so an install that saved a setup in between has the table
   // without this column.
   addColumn(db, "match_configs", "match_number", "INTEGER NOT NULL DEFAULT 1");
+  // The round limit the match was played to, recorded at the end because the
+  // status poll has certainly read `mp_maxrounds` by then. It is the only way
+  // to know where the sides swapped: the score a round record carries is
+  // per-side and goes on counting straight through half-time, so nothing in
+  // the rounds themselves marks it. Null on every match recorded before this
+  // column existed, and on anything MatchZy reported.
+  addColumn(db, "matches", "max_rounds", "INTEGER");
 }
 
 /** Adds a column when it is missing. SQLite has no `ADD COLUMN IF NOT EXISTS`. */

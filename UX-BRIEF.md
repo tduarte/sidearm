@@ -1,8 +1,26 @@
-# sidearm — UX brief
+# sidearm — UX brief (superseded 2026-08-31)
 
-Scope: the whole panel, all eight routes. **Visual identity is pinned and unchanged** —
-dark shadcn/ui, amber `--primary`, Geist Sans/Mono, Phosphor icons, sidebar + top bar. Every
-change below is structure, interaction, state, or copy. Mode: **Operate**.
+> **Superseded, twice over.** This brief was written while the visual identity was pinned and
+> while the panel had a single shared token instead of accounts. Both premises were already
+> false by 2026-08-31: see `DESIGN.md` for the visual system and `PRODUCT.md` for the
+> three-role model.
+>
+> The **route map** below is now false as well. The panel collapsed into three
+> destinations: `/dashboard` owns the live product — the match, the roster, the teams and the
+> series, all edited in place — `/history` owns the post-mortem, and `/settings` owns
+> administration. `/match`, `/maps`, `/config`, `/console` and `/players` are redirects, and
+> the console is a mode of the ⌘K palette rather than a page. So every "four navigations
+> apart" complaint below was answered by removing the navigations, not by moving the controls
+> between them.
+>
+> Its structural findings were implemented and it is kept as the record of *why*. The copy,
+> state and interaction reasoning is still sound; do not take its visual constraints or its
+> route inventory as current.
+
+Scope: the whole panel, all eight routes. Visual identity was pinned and unchanged at the
+time of writing — dark shadcn/ui, amber `--primary`, Geist Sans/Mono, Phosphor icons,
+sidebar + top bar. Every change below is structure, interaction, state, or copy.
+Mode: **Operate**.
 
 ---
 
