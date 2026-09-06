@@ -1741,6 +1741,19 @@ export const realAdapter = {
   async checkForUpdate(): Promise<UpdateStatus> {
     const result = await runUpdateCheck({
       rconExec,
+      /**
+       * The build the status poll already parsed, before spending an RCON
+       * round trip on the same `status` line.
+       *
+       * The poll reads `status` every couple of seconds and the header renders
+       * the build out of it, so a check that asks again is a second read of
+       * the same fact that can disagree with what the panel is showing — and
+       * for a stretch on the live server it did: the header had a build while
+       * every check logged "could not read a build number" until the panel was
+       * restarted. Null here means nothing has been polled yet, which falls
+       * through to RCON exactly as before.
+       */
+      installedBuild: async () => cache().status?.build ?? null,
       restartContainer: () => containerAction("cs2", "restart"),
       // `status.players` is the humans count. A null status means we have not
       // polled yet, and `runUpdateCheck` treats that as "do not restart".
@@ -1759,7 +1772,10 @@ export const realAdapter = {
       // A check that cannot reach a verdict used to return in silence, which is
       // indistinguishable from "nothing to do" in the log. That is how auto
       // update came to do nothing for three days without anyone noticing.
-      console.warn(`[update] check inconclusive: ${result.update.message}`);
+      console.warn(
+        `[update] check inconclusive: ${result.update.message}` +
+          (result.diagnostic ? ` (${result.diagnostic})` : ""),
+      );
     }
     return result.update;
   },

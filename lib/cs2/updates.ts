@@ -137,6 +137,23 @@ export interface UpdateCheckResult {
   restarted: boolean;
   /** Why a pending update was not applied, when it was not. */
   deferredReason?: string;
+  /**
+   * What an inconclusive check actually saw, for the log — never for the UI.
+   *
+   * "Could not read a build number" repeated every fifteen minutes for hours
+   * and did not once say what it had failed to read, which left no way to tell
+   * a changed `status` layout from a server that answered with someone else's
+   * output. The first lines only: the version line is the second one, and the
+   * rest of `status` is a roster of names, addresses and SteamIDs that has no
+   * business being copied into a log.
+   */
+  diagnostic?: string;
+}
+
+/** The first few lines, flattened and capped — enough to see the layout. */
+function sampleForLog(text: string): string {
+  const head = text.split("\n").slice(0, 3).join(" ").replace(/\s+/g, " ").trim();
+  return head.length > 160 ? `${head.slice(0, 160)}…` : head;
 }
 
 /**
@@ -162,12 +179,18 @@ export async function runUpdateCheck(
   let installedVersion: number | null = null;
   if (deps.installedBuild) {
     try {
-      installedVersion = await deps.installedBuild();
+      const reported = await deps.installedBuild();
+      // A zero or negative build is not a build. It would otherwise go to
+      // Steam, come back "not up to date", and restart the container on a
+      // number nobody read off the server — so it falls through to RCON like
+      // any other source that could not answer.
+      installedVersion = reported !== null && reported > 0 ? reported : null;
     } catch {
       // Not mounted, mid-download, unreadable — fall through to RCON.
     }
   }
 
+  let versionText: string | null = null;
   if (installedVersion === null) {
     // `status`, not `version`: CS2 has no `version` command, and asking for one
     // returns `Unknown command 'version'!`, which parses to null and pins
@@ -182,6 +205,7 @@ export async function runUpdateCheck(
       };
     }
 
+    versionText = versionOut;
     installedVersion = parseServerVersion(versionOut);
   }
 
@@ -192,6 +216,7 @@ export async function runUpdateCheck(
         message: "Could not read a build number from the `status` version line",
       },
       restarted: false,
+      diagnostic: versionText === null ? "no text read" : `read: ${sampleForLog(versionText)}`,
     };
   }
 
