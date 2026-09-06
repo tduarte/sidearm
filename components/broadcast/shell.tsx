@@ -90,7 +90,7 @@ function Shell({
 }) {
   const { data: status } = useServerStatus();
   const { data: match } = useMatchState();
-  const { user, can } = useSession();
+  const { user, role, can } = useSession();
   const [copied, setCopied] = useState(false);
 
   const docked = pathname === DOCKED;
@@ -225,10 +225,23 @@ function Shell({
                 );
               })}
             </nav>
-            {user && (
+            {user ? (
               <Link href="/settings" className="bc__me">
                 <b>{user.username}</b> · {user.role}
               </Link>
+            ) : (
+              /*
+                An identity with no account behind it — a trusted-network
+                viewer, or the break-glass token. The header used to render
+                nothing at all here, so a LAN browser saw a panel where every
+                control was disabled and no part of the page admitted that it
+                was signed in as nobody.
+              */
+              role && (
+                <Link href="/signin" className="bc__me">
+                  <b>Sign in</b> · {role}
+                </Link>
+              )
             )}
           </div>
         </div>
