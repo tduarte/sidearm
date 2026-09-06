@@ -35,6 +35,16 @@ export interface ModePreset {
   shape: string;
   /** Cvars — applied immediately over RCON. */
   live: ServerConfig["gameplay"];
+  /**
+   * `mp_maxrounds`, or `null` for a mode that does not count rounds.
+   *
+   * The official numbers, because a preset that put a mode on the server but
+   * left the previous mode's round limit behind would produce a wingman match
+   * that runs to 13. `null` on deathmatch (it ends on `mp_timelimit`) and on
+   * practice (nobody is keeping score), which is also what hides the control —
+   * see `fieldsForMode`.
+   */
+  maxRounds: number | null;
   /** Launch arguments — a container recreate. */
   boot: {
     /**
@@ -86,6 +96,8 @@ export const PRESETS: ModePreset[] = [
       botDifficulty: 2,
       botQuota: 0,
     },
+    // MR12: 24 rounds played, first to 13.
+    maxRounds: 24,
     boot: boot("competitive", 10),
     why: "Ten players plus a GOTV slot. Bots off — an empty slot is better than a bot in a match that counts.",
   },
@@ -101,6 +113,8 @@ export const PRESETS: ModePreset[] = [
       botDifficulty: 2,
       botQuota: 0,
     },
+    // MR8: 16 rounds, first to 9, sides swap at 8.
+    maxRounds: 16,
     boot: boot("wingman", 4),
     why: "Wingman is 2v2, so four slots is the whole game. Five with GOTV.",
   },
@@ -116,6 +130,8 @@ export const PRESETS: ModePreset[] = [
       botDifficulty: 2,
       botQuota: 8,
     },
+    // Ends on `mp_timelimit`, not on a round count.
+    maxRounds: null,
     boot: boot("deathmatch", 24),
     why: "Deathmatch is busy by design; 24 is the usual ceiling before spawns start fighting each other. Bots fill it out when few people are on.",
   },
@@ -131,6 +147,8 @@ export const PRESETS: ModePreset[] = [
       botDifficulty: 1,
       botQuota: 10,
     },
+    // 15 rounds, first to 8.
+    maxRounds: 15,
     boot: boot("casual", 20),
     why: "Twenty players, easy bots to keep both sides full while people join.",
   },
@@ -146,6 +164,7 @@ export const PRESETS: ModePreset[] = [
       botDifficulty: 1,
       botQuota: 0,
     },
+    maxRounds: null,
     boot: boot("practice", 10),
     why: "Same slots as competitive so you can switch between them without recreating the container. The grenade helpers and cheats live on Match Control, not here — they are per-session, not server setup.",
   },

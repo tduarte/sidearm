@@ -1088,7 +1088,7 @@ export function MatchStage({
 
           {/*
             The round limit, where the line above states it. `fieldsForMode`
-            already says this is competitive-only — a limit on a deathmatch
+            already says which modes count rounds — a limit on a deathmatch
             server is a number that governs nothing — and it was consulted for
             overtime and nothing else, so the header's claim that the round
             limit is edited in the band was true of the plan and not of the
