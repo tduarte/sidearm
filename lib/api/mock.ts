@@ -76,7 +76,7 @@ const initialMockState = {
     // the features that need MatchZy — team names, rosters, series length —
     // behind a notice, which is the opposite of what mock mode is for.
     //
-    // `match.matchzyState` stays null below: the plugin is present, no match
+    // `match.matchzyState` is `"none"` below: the plugin is present, no match
     // config is loaded. That is the state with the most interface on screen,
     // since the panel's own controls stay live instead of standing down.
     //
@@ -121,9 +121,13 @@ const initialMockState = {
     pause: "running",
     demo: { state: "recording", name: "sidearm_de_mirage_mock" },
     knifeSetupApplied: false,
-    // No match config loaded: the panel's own controls are all live, which is
-    // the state with more interface to show.
-    matchzyState: null,
+    // `"none"`, not null: that is what an installed MatchZy actually answers
+    // while no match config is loaded, and it is the resting state of every
+    // server this project deploys. Mocking it as null hid a truthiness bug
+    // that disabled the whole mode picker on every real server — see
+    // `matchzyOwns`. The panel's own controls are all live in this state,
+    // which is also the state with more interface to show.
+    matchzyState: "none",
     series: null,
   } as MatchState,
 

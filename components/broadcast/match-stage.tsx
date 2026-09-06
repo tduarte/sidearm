@@ -61,6 +61,7 @@ import {
   X,
 } from "@phosphor-icons/react";
 import { useCan } from "@/components/session-provider";
+import { matchzyOwns as matchzyOwnsState } from "@/lib/match/matchzy";
 import { api } from "@/lib/api/client";
 import { formatDuration, type BanDuration } from "@/lib/cs2/bans";
 import { useLivePlayers } from "@/lib/hooks/use-live-players";
@@ -515,7 +516,7 @@ export function MatchStage({
    * anything written here. The server already refuses those writes; saying so
    * up front is better than offering a control that silently loses.
    */
-  const matchzyOwns = Boolean(match?.matchzyState);
+  const matchzyOwns = matchzyOwnsState(match?.matchzyState ?? null);
 
   const apply = useMutation({
     mutationFn: async () => {

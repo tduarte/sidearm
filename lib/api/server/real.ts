@@ -21,6 +21,7 @@ import type {
 import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
 import { runUpdateCheck } from "@/lib/cs2/updates";
+import { matchzyOwns } from "@/lib/match/matchzy";
 import { fetchStatus } from "@/lib/cs2/status";
 import type { Get5Status } from "@/lib/cs2/plugins";
 import { bus } from "@/lib/ws/bus";
@@ -822,8 +823,7 @@ function saveRotation(state: RotationState): void {
  * produces two systems fighting over one server, which is worse.
  */
 export function matchzyOwnsMatch(): boolean {
-  const state = cache().match.matchzyState;
-  return state !== null && state !== "none";
+  return matchzyOwns(cache().match.matchzyState);
 }
 
 /**
