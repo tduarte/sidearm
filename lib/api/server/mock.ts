@@ -297,6 +297,19 @@ export const mockAdapter = {
 
   async setCvar(name: string, value: string): Promise<CvarState> {
     mockCvars[name] = value;
+    /*
+      The two cvars the dashboard owns are also match state, and the real
+      adapter never writes them here either — its status poll reads them back
+      a couple of seconds later and republishes the match. Mock mode has no
+      poll, so without this the round limit the dashboard just applied stays
+      at the old number until a reload, which is precisely the staleness
+      `match.update` exists to fix and would be invisible in development.
+    */
+    if (name === "mp_maxrounds") {
+      const rounds = Number.parseInt(value, 10);
+      if (Number.isFinite(rounds)) state.match.maxRounds = rounds;
+    }
+    if (name === "mp_overtime_enable") state.match.overtime = value !== "0";
     return {
       name,
       value,

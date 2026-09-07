@@ -583,6 +583,13 @@ export function updateCache(
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
   if (players !== null) cache().players = mergeRoster(cache().players, players);
+
+  // Everything above can have changed the match, and only the phase and the
+  // score have their own events. Without this a client that fetched
+  // `/api/match` before the first cvar read kept `maxRounds: null` forever —
+  // "Round 0", no limit, no Rounds field — until it was reloaded. A copy,
+  // because in-process subscribers must not get a handle on the live cache.
+  bus.emit({ type: "match.update", match: { ...cache().match } });
 }
 
 /**

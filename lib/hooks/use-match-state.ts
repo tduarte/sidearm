@@ -13,7 +13,15 @@ export function useMatchState() {
     staleTime: Infinity,
   });
 
-  useServerEvents(["match.phase", "match.score"], (e) => {
+  useServerEvents(["match.phase", "match.score", "match.update"], (e) => {
+    // The whole state as the server has it, which is authoritative over
+    // anything cached here — including the fields no delta event covers, such
+    // as the round limit. `staleTime: Infinity` means nothing else ever
+    // refreshes them.
+    if (e.type === "match.update") {
+      qc.setQueryData<MatchState>(["match"], e.match);
+      return;
+    }
     qc.setQueryData<MatchState>(["match"], (prev) => {
       if (!prev) return prev;
       if (e.type === "match.phase") return { ...prev, phase: e.phase };

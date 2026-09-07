@@ -555,11 +555,24 @@ export type WsEvent =
   | { type: "chat.message"; message: ChatMessage }
   | { type: "match.phase"; phase: MatchPhase }
   | { type: "match.score"; score: { ct: number; t: number }; round: number }
+  /**
+   * The whole match state, as of the poll that just landed.
+   *
+   * `match.phase` and `match.score` are deltas from the log stream, so every
+   * other field — the round limit, overtime, who owns the match, the series,
+   * the pause, the demo — never reached a client that had already fetched
+   * `/api/match`. A tab open before the first `mp_maxrounds` read stayed on
+   * "Round 0" with no limit and no Rounds field until someone reloaded it.
+   *
+   * Sent every poll rather than on change, so a client that missed one — or
+   * that reconnected after the socket dropped — is corrected on the next.
+   */
+  | { type: "match.update"; match: MatchState }
   | { type: "server.update"; update: UpdateStatus }
   /**
    * MatchZy started a different match, or moved to the next map of a series.
    * `null` when nothing is loaded. Carries identity only — the state itself
-   * arrives on the status poll.
+   * arrives on `match.update`.
    */
   | { type: "match.series"; matchId: number | null; mapNumber: number | null }
   | { type: "round.start" }

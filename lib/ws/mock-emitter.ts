@@ -121,6 +121,18 @@ export function startMockEmitter() {
     });
   }, 8000);
 
+  /*
+    2s: the whole match state, mirroring the real adapter's status poll.
+
+    Mock mode has no poll, so without this the dashboard's round limit,
+    overtime, MatchZy ownership and pause state only ever arrive on the first
+    `/api/match` fetch — and a bug that only shows up when one of them changes
+    under an open tab would be invisible in development.
+  */
+  setInterval(() => {
+    bus.emit({ type: "match.update", match: { ...state.match } });
+  }, 2000);
+
   // 30s: player churn
   setInterval(() => {
     if (state.status.state !== "running") return;
