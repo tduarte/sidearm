@@ -333,6 +333,56 @@ describe("runUpdateCheck", () => {
     assert.equal(r.update.installedVersion, null);
   });
 
+  it("says what it read when it cannot find a build number", async () => {
+    // "Could not read a build number" ran every fifteen minutes for hours
+    // without once saying what it had failed to read, which is the difference
+    // between a diagnosable log line and a mystery.
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => null,
+        rconExec: async () => "Unknown command 'version'!",
+      }),
+    );
+    assert.match(r.diagnostic ?? "", /Unknown command 'version'!/);
+  });
+
+  it("keeps the roster out of the diagnostic", async () => {
+    // `status` is mostly names, addresses and SteamIDs. Only the first lines
+    // are sampled, and the version line is the second one.
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => null,
+        rconExec: async () =>
+          ["hostname: sidearm", "no version here", "os : Linux", "# 2 1 \"ropz\" [U:1:12345] 10.0.0.4:27005"].join("\n"),
+      }),
+    );
+    assert.match(r.diagnostic ?? "", /hostname: sidearm/);
+    assert.ok(!/ropz|U:1:12345|10\.0\.0\.4/.test(r.diagnostic ?? ""), r.diagnostic);
+  });
+
+  it("caps a long sample rather than pasting the whole thing", async () => {
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => null,
+        rconExec: async () => "x".repeat(500),
+      }),
+    );
+    assert.ok((r.diagnostic ?? "").length < 200, String((r.diagnostic ?? "").length));
+  });
+
+  it("treats a non-positive build as no answer", async () => {
+    // 0 is not a build. Passed to Steam it comes back "not up to date", and
+    // with auto-restart on that is a container restart decided by a number
+    // nobody read off the server.
+    const r = await runUpdateCheck(
+      baseDeps({
+        installedBuild: async () => 0,
+        rconExec: async () => "version : 1.41.7.8/14178 14178 secure public",
+      }),
+    );
+    assert.equal(r.update.installedVersion, 14178);
+  });
+
   it("never restarts on an undeterminable build", async () => {
     // The failure that hides itself: an unknown build is not "up to date", but
     // it is also not grounds to restart, so the check must do nothing *and*

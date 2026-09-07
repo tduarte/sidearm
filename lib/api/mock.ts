@@ -70,12 +70,19 @@ const initialMockState = {
     vacSecure: true,
     build: 14177,
     gotv: { address: "0.0.0.0:27020", delaySec: 30 },
-    // A server without plugins, which is what most installs of this panel are
-    // — and it is the state with MORE interface to show, since the knife
-    // approximation is live rather than standing down for MatchZy. Stated
-    // explicitly rather than left undefined by the `as ServerStatus` below,
-    // which is how it would otherwise read.
-    plugins: { matchzy: false, metamod: false, cssharp: false, regressed: false },
+    // The plugin stack the project ships: `docker/cs2/` layers Metamod,
+    // CounterStrikeSharp and MatchZy onto every server this panel deploys, so
+    // a mock without them is a mock of an install nobody has. It also hides
+    // the features that need MatchZy — team names, rosters, series length —
+    // behind a notice, which is the opposite of what mock mode is for.
+    //
+    // `match.matchzyState` is `"none"` below: the plugin is present, no match
+    // config is loaded. That is the state with the most interface on screen,
+    // since the panel's own controls stay live instead of standing down.
+    //
+    // Stated explicitly rather than left undefined by the `as ServerStatus`
+    // below, which is how it would otherwise read.
+    plugins: { matchzy: true, metamod: true, cssharp: true, regressed: false },
     connectUrl: "steam://connect/192.168.1.20:27015/trusted",
     ip: "192.168.1.20",
     port: 27015,
@@ -114,9 +121,13 @@ const initialMockState = {
     pause: "running",
     demo: { state: "recording", name: "sidearm_de_mirage_mock" },
     knifeSetupApplied: false,
-    // No match config loaded: the panel's own controls are all live, which is
-    // the state with more interface to show.
-    matchzyState: null,
+    // `"none"`, not null: that is what an installed MatchZy actually answers
+    // while no match config is loaded, and it is the resting state of every
+    // server this project deploys. Mocking it as null hid a truthiness bug
+    // that disabled the whole mode picker on every real server — see
+    // `matchzyOwns`. The panel's own controls are all live in this state,
+    // which is also the state with more interface to show.
+    matchzyState: "none",
     series: null,
   } as MatchState,
 

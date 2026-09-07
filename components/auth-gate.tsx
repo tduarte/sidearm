@@ -25,12 +25,20 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   // The design explorations read fixture data and touch no API, so gating them
   // behind a login would only ever stop someone looking at a picture.
+  //
+  // `/signin` is ungated for the opposite reason: it is the way *in* for a
+  // caller the gate would otherwise wave straight through. On a LAN listed in
+  // `PANEL_TRUSTED_CIDRS` every browser already has a viewer identity, so the
+  // gate says "ready" and never offers a form — the panel renders in full with
+  // every control disabled and nothing on screen explaining why, or how to
+  // become someone who can use them.
   const isDesign = pathname?.startsWith("/design") ?? false;
+  const isSignIn = pathname === "/signin";
   const [screen, setScreen] = useState<Screen>("checking");
   const [tokenConfigured, setTokenConfigured] = useState(false);
 
   useEffect(() => {
-    if (isDesign) return;
+    if (isDesign || isSignIn) return;
     let cancelled = false;
     (async () => {
       try {
@@ -55,9 +63,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isDesign]);
+  }, [isDesign, isSignIn]);
 
-  if (isDesign) return <>{children}</>;
+  if (isDesign || isSignIn) return <>{children}</>;
   if (screen === "checking") return <GateSplash />;
   if (screen === "ready") return <>{children}</>;
 
@@ -87,7 +95,7 @@ function GateSplash() {
   );
 }
 
-function GateShell({ children }: { children: React.ReactNode }) {
+export function GateShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-dvh items-center justify-center p-6">
       <div className="w-full max-w-sm space-y-6">
@@ -214,7 +222,7 @@ function RegisterCard({
   );
 }
 
-function LoginCard({ onDone }: { onDone: () => void }) {
+export function LoginCard({ onDone }: { onDone: () => void }) {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);

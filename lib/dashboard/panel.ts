@@ -50,10 +50,17 @@ export type Draft = Partial<PanelValues>;
  * Which fields a mode is allowed to show.
  *
  * Complexity follows the mode. A round limit and overtime are the machinery of
- * a match that counts; on a deathmatch server or an aim map they are noise
- * around the only two things anyone came to change, which are the mode and the
- * map. Competitive is the only mode that earns the full set.
+ * a match that counts, and the modes that count rounds are the ones that show
+ * them: competitive (MR12, `mp_maxrounds 24`), wingman (MR8, 16) and casual
+ * (15, first to 8) all end on a round number.
+ *
+ * Two modes do not. Deathmatch ends on `mp_timelimit` — ten minutes, no rounds
+ * to limit — and practice keeps no score at all, so on those a round limit is
+ * a number that governs nothing, sitting beside the only two things anyone
+ * came to change: the mode and the map.
  */
+const ROUNDLESS: ReadonlySet<GameMode> = new Set<GameMode>(["deathmatch", "practice"]);
+
 export function fieldsForMode(mode: GameMode): FieldKey[] {
   const always: FieldKey[] = [
     "mode",
@@ -65,9 +72,7 @@ export function fieldsForMode(mode: GameMode): FieldKey[] {
     "botDifficulty",
     "visibleMaxPlayers",
   ];
-  return mode === "competitive"
-    ? [...always, "maxRounds", "overtime"]
-    : always;
+  return ROUNDLESS.has(mode) ? always : [...always, "maxRounds", "overtime"];
 }
 
 /** The keys whose staged value differs from what the server reports. */
@@ -211,13 +216,18 @@ export function modeNeedsMapReload(current: PanelValues, draft: Draft): boolean 
  * mid-session something you do not dare press.
  */
 export function presetDraft(preset: ModePreset, current: PanelValues): Draft {
-  const wanted: Draft = {
-    mode: preset.live.mode,
-    botsEnabled: preset.live.botsEnabled,
-    botQuota: preset.live.botQuota,
-    botDifficulty: preset.live.botDifficulty,
-    visibleMaxPlayers: preset.live.visibleMaxPlayers,
-  };
+  const wanted: Draft = { ...presetGameplay(preset) };
+
+  /**
+   * The round limit rides along, so picking Wingman does not leave a 2v2
+   * running to 13. Only when the preset has one and the server has already
+   * reported its current value: staging a limit against a `null` we have not
+   * read yet would claim a change we cannot describe.
+   */
+  if (preset.maxRounds !== null && current.maxRounds !== null) {
+    wanted.maxRounds = preset.maxRounds;
+  }
+
   // Keys already correct are dropped, so the save bar counts what will really
   // change rather than always claiming five.
   const draft: Draft = {};
@@ -227,7 +237,24 @@ export function presetDraft(preset: ModePreset, current: PanelValues): Draft {
   return draft;
 }
 
-/** Whether the server is already set up the way a preset describes. */
+function presetGameplay(preset: ModePreset): Draft {
+  return {
+    mode: preset.live.mode,
+    botsEnabled: preset.live.botsEnabled,
+    botQuota: preset.live.botQuota,
+    botDifficulty: preset.live.botDifficulty,
+    visibleMaxPlayers: preset.live.visibleMaxPlayers,
+  };
+}
+
+/**
+ * Whether the server is already set up the way a preset describes.
+ *
+ * The round limit is deliberately not part of the answer. It is a number the
+ * operator is free to change — a 30-round scrim is still competitive — and
+ * counting it would leave the mode menu showing nothing selected for a server
+ * that is plainly in one of these modes.
+ */
 export function presetActive(preset: ModePreset, current: PanelValues): boolean {
-  return Object.keys(presetDraft(preset, current)).length === 0;
+  return changedKeys(current, presetGameplay(preset)).length === 0;
 }

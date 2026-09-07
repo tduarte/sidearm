@@ -38,17 +38,21 @@ const baseConfig: ServerConfig = {
 } as ServerConfig;
 
 describe("complexity follows the mode", () => {
-  it("gives competitive the match machinery", () => {
-    const f = fieldsForMode("competitive");
-    assert.ok(f.includes("maxRounds"));
-    assert.ok(f.includes("overtime"));
+  it("gives every round-based mode the match machinery", () => {
+    // Competitive is MR12, wingman MR8, casual 15-and-first-to-8. All three
+    // end on a round number, so all three can set one.
+    for (const mode of ["competitive", "wingman", "casual"] as const) {
+      const f = fieldsForMode(mode);
+      assert.ok(f.includes("maxRounds"), `${mode} should offer a round limit`);
+      assert.ok(f.includes("overtime"), `${mode} should offer overtime`);
+    }
   });
 
-  it("hides the round limit and overtime everywhere else", () => {
-    // An aim map has no round limit worth setting, and a deathmatch has no
-    // overtime. Offering them is noise around the mode and the map, which are
-    // the only two things anyone came to change.
-    for (const mode of ["casual", "deathmatch", "practice", "wingman"] as const) {
+  it("hides the round limit and overtime where rounds do not end anything", () => {
+    // Deathmatch ends on `mp_timelimit` and practice keeps no score, so a
+    // round limit there is noise around the mode and the map, which are the
+    // only two things anyone came to change.
+    for (const mode of ["deathmatch", "practice"] as const) {
       const f = fieldsForMode(mode);
       assert.ok(!f.includes("maxRounds"), `${mode} should not offer a round limit`);
       assert.ok(!f.includes("overtime"), `${mode} should not offer overtime`);
@@ -179,10 +183,40 @@ describe("one-tap presets", () => {
     assert.ok(!("botDifficulty" in d));
   });
 
+  it("brings the mode's own round limit with it", () => {
+    // A wingman preset that left `mp_maxrounds 24` behind would run a 2v2 to
+    // 13. The official numbers travel with the mode.
+    assert.equal(presetDraft(wingman, current).maxRounds, 16);
+  });
+
+  it("does not stage a round limit the server has not reported yet", () => {
+    // null is "not polled", not "no limit"; staging against it would claim a
+    // change nobody can read.
+    const unknown: PanelValues = { ...current, maxRounds: null };
+    assert.ok(!("maxRounds" in presetDraft(wingman, unknown)));
+  });
+
   it("stages nothing when the server already matches", () => {
-    const already: PanelValues = { ...current, mode: "wingman", visibleMaxPlayers: 4 };
+    const already: PanelValues = {
+      ...current,
+      mode: "wingman",
+      visibleMaxPlayers: 4,
+      maxRounds: 16,
+    };
     assert.deepEqual(presetDraft(wingman, already), {});
     assert.equal(presetActive(wingman, already), true);
+  });
+
+  it("still counts a mode as active on a custom round limit", () => {
+    // A 30-round scrim is still competitive. Judging the mode by its round
+    // limit would leave the menu showing nothing selected.
+    const scrim: PanelValues = {
+      ...current,
+      mode: "wingman",
+      visibleMaxPlayers: 4,
+      maxRounds: 30,
+    };
+    assert.equal(presetActive(wingman, scrim), true);
   });
 
   it("leaves the map alone", () => {
@@ -191,9 +225,11 @@ describe("one-tap presets", () => {
     assert.ok(!("map" in presetDraft(wingman, current)));
   });
 
-  it("goes out as one config write", () => {
+  it("goes out as one config write, after the round limit cvar", () => {
     const steps = planApply(current, presetDraft(wingman, current), baseConfig);
-    assert.equal(steps.length, 1);
-    assert.equal(steps[0]?.kind, "config");
+    assert.deepEqual(
+      steps.map((s) => s.kind),
+      ["cvar", "config"],
+    );
   });
 });

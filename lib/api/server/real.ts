@@ -21,6 +21,7 @@ import type {
 import { rconExec } from "@/lib/cs2/rcon";
 import { containerAction } from "@/lib/cs2/docker";
 import { runUpdateCheck } from "@/lib/cs2/updates";
+import { matchzyOwns } from "@/lib/match/matchzy";
 import { fetchStatus } from "@/lib/cs2/status";
 import type { Get5Status } from "@/lib/cs2/plugins";
 import { bus } from "@/lib/ws/bus";
@@ -582,6 +583,13 @@ export function updateCache(
   // A null roster means RCON did not answer this tick — keep the last known
   // roster rather than blanking the players page and losing accumulated stats.
   if (players !== null) cache().players = mergeRoster(cache().players, players);
+
+  // Everything above can have changed the match, and only the phase and the
+  // score have their own events. Without this a client that fetched
+  // `/api/match` before the first cvar read kept `maxRounds: null` forever —
+  // "Round 0", no limit, no Rounds field — until it was reloaded. A copy,
+  // because in-process subscribers must not get a handle on the live cache.
+  bus.emit({ type: "match.update", match: { ...cache().match } });
 }
 
 /**
@@ -822,8 +830,7 @@ function saveRotation(state: RotationState): void {
  * produces two systems fighting over one server, which is worse.
  */
 export function matchzyOwnsMatch(): boolean {
-  const state = cache().match.matchzyState;
-  return state !== null && state !== "none";
+  return matchzyOwns(cache().match.matchzyState);
 }
 
 /**
@@ -1741,6 +1748,19 @@ export const realAdapter = {
   async checkForUpdate(): Promise<UpdateStatus> {
     const result = await runUpdateCheck({
       rconExec,
+      /**
+       * The build the status poll already parsed, before spending an RCON
+       * round trip on the same `status` line.
+       *
+       * The poll reads `status` every couple of seconds and the header renders
+       * the build out of it, so a check that asks again is a second read of
+       * the same fact that can disagree with what the panel is showing — and
+       * for a stretch on the live server it did: the header had a build while
+       * every check logged "could not read a build number" until the panel was
+       * restarted. Null here means nothing has been polled yet, which falls
+       * through to RCON exactly as before.
+       */
+      installedBuild: async () => cache().status?.build ?? null,
       restartContainer: () => containerAction("cs2", "restart"),
       // `status.players` is the humans count. A null status means we have not
       // polled yet, and `runUpdateCheck` treats that as "do not restart".
@@ -1759,7 +1779,10 @@ export const realAdapter = {
       // A check that cannot reach a verdict used to return in silence, which is
       // indistinguishable from "nothing to do" in the log. That is how auto
       // update came to do nothing for three days without anyone noticing.
-      console.warn(`[update] check inconclusive: ${result.update.message}`);
+      console.warn(
+        `[update] check inconclusive: ${result.update.message}` +
+          (result.diagnostic ? ` (${result.diagnostic})` : ""),
+      );
     }
     return result.update;
   },
